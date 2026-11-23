@@ -169,17 +169,21 @@ class TestProvider(unittest.TestCase):
     def test_official_paces_even_with_successful_requests(self):
         allowed={"code":0,"data":{"fields":[],"items":[]}}
         clock=FakeClock()
-        with patch("value_screener.tushare_client.urlopen",
-                   return_value=FakeHTTP(allowed)) as fetch, \
+        requests=[]
+        def fake_urlopen(*_args,**_kwargs):
+            requests.append(clock.monotonic())
+            return FakeHTTP(allowed)
+        with patch("value_screener.tushare_client.urlopen",side_effect=fake_urlopen), \
              patch("value_screener.tushare_client.time.sleep",side_effect=clock.sleep), \
              patch("value_screener.tushare_client.time.monotonic",side_effect=clock.monotonic):
             client=TushareClient("official-key")
             for _ in range(103):
                 client.query("trade_cal")
-        self.assertEqual(fetch.call_count,103)
-        self.assertEqual(len(clock.sleeps),102)
-        self.assertTrue(all(x>=0.61-1e-9 for x in clock.sleeps))
-        self.assertGreaterEqual(clock.monotonic()-clock.sleeps[0],61)
+        self.assertEqual(len(requests),103)
+        for earlier,later in zip(requests,requests[1:]):
+            self.assertGreaterEqual(later-earlier,0.61-1e-9)
+        for t in requests:
+            self.assertLessEqual(sum((t-60)<q<=t for q in requests),100)
 
     def test_strict_rolling_window_caps_calls_even_with_existing_burst(self):
         from collections import deque

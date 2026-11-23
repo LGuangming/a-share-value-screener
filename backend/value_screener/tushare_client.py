@@ -103,7 +103,9 @@ class TushareClient:
                 self._request_starts.append(now)
                 self._last_request_start = now
                 return
-            time.sleep(wait)
+            # A tiny positive remainder may not advance a mocked or coarse
+            # monotonic clock, causing a busy loop. Sleep a minimum quantum.
+            time.sleep(max(wait, 0.001))
 
     def _retry_transient(self, api_name: str, attempt: int, retries: int,
                          reason: str) -> bool:
