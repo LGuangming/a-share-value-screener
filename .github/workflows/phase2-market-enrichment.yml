@@ -55,8 +55,12 @@ jobs:
           pip install -r backend/requirements.txt
           pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2'
       - name: Restore/verify existing monthly partitions or fetch missing market data
+        env:
+          START_YEAR: ${{ inputs.start_year || '2025' }}
+          END_YEAR: ${{ inputs.end_year || '2020' }}
+          MARKET_DATASETS: ${{ inputs.datasets || 'adj_factor,stk_limit,daily_basic,suspend_d' }}
         run: |
           python -m value_screener.phase2_market \
-            --start-year "${{ inputs.start_year || '2025' }}" \
-            --end-year "${{ inputs.end_year || '2020' }}" \
-            --datasets "${{ inputs.datasets || 'adj_factor,stk_limit,daily_basic,suspend_d' }}"
+            --start-year "$START_YEAR" \
+            --end-year "$END_YEAR" \
+            --datasets "$MARKET_DATASETS"
