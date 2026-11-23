@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ArrowLeft, CalendarClock, FileCheck2, ShieldAlert, TrendingUp, AlertTriangle } from "lucide-react";
+import { ArrowLeft, CalendarClock, FileCheck2, TrendingUp, AlertTriangle } from "lucide-react";
 import { stockDetail } from "@/lib/data";
 import { fixed, pct, moneyCny, stateLabel, signalLabel, flagLabel } from "@/lib/format";
 import { evaluateFundamentalReview, severityLabel, priorityLabel } from "@/lib/review";
@@ -31,13 +31,13 @@ export default async function StockPage({params}: Props) {
         <div className="stat-card"><span>最近收盘价</span><strong>¥{fixed(stock.price)}</strong><small>交易日 {stock.trade_date}</small></div>
         <div className="stat-card"><span>NCAV覆盖率</span><strong className="stat-green">{pct(stock.ncav_coverage,1)}</strong><small>流动资产 − 全部负债</small></div>
         <div className="stat-card"><span>压力价值覆盖率</span><strong>{pct(stock.stress_coverage,1)}</strong><small>假设性回收率测算</small></div>
-        <div className="stat-card"><span>当前信号</span><strong className="status-stat">{signalLabel(stock.signal)}</strong><small>并非交易指令</small></div>
+        <div className="stat-card"><span>当前信号</span><strong className="status-stat">{signalLabel(stock.signal)}</strong><small>趋势观察</small></div>
       </div>
       {review && <section className="panel review-detail-panel">
         <div className="panel-heading"><div>
           <div className="section-kicker">FUNDAMENTAL RISK REVIEW</div>
           <h2>基本面复核摘要</h2>
-          <p>按已取得的结构化数据自动判断，并非人工财务尽调或资产可回收性核查。</p>
+          <p>财务指标与风险事项汇总。</p>
         </div></div>
         <div className="review-summary-grid">
           <div><span>风险等级</span><strong className={`review-level review-level-${review.severity.toLowerCase()}`}>{severityLabel[review.severity]}</strong></div>
@@ -52,11 +52,11 @@ export default async function StockPage({params}: Props) {
               <span>{reason.focus} · 风险{severityLabel[reason.severity]}</span></div>
             <p>{reason.explanation}</p>
           </div>)}
-        </div> : <p className="review-muted">当前规则未识别到需重点复核的事项，但仍须核实财报附注、资产受限、重大诉讼及非结构化信息。</p>}
+        </div> : <p className="review-muted">暂无重点复核事项。</p>}
       </section>}
       <div className="detail-grid">
         <section className="panel"><div className="panel-heading"><div><div className="section-kicker">PRICE HISTORY</div><h2>收盘价变化</h2></div><TrendingUp size={18} className="muted"/></div>
-          <Sparkline prices={prices}/><p className="note">已加载 {prices.length} 个交易日收盘价（最近最多120个交易日）；合并近期历史缓存与每日行情，按交易日去重。历史价格未复权、未考虑交易成本，不代表策略收益。</p>
+          <Sparkline prices={prices}/><p className="note">最近 {prices.length} 个交易日收盘价（未复权）。</p>
         </section>
         <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
           <dl className="detail-list">
@@ -73,11 +73,10 @@ export default async function StockPage({params}: Props) {
       <div className="detail-grid">
         <section className="panel"><div className="section-kicker">FUNDAMENTAL REVIEW</div><h2>基本面初步评价</h2>
           <p className="assessment">{stock.assessment}</p>
-          <div className="research-disclaimer"><ShieldAlert size={18}/><span>根据财务数据和固定规则自动生成，不是经过人工审计的深入尽调报告。需要进一步核对附注、账龄、受限资金及关联交易。</span></div>
         </section>
         <section className="panel"><div className="section-kicker">RISK CHECKS</div><h2>财务风险和未核验项目</h2>
           {stock.flags.length ? <div className="flag-list">{stock.flags.map((flag,i)=><span key={`${flag}-${i}`} className="risk-flag"><AlertTriangle size={14}/>{flag === "CASHFLOW_NOT_VERIFIED" ? review?.reasons.find(x => x.code.startsWith("CASHFLOW_"))?.label ?? flagLabel(flag) : flagLabel(flag)}</span>)}</div>
-          : <div className="no-flags"><FileCheck2 size={20}/> 未由当前自动规则识别到风险标记；不代表不存在未披露或非结构化风险。</div>}
+          : <div className="no-flags"><FileCheck2 size={20}/> 暂无已标记风险事项。</div>}
           <div className="dates"><div><CalendarClock size={15}/> 财务报告期：{stock.report_date || "未取得"}</div>
             <div><CalendarClock size={15}/> 财报披露日：{stock.disclosed_at || "未取得"}</div></div>
         </section>
