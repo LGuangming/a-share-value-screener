@@ -25,6 +25,16 @@ class Phase2MarketTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Crossed"):
             validate_row("stk_limit", x, "20250813")
 
+    def test_unavailable_limit_is_not_converted_into_a_fake_price(self):
+        row = {"ts_code": "000001.SZ", "trade_date": "20250102",
+               "up_limit": 12.0, "down_limit": None}
+        self.assertEqual(validate_row("stk_limit", row, "20250102")[-1], None)
+        row["down_limit"] = 0
+        self.assertEqual(validate_row("stk_limit", row, "20250102")[-1], 0)
+        row["down_limit"] = -1
+        with self.assertRaisesRegex(RuntimeError, "Invalid price limit"):
+            validate_row("stk_limit", row, "20250102")
+
     def test_suspension_types_and_nullable_timing(self):
         x = {"ts_code": "600000.SH", "trade_date": "20250813",
              "suspend_type": "S", "suspend_timing": None}
