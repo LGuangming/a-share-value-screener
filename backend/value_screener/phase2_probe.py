@@ -1,6 +1,6 @@
 """Permission and availability probe for the A-share research backfill.
 
-Only 11 bounded historical requests. Does not write market data or modify Neon.
+Only 16 bounded historical requests. Does not write market data or modify Neon.
 Raw quotes, access tokens and customer credentials are never printed.
 """
 from __future__ import annotations
@@ -35,6 +35,16 @@ PROBES = (
      "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,revenue,n_income_attr_p", False),
     ("cashflow_vip", {"period": SAMPLE_QUARTER},
      "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,n_cashflow_act", False),
+    ("balancesheet", {"ts_code": "600000.SH", "period": SAMPLE_QUARTER},
+     "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,total_cur_assets,total_liab", False),
+    ("income", {"ts_code": "600000.SH", "period": SAMPLE_QUARTER},
+     "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,revenue,n_income_attr_p", False),
+    ("cashflow", {"ts_code": "600000.SH", "period": SAMPLE_QUARTER},
+     "ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,n_cashflow_act", False),
+    ("fina_indicator", {"ts_code": "600000.SH", "period": SAMPLE_QUARTER},
+     "ts_code,ann_date,end_date,roe,roa", False),
+    ("disclosure_date", {"end_date": SAMPLE_QUARTER},
+     "ts_code,end_date,actual_date,ann_date,pre_date", False),
 )
 
 
