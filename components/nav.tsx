@@ -26,6 +26,32 @@ function currentLink(pathname: string): string {
 export default function Nav() {
   const pathname = usePathname();
   const activeHref = currentLink(pathname);
+  const [selectedStrategy, setSelectedStrategy] = useState<string | null>(null);
+  useEffect(() => {
+    const refresh = () => {
+      let id = new URLSearchParams(window.location.search).get("strategy");
+      if (!id) {
+        try { id = sessionStorage.getItem("a_share_selected_strategy"); } catch { /* optional */ }
+      }
+      setSelectedStrategy(id && findStrategy(id) ? id : null);
+    };
+    const onStrategyChange = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      setSelectedStrategy(findStrategy(id) ? id : null);
+    };
+    refresh();
+    window.addEventListener("a-share-strategy-change", onStrategyChange);
+    window.addEventListener("popstate", refresh);
+    return () => {
+      window.removeEventListener("a-share-strategy-change", onStrategyChange);
+      window.removeEventListener("popstate", refresh);
+    };
+  }, [pathname]);
+  function strategyHref(href: string): string {
+    return selectedStrategy && (href === "/" || href === "/signals")
+      ? `${href}?strategy=${encodeURIComponent(selectedStrategy)}`
+      : href;
+  }
   return <>
     <aside className="sidebar">
       <Link className="brand" href={strategyHref("/")}>
@@ -55,7 +81,7 @@ export default function Nav() {
     <nav className="mobile-nav" aria-label="移动端导航">
       {links.map(({ href, label, Icon }) => {
         const isActive = activeHref === href;
-        return <Link key={href} href={href}
+        return <Link key={href} href={strategyHref(href)}
           className={isActive ? "is-active" : undefined}
           aria-current={isActive ? "page" : undefined}>
           <Icon size={17}/><span>{label}</span>
