@@ -33,8 +33,8 @@ class PipelineIsolationTests(unittest.TestCase):
     def test_daily_scan_never_requests_financial_api(self):
         client, store = self.prepare()
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
-              patch("value_screener.cli.TushareClient.from_environment", return_value=client),
-              patch("value_screener.cli.Store", return_value=store)):
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             run_scan(SimpleNamespace(date="2026-11-20"))
         client.trade_open.assert_called_once_with("20261120")
         client.stocks.assert_called_once()
@@ -51,8 +51,8 @@ class PipelineIsolationTests(unittest.TestCase):
     def test_financial_refresh_is_independent_from_publication(self):
         client, store = self.prepare()
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
-              patch("value_screener.cli.TushareClient.from_environment", return_value=client),
-              patch("value_screener.cli.Store", return_value=store)):
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=1))
         self.assertEqual(client.report_rows.call_count, 3)
         self.assertEqual([call.args[0] for call in client.report_rows.call_args_list],
@@ -67,8 +67,8 @@ class PipelineIsolationTests(unittest.TestCase):
         client, store = self.prepare()
         client.report_rows.side_effect = TushareError("balancesheet: rate-limited (429)")
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
-              patch("value_screener.cli.TushareClient.from_environment", return_value=client),
-              patch("value_screener.cli.Store", return_value=store)):
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             with self.assertRaisesRegex(RuntimeError, "Stopping this independent refresh"):
                 run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=1))
         self.assertEqual(store.finish_run.call_args.args[1], "failed")
@@ -80,8 +80,8 @@ class PipelineIsolationTests(unittest.TestCase):
         client, store = self.prepare()
         store.financial_queue.return_value = []
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
-              patch("value_screener.cli.TushareClient.from_environment", return_value=client),
-              patch("value_screener.cli.Store", return_value=store)):
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=5))
         client.report_rows.assert_not_called()
         self.assertEqual(store.finish_run.call_args.args[1], "skipped")
@@ -90,8 +90,8 @@ class PipelineIsolationTests(unittest.TestCase):
     def test_empty_financial_budget_skips_without_cached_quotes(self):
         client, store = self.prepare()
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
-              patch("value_screener.cli.TushareClient.from_environment", return_value=client),
-              patch("value_screener.cli.Store", return_value=store)):
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=0))
         client.report_rows.assert_not_called()
         store.latest_quote_date.assert_not_called()
@@ -101,8 +101,8 @@ class PipelineIsolationTests(unittest.TestCase):
         client, store = self.prepare()
         store.latest_quote_date.return_value = date(2026, 9, 30)
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
-              patch("value_screener.cli.TushareClient.from_environment", return_value=client),
-              patch("value_screener.cli.Store", return_value=store)):
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             with self.assertRaisesRegex(RuntimeError, "more than 14 days old"):
                 run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=5))
         client.report_rows.assert_not_called()

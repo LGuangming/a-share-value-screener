@@ -46,8 +46,10 @@ jobs:
           cache-dependency-path: backend/requirements-akshare.txt
       - name: Install AKShare experiment dependencies
         run: pip install -r backend/requirements-akshare.txt
-      - name: Run normalized-data unit tests
-        run: python -m unittest discover -s backend/tests -v
+      # AKShare has no dependency on the Tushare/Neon pipeline test suite.
+      # The full 48-test suite is run independently in Tests and Build.
+      - name: Run AKShare normalized-data unit tests
+        run: python -m unittest discover -s backend/tests -p 'test_akshare.py' -v
       - name: Experimental live provider fetch (Eastmoney -> Tencent -> Sina; test-only)
         run: |
           if [ "$TEST_MODE" = publish ]; then
