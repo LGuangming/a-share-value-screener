@@ -1,11 +1,17 @@
 """Contract tests: finance throttling cannot stop daily market publication."""
 import os
+import sys
 import unittest
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from value_screener.cli import run_scan, run_financial_refresh
+# Production's PostgreSQL driver is intentionally not installed in the
+# pure-unit-tests CI job. Stub only the DB module at import time; each test
+# replaces the Store factory with an isolated mock.
+from unittest.mock import Mock as _Mock
+with patch.dict("sys.modules", {"value_screener.store": _Mock(Store=_Mock())}):
+    from value_screener.cli import run_scan, run_financial_refresh
 from value_screener.tushare_client import TushareError
 
 
