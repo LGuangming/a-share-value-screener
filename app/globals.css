@@ -26,7 +26,6 @@ h1,h2,h3,p { margin-top: 0; }
 .sidebar { position: fixed; inset: 0 auto 0 0; width: 244px; background: var(--sidebar); color: #e7f1ea;
   display: flex; flex-direction: column; padding: 31px 18px 24px; z-index: 30; }
 .brand { display:flex;align-items:center;gap:12px;padding:2px 10px 43px; }
-.brand-icon { height:42px;width:42px;display:grid;place-items:center;background:#234b3f;color:#bbecb9;border:1px solid #366756;border-radius:12px; }
 .brand-text { display:flex;flex-direction:column;gap:5px; }
 .brand-text strong{font-size:21px;letter-spacing:.07em;font-weight:700}
 .brand-text small { font-size:9px; letter-spacing:.10em;color:#8fa99a; }
@@ -305,4 +304,35 @@ h1 {font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:9px;line
   .route-transition,.strategy-view-enter{animation:none!important;}
   .nav-link,.nav-link::before,.strategy-switch-option,.tab{transition:none!important;}
   .nav-link:hover,.strategy-switch-option:hover{transform:none;}
+}
+
+/* Instant stock lookup: search within the loaded, published Net-Net universe. */
+.stock-search{position:relative;z-index:12;flex:0 1 235px;min-width:210px;}
+.stock-search>.search-field{width:100%;min-height:39px;transition:border-color .16s ease,box-shadow .16s ease;}
+.stock-search>.search-field:focus-within{border-color:#72b69e;box-shadow:0 0 0 3px rgba(22,134,116,.09);}
+.stock-search .search-field input{width:100%;min-width:0;flex:1;}
+.stock-suggestions{position:absolute;left:0;top:calc(100% + 6px);z-index:30;
+  width:max(100%,340px);max-width:min(410px,calc(100vw - 30px));max-height:370px;
+  overflow-y:auto;overscroll-behavior:contain;background:#fff;
+  border:1px solid #d9e7de;border-radius:10px;box-shadow:0 12px 30px rgba(24,57,41,.14);
+  padding:5px;}
+.stock-suggestions-heading{font-size:10px;color:#82998b;padding:10px 11px 8px;
+  border-bottom:1px solid #edf2ee;margin-bottom:3px;}
+.stock-suggestion{width:100%;display:flex;align-items:center;gap:10px;text-align:left;
+  color:#435b4d;background:transparent;border:0;border-radius:7px;padding:10px 11px;
+  transition:background .13s ease;}
+.stock-suggestion:hover,.stock-suggestion.is-highlighted,
+.stock-suggestion:focus-visible{background:#eaf6ef;outline:none;}
+.stock-suggestion strong{font-size:12px;color:#213f32;white-space:nowrap;}
+.stock-suggestion span{font-variant-numeric:tabular-nums;font-size:11px;color:#4c947a;}
+.stock-suggestion small{font-size:10px;color:#83958a;margin-left:auto;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:92px;}
+.stock-search-feedback{margin:0 0 15px;padding:10px 12px;font-size:11px;line-height:1.8;
+  color:#4a8068;background:#f0f8f3;border:1px solid #e0eee4;border-radius:7px;}
+@media(max-width:700px){
+  .stock-search{flex:1 1 100%;min-width:0;}
+  .stock-suggestions{width:100%;max-width:100%;}
+}
+@media(prefers-reduced-motion:reduce){
+  .stock-search>.search-field,.stock-suggestion{transition:none;}
 }
