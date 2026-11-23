@@ -99,6 +99,45 @@ class AKShareNormalizationTests(unittest.TestCase):
         with self.assertRaises(AKShareError):
             AKShareClient(provider=fake).spot(["000910.SZ"])
 
+    def test_tencent_dated_bar_fallback_does_not_invent_cap(self):
+        fake = Mock()
+        fake.stock_individual_info_em.side_effect = ValueError("not JSON")
+        fake.stock_zh_a_hist_tx.return_value.to_dict.return_value = [
+            {"date":"2026-11-20","close":4.12},
+            {"date":"2026-11-23","close":4.25},
+            {"date":"2026-11-24","close":5.0},
+        ]
+        quote, errors = AKShareClient(provider=fake).quote_one("000910.SZ", date(2026,11,23))
+        self.assertEqual(quote["quote_source"],"stock_zh_a_hist_tx")
+        self.assertEqual(quote["quote_date"],"2026-11-23")
+        self.assertAlmostEqual(quote["close"],4.25)
+        self.assertIsNone(quote["total_mv"])
+        self.assertIsNone(quote["market_cap_yuan"])
+        self.assertGreaterEqual(len(errors),1)
+        fake.stock_zh_a_hist_sina.assert_not_called()
+
+    def test_sina_fallback_and_each_source_reported(self):
+        fake=Mock()
+        fake.stock_individual_info_em.side_effect=ValueError("not JSON")
+        fake.stock_zh_a_hist_tx.side_effect=OSError("Tencent unavailable")
+        fake.stock_zh_a_hist_sina.return_value.to_dict.return_value=[
+            {"date":"2026-11-20","close":3.24}
+        ]
+        quote, errors=AKShareClient(provider=fake).quote_one("000910.SZ",date(2026,11,23))
+        self.assertEqual(quote["quote_source"],"stock_zh_a_hist_sina")
+        self.assertEqual(quote["quote_date"],"2026-11-20")
+        self.assertEqual(len(errors),2)
+        self.assertIsNone(quote["market_cap_yuan"])
+
+    def test_no_quotes_returns_all_errors_without_fake_data(self):
+        fake=Mock()
+        fake.stock_individual_info_em.side_effect=ValueError("not JSON")
+        fake.stock_zh_a_hist_tx.side_effect=OSError("blocked")
+        fake.stock_zh_a_hist_sina.side_effect=OSError("blocked")
+        quote, errors=AKShareClient(provider=fake).quote_one("000910.SZ",date(2026,11,23))
+        self.assertIsNone(quote)
+        self.assertEqual(len(errors),3)
+
     def test_partial_market_data_rejected(self):
         fake=Mock()
         fake.stock_zh_a_spot_em.return_value.to_dict.return_value=[
