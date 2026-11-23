@@ -7,7 +7,7 @@
 - 代码：Next.js + TypeScript网站，Python数据采集/筛选程序，Supabase PostgreSQL建表脚本，GitHub Actions每日定时任务。
 - 页面：每日选股看板、股票详情、交易观察、筛选方法、回测开发占位。
 - 数据：**默认不内置假股票或假行情**。必须配置Tushare Token与数据库，第一次任务成功后页面才有真实数据。
-- 时间：每个中国A股交易日北京时间19:30扫描；节假日按上证交易日历跳过。
+- 时间：工作日19:30补行情、每天08:17补财报，数据有实质变化后事件驱动重算NCAV；近期历史价格通过独立补齐工作流回填。
 - 股票范围：第一版先按沪深主板非ST低价股筛选；其他板块、退市历史、重大风险公告暂不覆盖完整。
 
 ## 1. 创建一个独立的私人GitHub仓库
@@ -107,6 +107,16 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 
 **补充限制**：披露日历并非完整历史财报修订事件流，最新两季以外的更正、源站延迟、缺失公告日期仍需单独核查。已有成功的快照不会因下游任务失败被标记为成功或清空。
 
+## 3C. 近期历史行情补齐（独立工作流）
+
+[**A-Share Recent Price History Backfill**](.github/workflows/recent-price-history.yml) 是一次性历史数据建设工作流，与行情、财务、NCAV三项定时任务相互独立。首次发布会自动启动一次，后续需要重试可在GitHub Actions手动使用 **Run workflow**。不设长期Cron，避免补齐完成后每天反复调用接口。
+
+- 默认回填**最近120个自然日**，结束日为Neon最近已保存的交易日；有至少50个有效交易日，才能消除20日/50日均线的 `INSUFFICIENT_HISTORY` 提示。
+- 只使用Tushare官方HTTPS的 `trade_cal`、`stock_basic` 和按交易日调用的 `daily_basic`。每个历史交易日最多调用一次 `daily_basic`；已完成的日期跳过，重复运行只请求仍缺少的交易日。
+- 新增**精简表** `price_history(ts_code,trade_date,close)` 保存未复权收盘价，`price_history_fetches` 保存每个交易日的完成记录；程序启动时自动创建这两张表，不需要手工运行数据库迁移。已有 `daily_prices` 的完整交易日也会跳过。单日数据与其完成标记在同一事务中写入，失败可断点续跑。
+- `Recalculate NCAV` 读取 `price_history` 和 `daily_prices` 合并去重后的最近90日价格；优先保留正式行情表的相同交易日收盘价。回填完成后自动运行一次独立NCAV计算，更新网站交易观察信号，不重复请求行情。
+- **局限**：历史价格未复权，分红除权及拆并股可能造成技术均线不连续；历史退市证券不在此次当前上市股票的回填范围内。此工作流旨在补齐**当前股票池的近期交易观察**，不是已验证的历史回测引擎。GitHub Actions为尽力调度，首次任务的实际完成情况以运行日志为准。
+
 ## 4. 在Vercel部署
 
 1. 登录 [Vercel](https://vercel.com/)，选择 Add New → Project → Import Git Repository，选中刚创建的仓库。
@@ -124,7 +134,7 @@ Vercel仅渲染结果，不参与数千只股票数据采集，不需要Tushare 
 ```bash
 pip install -r backend/requirements.txt
 PYTHONPATH=backend python -m value_screener.cli init-db
-PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 110
+PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 120 --min-sessions 50
 PYTHONPATH=backend python -m value_screener.cli fetch-market
 PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 40
@@ -147,7 +157,7 @@ PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 - 首页显示“尚未配置数据库”：检查Vercel `DATABASE_READ_URL`。
 - 首页显示“数据库已连接但没有结果”：检查GitHub Actions运行日志，确认首次财务扫描成功。
 - 股票数量偏少：检查Tushare行情接口、已有财报的覆盖率和独立财务补齐工作流。**数据缺口不等于没有符合筛选条件的股票。**
-- 买入信号显示“历史行情不足”：先运行 `bootstrap-prices` 回填至少50个交易日。
+- 交易观察显示“历史行情不足”：运行独立的 `A-Share Recent Price History Backfill`，默认自动回填最近120自然日的未复权收盘价并在完成后重算。
 - 回测页面没有收益：回测引擎尚未开发，不能将技术观察信号误认为已回测策略。
 
 ## 7. 算法提醒

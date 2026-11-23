@@ -83,6 +83,9 @@ def recalculate_ncav(args):
     if not db:
         raise RuntimeError("DATABASE_URL is required")
     store = Store(db)
+    # Safe additive migration: existing production Neon databases need no
+    # manual SQL step before the first historical backfill runs.
+    store.ensure_price_history_tables()
     trigger_run_id = getattr(args, "trigger_run_id", None)
     if trigger_run_id is not None and not store.has_successful_data_trigger(trigger_run_id):
         LOGGER.info("Skipping recalculate-ncav: no eligible changes for the latest quote date in upstream run %s",
@@ -144,6 +147,9 @@ def recalculate_ncav(args):
                 )
         stats["candidate_count"] = len(selected)
         stats["financial_data_gap"] = sum(r["status"] == "DATA_GAP" for r in results)
+        stats["insufficient_price_history"] = sum(
+            r["signal"] == "INSUFFICIENT_HISTORY" for r in results
+        )
         stats["rows_published"] = len(results)
         store.publish(quote_day, run_id, results, stats)
         LOGGER.info("NCAV recalculation published: %s",
@@ -279,26 +285,90 @@ def run_financial_refresh(args):
 
 
 def bootstrap_prices(args):
+    """Backfill recent unadjusted close prices in a compact resume-safe table.
+
+    Historical closes are sufficient for the existing 20/50-day technical
+    observation signals; avoid copying millions of full quote JSON records.
+    Previously completed market sessions are skipped on retries.
+    """
+    today = datetime.now(CN_TZ).date()
+    requested_end = date.fromisoformat(args.end_date) if args.end_date else today
+    if requested_end > today:
+        raise ValueError("--end-date cannot be in the future")
     db = os.environ.get("DATABASE_URL", "")
     if not db:
         raise RuntimeError("DATABASE_URL is required")
-    client, store = TushareClient.from_environment(), Store(db)
-    end = date.fromisoformat(args.end_date) if args.end_date else datetime.now(CN_TZ).date()
+    store = Store(db)
+    # If today's session has not yet been saved, do not fetch unfinished
+    # same-day quotes. Historical lookback ends at the latest cached session.
+    end = store.latest_quote_date(requested_end)
+    if end is None:
+        raise RuntimeError("No cached trading day found; run Market Data Refresh first")
     start = end - timedelta(days=args.days)
+    client = TushareClient.from_environment()
     stocks = client.stocks()
+    listed_codes = {str(row["ts_code"]) for row in stocks if row.get("ts_code")}
+    if not listed_codes:
+        raise RuntimeError("No currently listed stocks returned")
     store.upsert_stocks(stocks)
-    sessions = client.query("trade_cal", {"exchange":"SSE", "start_date":start.strftime("%Y%m%d"),
-                                         "end_date":end.strftime("%Y%m%d")},"cal_date,is_open")
-    trading_days = sorted([x["cal_date"] for x in sessions if str(x.get("is_open")) == "1"])
-    if not trading_days:
-        raise RuntimeError("no sessions returned for bootstrap")
-    for code in trading_days:
+    store.ensure_price_history_tables()
+    min_rows = max(1000, round(len(listed_codes) * 0.70))
+    sessions = client.query(
+        "trade_cal",
+        {"exchange": "SSE", "start_date": start.strftime("%Y%m%d"),
+         "end_date": end.strftime("%Y%m%d")},
+        "cal_date,is_open",
+    )
+    trading_days = sorted({
+        row["cal_date"] for row in sessions
+        if str(row.get("is_open")) == "1" and row.get("cal_date")
+    })
+    if len(trading_days) < args.min_sessions:
+        raise RuntimeError(
+            f"Only {len(trading_days)} trading sessions in the history window; "
+            f"at least {args.min_sessions} required. Increase --days."
+        )
+    completed = store.completed_history_days(start, end, min_rows)
+    pending = [
+        code for code in trading_days
+        if Store._parse_date(code) not in completed
+    ]
+    LOGGER.info(
+        "Price-history backfill: range=%s..%s, sessions=%d, cached=%d, "
+        "missing=%d, minimum_daily_quotes=%d",
+        start, end, len(trading_days), len(trading_days) - len(pending),
+        len(pending), min_rows,
+    )
+    written = 0
+    for index, code in enumerate(pending, 1):
         day = Store._parse_date(code)
-        quotes = client.daily(code)
-        if len(quotes) < 1000:
-            raise RuntimeError(f"Price history incomplete for {code}: {len(quotes)} rows")
-        count = store.upsert_quotes(quotes, day)
-        LOGGER.info("Price history %s: %s rows",code,count)
+        quote_rows = client.daily(code)
+        if len(quote_rows) < min_rows:
+            raise RuntimeError(
+                f"Incomplete historical prices for {code}: {len(quote_rows)} rows "
+                f"(need {min_rows}). Previously completed days remain saved."
+            )
+        saved = store.save_compact_history(
+            day, quote_rows, listed_codes, min_rows
+        )
+        written += saved
+        LOGGER.info(
+            "Historical closes %d/%d: %s, saved %d listed-company prices",
+            index, len(pending), code, saved,
+        )
+    LOGGER.info(
+        "Price-history backfill completed: %s",
+        json.dumps({
+            "from": start.isoformat(), "to": end.isoformat(),
+            "trading_sessions": len(trading_days),
+            "already_cached_sessions": len(trading_days) - len(pending),
+            "downloaded_sessions": len(pending),
+            "api_daily_basic_calls": len(pending),
+            "rows_saved": written,
+            "minimum_sessions_for_signals": args.min_sessions,
+        }, ensure_ascii=False),
+    )
+
 
 
 def bootstrap_financials(args):
@@ -379,9 +449,12 @@ def main():
     vip.add_argument("--period",required=True,help="Quarter-end YYYYMMDD, e.g. 20260930")
     vip.add_argument("--min-coverage",type=float,default=0.80,
                      help="Warn if returned company coverage below threshold (default 80%%)")
-    bootstrap = subs.add_parser("bootstrap-prices",help="Backfill price history for signals")
-    bootstrap.add_argument("--days",type=int,default=110,help="Calendar days to backfill")
-    bootstrap.add_argument("--end-date",help="YYYY-MM-DD; default today")
+    bootstrap = subs.add_parser("bootstrap-prices", help="Resume-safe compact history for 20/50-day signals")
+    bootstrap.add_argument("--days", type=int, default=120,
+                           help="Historical calendar-day window (default 120)")
+    bootstrap.add_argument("--min-sessions", type=int, default=50,
+                           help="Require at least this many open sessions (default 50)")
+    bootstrap.add_argument("--end-date", help="YYYY-MM-DD; latest cached session when omitted")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO,format="%(asctime)s %(levelname)s %(message)s")
     if args.command == "init-db":
@@ -407,8 +480,10 @@ def main():
             parser.error("--min-coverage must be in (0,1]")
         bootstrap_financials(args)
     else:
-        if args.days < 1:
-            parser.error("--days must be positive")
+        if not 70 <= args.days <= 365:
+            parser.error("--days must be between 70 and 365")
+        if not 50 <= args.min_sessions <= 100:
+            parser.error("--min-sessions must be between 50 and 100")
         bootstrap_prices(args)
 
 

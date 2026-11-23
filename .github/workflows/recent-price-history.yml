@@ -1,0 +1,59 @@
+name: A-Share Recent Price History Backfill
+
+on:
+  # Initial one-shot launch; removed after the first job is queued.
+  push:
+    branches: [main]
+    paths:
+      - '.github/one-shot/recent-history-20261123.txt'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Recent calendar days to backfill, 70-365 (default 120)'
+        required: false
+        default: '120'
+        type: string
+      min_sessions:
+        description: 'Minimum market sessions needed for MA20/MA50 (default 50)'
+        required: false
+        default: '50'
+        type: string
+
+permissions:
+  contents: read
+
+# Do not overlap live data ingestion or NCAV publication.
+concurrency:
+  group: a-share-data-pipeline
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      TUSHARE_API_SOURCE: official
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PYTHONPATH: backend
+      HISTORY_DAYS: ${{ inputs.days || '120' }}
+      MIN_SESSIONS: ${{ inputs.min_sessions || '50' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Verify official Tushare and Neon credentials
+        run: |
+          test -n "$TUSHARE_TOKEN" || { echo 'TUSHARE_TOKEN secret is missing'; exit 1; }
+          test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
+      - name: Backfill compact historical closes (skip complete dates; safely resume)
+        run: |
+          python -m value_screener.cli bootstrap-prices --days "$HISTORY_DAYS" --min-sessions "$MIN_SESSIONS"
+      - name: Recalculate and publish NCAV observation signals with Neon only
+        run: python -m value_screener.cli recalculate-ncav

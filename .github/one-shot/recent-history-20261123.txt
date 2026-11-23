@@ -1,0 +1,2 @@
+One-time bootstrap of the most recent 120 calendar days of close prices, requested on 2026-11-23.
+Official Tushare, Neon compact table, and NCAV signal recalculation.

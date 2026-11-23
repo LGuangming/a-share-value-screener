@@ -67,14 +67,14 @@ export TUSHARE_TOKEN='YOUR_TOKEN'
 export DATABASE_URL='postgresql://...'
 
 python -m value_screener.cli init-db
-python -m value_screener.cli bootstrap-prices --days 110
+python -m value_screener.cli bootstrap-prices --days 120 --min-sessions 50
 python -m value_screener.cli fetch-market
 python -m value_screener.cli recalculate-ncav
 python -m value_screener.cli refresh-financials --budget 40
 python -m value_screener.cli recalculate-ncav
 ```
 
-The `bootstrap-prices` job may require numerous API requests. Watch provider limits before increasing its run size. Its `daily_basic` history is sufficient for basic MA observation, not for a survivorship-bias-free backtest.
+The dedicated [A-Share Recent Price History Backfill](.github/workflows/recent-price-history.yml) initializes a compact `price_history` table of unadjusted closing prices and `price_history_fetches` completion markers, then backfills the last 120 calendar days and recalculates NCAV. Historical sessions already fully cached in Neon are skipped. This is a one-time workflow with manual retry, not an extra permanent daily schedule. The 20/50-day signals use a deduplicated union of compact history and normal daily prices. Historical `daily_basic.close` is unadjusted and does not constitute a survivorship-bias-free backtest.
 
 For unattended recurring scans, keep the default financial budget modest and monitor `financial_data_gap`, `financial_successes` and `listed_stocks` in `job_runs.metrics`. Access to the financial APIs may require additional Tushare points.
 

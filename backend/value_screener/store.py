@@ -80,6 +80,80 @@ class Store:
                 """, values)
         return len(values)
 
+    def ensure_price_history_tables(self):
+        """Migrate the compact historical-close cache without manual SQL setup."""
+        with self.connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS price_history (
+                    ts_code text NOT NULL REFERENCES stocks(ts_code),
+                    trade_date date NOT NULL,
+                    close numeric(16,4) NOT NULL CHECK (close > 0),
+                    PRIMARY KEY (ts_code, trade_date)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS price_history_fetches (
+                    trade_date date PRIMARY KEY,
+                    rows_saved integer NOT NULL CHECK (rows_saved > 0),
+                    fetched_at timestamptz NOT NULL DEFAULT now()
+                )
+            """)
+
+    def completed_history_days(self, start: date, end: date,
+                               min_full_quotes: int) -> set[date]:
+        """Resume via committed history-day markers or complete daily snapshots."""
+        with self.connect() as conn:
+            rows = conn.execute("""
+                SELECT trade_date FROM price_history_fetches
+                WHERE trade_date BETWEEN %s AND %s
+                UNION
+                SELECT trade_date FROM daily_prices
+                WHERE trade_date BETWEEN %s AND %s
+                GROUP BY trade_date
+                HAVING COUNT(*) >= %s
+            """, (start, end, start, end, min_full_quotes)).fetchall()
+        return {r["trade_date"] for r in rows}
+
+    def save_compact_history(self, day: date, rows: list[dict],
+                             current_codes: set[str], min_rows: int) -> int:
+        """Insert valid close prices and completion marker atomically per day.
+
+        Restrict to currently listed symbols to preserve the stocks foreign key.
+        No multi-year OHLC/JSON data is duplicated into the expensive daily table.
+        """
+        prices = []
+        for row in rows:
+            code = str(row.get("ts_code") or "")
+            if code not in current_codes:
+                continue
+            try:
+                close = float(row["close"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if not (0 < close < float("inf")):
+                continue
+            prices.append((code, day, close))
+        if len(prices) < min_rows:
+            raise RuntimeError(
+                f"{day}: only {len(prices)} eligible valid close prices "
+                f"(minimum {min_rows}); no completion marker was saved"
+            )
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO price_history (ts_code,trade_date,close)
+                    VALUES (%s,%s,%s)
+                    ON CONFLICT (ts_code,trade_date) DO UPDATE
+                    SET close=excluded.close
+                """, prices)
+            conn.execute("""
+                INSERT INTO price_history_fetches (trade_date,rows_saved,fetched_at)
+                VALUES (%s,%s,now())
+                ON CONFLICT (trade_date) DO UPDATE
+                SET rows_saved=excluded.rows_saved, fetched_at=excluded.fetched_at
+            """, (day, len(prices)))
+        return len(prices)
+
     def latest_quote_date(self, asof: date) -> date | None:
         with self.connect() as conn:
             row = conn.execute(
@@ -389,21 +463,43 @@ class Store:
             """, (day,)).fetchall()
         return rows
 
-    def price_history(self, codes: list[str], day: date, limit_days: int = 90) -> dict[str,list[float]]:
+    def price_history(self, codes: list[str], day: date,
+                      limit_days: int = 90) -> dict[str,list[float]]:
+        """Merge compact historical closes with daily quotes without duplicates.
+
+        Prefer daily_prices when both tables contain the same trade date, then
+        take the latest unique 90 trading sessions, without forward prices.
+        """
         if not codes:
             return {}
         with self.connect() as conn:
             rows = conn.execute("""
-                SELECT ts_code,trade_date,close FROM (
-                    SELECT ts_code,trade_date,close,
-                           row_number() OVER (PARTITION BY ts_code ORDER BY trade_date DESC) AS rn
+                WITH combined AS (
+                    SELECT ts_code,trade_date,close,2 AS priority
                     FROM daily_prices WHERE ts_code = ANY(%s) AND trade_date<=%s
-                ) v WHERE rn<=%s ORDER BY ts_code,trade_date
-            """, (codes,day,limit_days)).fetchall()
+                    UNION ALL
+                    SELECT ts_code,trade_date,close,1 AS priority
+                    FROM price_history WHERE ts_code = ANY(%s) AND trade_date<=%s
+                ), deduped AS (
+                    SELECT DISTINCT ON (ts_code,trade_date)
+                           ts_code,trade_date,close
+                    FROM combined
+                    ORDER BY ts_code,trade_date,priority DESC
+                ), ranked AS (
+                    SELECT ts_code,trade_date,close,
+                           row_number() OVER (
+                               PARTITION BY ts_code ORDER BY trade_date DESC
+                           ) AS rn
+                    FROM deduped
+                )
+                SELECT ts_code,trade_date,close FROM ranked
+                WHERE rn<=%s ORDER BY ts_code,trade_date
+            """, (codes, day, codes, day, limit_days)).fetchall()
         values: dict[str,list[float]] = {code: [] for code in codes}
         for item in rows:
             values[item["ts_code"]].append(float(item["close"]))
         return values
+
 
     def publish(self, day: date, run_id: UUID, candidates: list[dict], metrics: dict,
                 strategy: str = "netnet_v1"):

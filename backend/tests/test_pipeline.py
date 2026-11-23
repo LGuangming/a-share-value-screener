@@ -2,7 +2,7 @@
 import os
 import sys
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 # replaces the Store factory with an isolated mock.
 from unittest.mock import Mock as _Mock
 with patch.dict("sys.modules", {"value_screener.store": _Mock(Store=_Mock())}):
-    from value_screener.cli import run_scan, fetch_market, recalculate_ncav, run_financial_refresh, TushareError
+    from value_screener.cli import run_scan, fetch_market, recalculate_ncav, run_financial_refresh, bootstrap_prices, TushareError
 
 
 class PipelineIsolationTests(unittest.TestCase):
@@ -278,6 +278,80 @@ class PipelineIsolationTests(unittest.TestCase):
         client.report_rows.assert_not_called()
         store.latest_quote_date.assert_not_called()
         self.assertEqual(store.finish_run.call_args.args[1], "skipped")
+
+    def test_price_history_backfill_skips_cached_sessions_and_uses_compact_table(self):
+        client, store = self.prepare()
+        store.latest_quote_date.return_value = date(2026, 11, 20)
+        client.stocks.return_value = [
+            {"ts_code": f"{i:06d}.SZ", "name": f"Stock {i}"}
+            for i in range(1000)
+        ]
+        first = date(2026, 9, 1)
+        dates = [first + timedelta(days=i) for i in range(51)]
+        days = [d.strftime("%Y%m%d") for d in dates]
+        client.query.return_value = [{"cal_date": d, "is_open": 1} for d in days]
+        store.completed_history_days.return_value = set(dates[:50])
+        client.daily.return_value = [
+            {"ts_code": f"{i:06d}.SZ", "close": 1.2}
+            for i in range(1000)
+        ]
+        store.save_compact_history.return_value = 1000
+        factory = Mock(return_value=store)
+        factory._parse_date.side_effect = lambda x: date.fromisoformat(
+            f"{x[:4]}-{x[4:6]}-{x[6:]}"
+        )
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment",
+                           return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": factory})):
+            bootstrap_prices(SimpleNamespace(days=120, min_sessions=50,
+                                             end_date="2026-11-20"))
+        client.daily.assert_called_once_with(days[-1])
+        store.save_compact_history.assert_called_once()
+        self.assertEqual(store.save_compact_history.call_args.args[0], dates[-1])
+        store.upsert_quotes.assert_not_called()
+        store.ensure_price_history_tables.assert_called_once()
+        store.completed_history_days.assert_called_once()
+
+    def test_price_history_backfill_all_cached_makes_no_daily_requests(self):
+        client, store = self.prepare()
+        d = date(2026, 9, 1)
+        days = [(d + timedelta(days=i)).strftime("%Y%m%d") for i in range(50)]
+        client.query.return_value = [{"cal_date": v, "is_open": 1} for v in days]
+        store.completed_history_days.return_value = {
+            d + timedelta(days=i) for i in range(50)
+        }
+        factory = Mock(return_value=store)
+        factory._parse_date.side_effect = lambda x: date.fromisoformat(
+            f"{x[:4]}-{x[4:6]}-{x[6:]}"
+        )
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment",
+                           return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": factory})):
+            bootstrap_prices(SimpleNamespace(days=120, min_sessions=50,
+                                             end_date="2026-11-20"))
+        client.daily.assert_not_called()
+        store.save_compact_history.assert_not_called()
+
+    def test_price_history_backfill_rejects_too_short_calendar_window(self):
+        client, store = self.prepare()
+        client.query.return_value = [
+            {"cal_date": "20261120", "is_open": 1}
+        ]
+        factory = Mock(return_value=store)
+        factory._parse_date.side_effect = lambda x: date.fromisoformat(
+            f"{x[:4]}-{x[4:6]}-{x[6:]}"
+        )
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment",
+                           return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": factory})):
+            with self.assertRaisesRegex(RuntimeError, "at least 50 required"):
+                bootstrap_prices(SimpleNamespace(days=120, min_sessions=50,
+                                                 end_date="2026-11-20"))
+        client.daily.assert_not_called()
+        store.save_compact_history.assert_not_called()
 
     def test_stale_market_quotes_block_financial_refresh(self):
         client, store = self.prepare()
