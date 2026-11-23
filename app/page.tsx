@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, Circl
 import { Empty } from "@/components/empty";
 import StrategySwitch from "@/components/strategy-switch";
 import ScreenerResults, { type ScreenTableRow } from "@/components/screener-results";
-import { latestSnapshot, screeningRows } from "@/lib/data";
+import { latestSnapshot, screeningRowsStatus } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const { snapshot, error } = await latestSnapshot();
   // Only Net-Net has a published scanner. Other strategies display their own
   // condition catalog, not re-labeled Net-Net candidates.
-  const rows = snapshot ? await screeningRows(snapshot.trade_date, "netnet_v1") : [];
+  const scan = snapshot ? await screeningRowsStatus(snapshot.trade_date, "netnet_v1") : { rows: [], error: null };
+  const rows = scan.rows;
   const qualified = rows.filter(r => r.is_candidate);
   const stressQualified = qualified.filter(r => r.stress_coverage !== null && r.stress_coverage >= 1);
   const gaps = rows.filter(r => r.status === "DATA_GAP" || r.status === "STALE_FINANCIALS");
@@ -64,7 +65,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         已上市 {snapshot.metrics.listed_stocks ?? "—"} 只 · 本轮财务刷新 {snapshot.metrics.financial_successes ?? 0} 家。
         查询结果短时缓存90秒，筛选条件在浏览器内切换，无需重新查询。
       </span></div>}
-      <ScreenerResults rows={tableRows} initial={query}/>
+      {scan.error && <div className="panel notice-panel">
+        <Empty title="Net-Net股票结果暂时无法读取" detail={scan.error} type="warning"/>
+      </div>}
+      {snapshot && !scan.error ? <ScreenerResults rows={tableRows} initial={query}/>
+        : <section className="panel"><div className="section-kicker">NET-NET SCREEN RESULTS</div>
+          <h2>历史筛选结果暂不可用</h2>
+          <p className="note">读取尚未成功，系统不会把数据库错误解释为零只股票。无需重新采集历史行情或删除原有筛选记录。</p>
+        </section>}
       <div className="bottom-grid">
         <div className="panel info-panel"><div className="section-kicker">NET-NET METHODOLOGY</div>
           <h3>从账面折价到真实安全边际</h3>
