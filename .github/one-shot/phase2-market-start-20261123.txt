@@ -1,1 +1,2 @@
 One-time phase-2 historical market enrichment 2025 through 2020. Datasets: adj_factor, stk_limit, daily_basic, suspend_d. Private Neon immutable monthly Parquet archive and SHA-256 verification. Skip published verified months; stop on errors; do not collect unauthorized stock_st or VIP financials.
+Retry after recording a bounded set of legacy unrecognized stock symbols; never claim historical ST or financial PIT completion.
