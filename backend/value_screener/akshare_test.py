@@ -21,7 +21,6 @@ from zoneinfo import ZoneInfo
 
 from .akshare_client import AKShareClient, AKShareError
 from .rules import assess, ScreenConfig
-from .store import Store
 
 LOGGER = logging.getLogger("akshare_test")
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -135,6 +134,7 @@ def main() -> None:
     db = os.getenv("DATABASE_URL")
     if not db:
         raise RuntimeError("DATABASE_URL write credential required only for --publish")
+    from .store import Store  # optional database dependency for publish mode only
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "akshare_test", now.date())
