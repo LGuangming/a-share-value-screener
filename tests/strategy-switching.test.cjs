@@ -94,7 +94,7 @@ test("Vercel read-only results use the Neon HTTPS driver, never raw PostgreSQL T
   assert.equal(typeof pkg.dependencies["@neondatabase/serverless"],"string");
   assert.equal(pkg.dependencies.postgres,undefined);
   assert.match(data,/import \{ neon \} from "@neondatabase\/serverless"/);
-  assert.match(data,/neon\(url\)/);
+  assert.match(data,/neon\(url, \{ arrayMode: false, fullResults: false \}\)/);
   assert.match(data,/process\.env\.DATABASE_READ_URL/);
   assert.doesNotMatch(data,/postgres\(url|process\.env\.DATABASE_URL\b/);
 });
