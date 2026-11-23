@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import { ArrowLeft, ClipboardCheck, Database, FlaskConical } from "lucide-react";
+import { ArrowLeft, ClipboardCheck, Database } from "lucide-react";
 import StrategyDraft from "@/components/strategy-draft";
 import { findStrategy, strategies, requirementLabels, strategyStatusLabel } from "@/lib/strategies";
 
@@ -44,19 +44,15 @@ export default async function StrategyDetailPage({params}:Props) {
         <div className="strategy-data-list">{strategy.requirements.map(req=>
           <div key={req}><Database size={16}/><span>{requirementLabels[req]??req}</span></div>
         )}</div>
-        <p className="note">所需数据不等于已经完整可用。历史ST、退市与财报披露时点必须在正式回测前单独通过质量检查。</p>
+        <p className="note"></p>
       </section>
     </div>
     <section className="panel">
       <div className="panel-heading"><div><div className="section-kicker">PARAMETER DRAFT</div>
         <h2>策略参数草稿</h2>
-        <p>根据策略登记信息自动生成配置表单，供将来开发新的选股逻辑和回测版本使用。</p>
+        <p>调整并复制策略参数。</p>
       </div><ClipboardCheck size={18} className="muted"/></div>
       <StrategyDraft strategy={strategy}/>
     </section>
-    <section className="panel signal-alert"><FlaskConical size={19}/><p>
-      当前只有Net-Net接入每日正式选股。其它策略仅登记研究定义，暂不自动执行；即使已登记参数，也不会产生回测收益或交易指令。
-      <Link className="inline-link" href="/backtest">查看回测实验室</Link>
-    </p></section>
   </main>;
 }
