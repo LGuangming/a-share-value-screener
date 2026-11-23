@@ -97,6 +97,55 @@ class TestProvider(unittest.TestCase):
                 TushareClient("token",api_source="relay",relay_url=url,
                               allow_insecure_http=True)
 
+    def test_relay_429_then_success_uses_bounded_backoff(self):
+        limited = {"code":429,"msg":"您请求速度过快","data":None}
+        allowed = {"code":0,"msg":"","data":{"fields":["cal_date","is_open"],"items":[["20261123",1]]}}
+        with patch("value_screener.tushare_client.urlopen",
+                   side_effect=[FakeHTTP(limited), FakeHTTP(allowed)]) as fetch, \
+             patch("value_screener.tushare_client.time.sleep") as sleep, \
+             patch("value_screener.tushare_client.time.monotonic",side_effect=[100,100,101,101]):
+            client=TushareClient("relay-key",api_source="relay",
+                                 allow_insecure_http=True,relay_min_interval_seconds=5)
+            rows=client.query("trade_cal",retries=3)
+        self.assertEqual(rows,[{"cal_date":"20261123","is_open":1}])
+        self.assertEqual(fetch.call_count,2)
+        self.assertTrue(any(call.args[0] >= 15 for call in sleep.call_args_list))
+
+    def test_relay_429_exhaustion_is_explicit(self):
+        limited = {"code":429,"msg":"您请求速度过快","data":None}
+        with patch("value_screener.tushare_client.urlopen",
+                   side_effect=[FakeHTTP(limited),FakeHTTP(limited),FakeHTTP(limited)]) as fetch, \
+             patch("value_screener.tushare_client.time.sleep"):
+            client=TushareClient("relay-key",api_source="relay",
+                                 allow_insecure_http=True)
+            with self.assertRaisesRegex(TushareError,"rate-limited"):
+                client.query("daily_basic",retries=3)
+        self.assertEqual(fetch.call_count,3)
+
+    def test_relay_pacing_between_separate_requests(self):
+        allowed={"code":0,"data":{"fields":[],"items":[]}}
+        with patch("value_screener.tushare_client.urlopen",
+                   side_effect=[FakeHTTP(allowed),FakeHTTP(allowed)]), \
+             patch("value_screener.tushare_client.time.sleep") as sleep, \
+             patch("value_screener.tushare_client.time.monotonic",side_effect=[100,100,101,101]):
+            client=TushareClient("relay-key",api_source="relay",
+                                 allow_insecure_http=True,relay_min_interval_seconds=5)
+            client.query("trade_cal")
+            client.query("stock_basic")
+        sleep.assert_called_once_with(4)
+
+    def test_official_429_does_not_fallback_to_relay(self):
+        limited={"code":429,"msg":"rate limited","data":None}
+        with patch("value_screener.tushare_client.urlopen",return_value=FakeHTTP(limited)) as fetch:
+            with self.assertRaises(TushareError):
+                TushareClient("official-key").query("trade_cal")
+        self.assertEqual(fetch.call_count,1)
+
+    def test_relay_interval_validation(self):
+        with self.assertRaises(ValueError):
+            TushareClient("token",api_source="relay",
+                          allow_insecure_http=True,relay_min_interval_seconds=0.1)
+
     def test_provider_permission_error_does_not_silently_fallback(self):
         payload={"code":40203,"msg":"permission denied","data":None}
         with patch("value_screener.tushare_client.urlopen",return_value=FakeHTTP(payload)) as fetch:

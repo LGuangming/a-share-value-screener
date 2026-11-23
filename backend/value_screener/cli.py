@@ -167,12 +167,21 @@ def check_api(args):
     stocks = client.stocks()
     if not stocks:
         raise TushareError("stock_basic returned no listed securities")
+    checks = ["trade_cal", "stock_basic"]
+    quotes_count = None
+    if open_session:
+        quotes = client.daily(day.strftime("%Y%m%d"))
+        quotes_count = len(quotes)
+        if quotes_count < 1000:
+            raise TushareError(f"daily_basic incomplete: {quotes_count} quotes; expected at least 1000")
+        checks.append("daily_basic")
     LOGGER.info("API connectivity OK: %s", json.dumps({
         "api_source": client.source,
         "session_date": day.isoformat(),
         "session_open": open_session,
         "listed_count": len(stocks),
-        "checks": ["trade_cal", "stock_basic"],
+        "quote_rows": quotes_count,
+        "checks": checks,
         "database_writes": False
     }, ensure_ascii=False))
 

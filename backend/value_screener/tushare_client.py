@@ -3,6 +3,7 @@ Docs: https://tushare.pro/document/2 . Credentials must never be logged.
 """
 from __future__ import annotations
 import json
+import math
 import os
 import time
 from urllib.parse import urlsplit
@@ -20,7 +21,8 @@ class TushareError(RuntimeError):
 class TushareClient:
     def __init__(self, token: str, timeout: int = 40, *,
                  api_source: str = "official", relay_url: str | None = None,
-                 allow_insecure_http: bool = False):
+                 allow_insecure_http: bool = False,
+                 relay_min_interval_seconds: float = 5.0):
         if not token:
             raise ValueError("Tushare API token is required")
         if api_source not in ("official", "relay"):
@@ -28,6 +30,11 @@ class TushareClient:
         self.source = api_source
         self._token = token
         self.timeout = timeout
+        if (not math.isfinite(relay_min_interval_seconds) or
+                not 0.5 <= relay_min_interval_seconds <= 60):
+            raise ValueError("Relay minimum request interval must be between 0.5 and 60 seconds")
+        self._relay_interval = relay_min_interval_seconds
+        self._last_request_start: float | None = None
         if api_source == "official":
             self.api_url = API_URL  # Unchanged official HTTPS endpoint.
         else:
@@ -51,9 +58,24 @@ class TushareClient:
         token = os.environ.get(key, "")
         if not token:
             raise ValueError(f"{key} is required for the {source} API source")
+        try:
+            interval = float(os.environ.get("TUSHARE_RELAY_MIN_INTERVAL_SECONDS", "5"))
+        except ValueError as exc:
+            raise ValueError("TUSHARE_RELAY_MIN_INTERVAL_SECONDS must be numeric") from exc
         return cls(token, timeout=timeout, api_source=source,
                    relay_url=os.environ.get("TUSHARE_RELAY_URL") or None,
-                   allow_insecure_http=os.environ.get("TUSHARE_ALLOW_HTTP") == "1")
+                   allow_insecure_http=os.environ.get("TUSHARE_ALLOW_HTTP") == "1",
+                   relay_min_interval_seconds=interval)
+
+    def _respect_relay_rate_limit(self) -> None:
+        if self.source != "relay":
+            return
+        now = time.monotonic()
+        if self._last_request_start is not None:
+            remaining = self._relay_interval - (now - self._last_request_start)
+            if remaining > 0:
+                time.sleep(remaining)
+        self._last_request_start = time.monotonic()
 
     def query(self, api_name: str, params: dict | None = None, fields: str = "", retries: int = 3) -> list[dict]:
         body = json.dumps({"api_name": api_name, "token": self._token,
@@ -61,18 +83,33 @@ class TushareClient:
         request = Request(self.api_url, data=body,
                           headers={"Content-Type": "application/json", "User-Agent": "a-share-value-screener/0.1"},
                           method="POST")
+        if retries < 1:
+            raise ValueError("retries must be positive")
         for attempt in range(retries):
+            self._respect_relay_rate_limit()
             try:
                 with urlopen(request, timeout=self.timeout) as response:
                     payload = json.load(response)
-                if payload.get("code") != 0:
-                    # Provider failures usually indicate permission / quota / query errors.
-                    raise TushareError(f"{api_name}: provider error {payload.get('code')}: {payload.get('msg')}")
+                code = payload.get("code")
+                if code != 0:
+                    # Only the explicitly opted-in relay retries transient HTTP-style
+                    # provider 429; hard permission denials (e.g. 40203) never retry.
+                    message = str(payload.get("msg") or "")
+                    rate_limited = self.source == "relay" and (
+                        str(code) == "429" or "请求速度过快" in message)
+                    if rate_limited:
+                        if attempt < retries - 1:
+                            time.sleep(15 * 2 ** attempt)
+                            continue
+                        raise TushareError(
+                            f"{api_name}: relay rate-limited (429) after {retries} attempts; "
+                            "increase TUSHARE_RELAY_MIN_INTERVAL_SECONDS or reduce request volume")
+                    raise TushareError(f"{api_name}: provider error {code}: {message}")
                 fields_out = (payload.get("data") or {}).get("fields") or []
                 items = (payload.get("data") or {}).get("items") or []
                 return [dict(zip(fields_out, item)) for item in items]
             except TushareError:
-                raise  # Permission errors should fail visibly, not burn the quota.
+                raise
             except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
                 if attempt == retries - 1:
                     raise TushareError(f"{api_name}: network/response failure ({type(exc).__name__})") from exc

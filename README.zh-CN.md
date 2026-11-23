@@ -61,11 +61,13 @@ git push -u origin main
 
 1. GitHub仓库 → **Settings → Secrets and variables → Actions → Secrets**：新增 `TUSHARE_RELAY_TOKEN`，填中转服务实际要求的Token；原有 `TUSHARE_TOKEN` 不变。
 2. GitHub Actions → [A-Share Daily Net-Net Scan](.github/workflows/daily-scan.yml) → **Run workflow**。
-3. 将 `api_source` 设置为 `relay`，`check_api_only` 设为 `true`，先仅检查 `trade_cal` 和 `stock_basic`，**不写入Neon**。
-4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行完整扫描。出现接口缺失或数据不完整时会失败，不伪造选股结果。
+3. 将 `api_source` 设置为 `relay`，`check_api_only` 设为 `true`，先检查 `trade_cal`、`stock_basic`，如为交易日还检查 `daily_basic`，**不写入Neon**。
+4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行完整扫描。**建议先设 `financial_budget=0` 验证全市场行情；确认无429后再设5、10逐步提高。** 出现接口缺失或数据不完整时会失败，不伪造选股结果。
 5. 想恢复官方接口，将 `api_source` 切回 `official`。工作日北京时间19:30的自动任务始终按默认 `official` 执行。
 
 默认中转网址已内置；如果服务方提供HTTPS或更换域名，可在GitHub Actions的 **Variables** 添加 `TUSHARE_RELAY_URL`。仅在显式选择中转的运行中生效。
+
+**中转429限流处理（2026-11-23）：** 默认每两个中转请求之间至少隔5秒，收到明确的 `429 / 您请求速度过快` 时最多重试3次，分别退避15秒、30秒；其他权限错误（例如40203）不会反复重试。GitHub手动运行可调 `relay_min_interval_seconds`（建议先5，若429仍出现试10或20，允许0.5–60）。该限速不能保证第三方服务器会放行：其IP/账号全局配额仍以服务商实际限制为准。**官方HTTPS模式不受这项中转限速影响。**
 
 本机CLI可选用环境变量（不要提交真实Token）：
 

@@ -24,10 +24,15 @@ on:
           - official
           - relay
       check_api_only:
-        description: 'Check trade_cal and stock_basic only (no database writes)'
+        description: 'Check trade_cal, stock_basic and daily_basic on open days (no database writes)'
         required: false
         default: false
         type: boolean
+      relay_min_interval_seconds:
+        description: 'Minimum seconds between relay requests (increase on 429)'
+        required: false
+        default: '5'
+        type: string
 permissions:
   contents: read
 concurrency:
@@ -42,6 +47,7 @@ jobs:
       TUSHARE_RELAY_TOKEN: ${{ secrets.TUSHARE_RELAY_TOKEN }}
       TUSHARE_API_SOURCE: ${{ inputs.api_source || 'official' }}
       TUSHARE_RELAY_URL: ${{ vars.TUSHARE_RELAY_URL || 'http://tus.sxdata.top/tu_share/' }}
+      TUSHARE_RELAY_MIN_INTERVAL_SECONDS: ${{ inputs.relay_min_interval_seconds || '5' }}
       TUSHARE_ALLOW_HTTP: ${{ inputs.api_source == 'relay' && '1' || '0' }}
       CHECK_API_ONLY: ${{ inputs.check_api_only || 'false' }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
