@@ -6,12 +6,17 @@ import { unstable_cache } from "next/cache";
 // The previous postgres.js TCP path was repeatedly failing with CONNECT_TIMEOUT
 // on port 5432. No persistent serverless TCP pool is needed with neon().
 // Never fall back to DATABASE_URL: only the restricted reader credential is used.
-let client: ReturnType<typeof neon> | null = null;
+function makeReader(url: string) {
+  // Explicit response mode narrows Neon's generic type to row objects, not
+  // the union of array rows and full-result metadata.
+  return neon(url, { arrayMode: false, fullResults: false });
+}
+let client: ReturnType<typeof makeReader> | null = null;
 
 function connection() {
   const url = process.env.DATABASE_READ_URL;
   if (!url) return null;
-  if (!client) client = neon(url);
+  if (!client) client = makeReader(url);
   return client;
 }
 
