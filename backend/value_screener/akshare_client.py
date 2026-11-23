@@ -5,7 +5,7 @@ Provider data is experimental and may be blocked or changed upstream.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import math
 import re
 from typing import Any
@@ -208,6 +208,54 @@ class AKShareClient:
         if len(result) < 1000:
             raise AKShareError(f"stock_zh_a_spot_em too few valid quotes: {len(result)}; refusing incomplete market data")
         return result
+
+    def quote_one(self, code: str, asof: date) -> tuple[dict | None, list[str]]:
+        """Test Eastmoney first, then dated Tencent/Sina daily bars.
+
+        Dated historical bars do NOT contain total market cap or verified PB;
+        the missing fields stay None, preventing unsupported NCAV ratios.
+        All failures are returned for inspection, not silently swallowed.
+        """
+        errors: list[str] = []
+        try:
+            q = self.spot([code])[code]
+            q["quote_date"] = None
+            q["quote_source"] = "stock_individual_info_em"
+            return q, errors
+        except (AKShareError, KeyError) as exc:
+            errors.append(f"stock_individual_info_em: {str(exc)[:155]}")
+
+        raw_code, market = code.split(".")
+        symbol = market.lower() + raw_code
+        start = (asof - timedelta(days=20)).strftime("%Y%m%d")
+        end = asof.strftime("%Y%m%d")
+        for endpoint in ("stock_zh_a_hist_tx", "stock_zh_a_hist_sina"):
+            try:
+                func = getattr(self.ak, endpoint)
+                kwargs = {"symbol": symbol, "start_date": start, "end_date": end, "adjust": ""}
+                if endpoint.endswith("_sina"):
+                    kwargs["period"] = "daily"
+                rows = self._rows(func(**kwargs), endpoint)
+                valid = []
+                for row in rows:
+                    fields = {str(k).lower(): v for k, v in row.items()}
+                    row_day = _day(fields.get("date") or fields.get("日期"))
+                    close = _pick(fields, "close", "收盘")
+                    if row_day is not None and row_day <= asof and close is not None and close > 0:
+                        valid.append((row_day, close))
+                if not valid:
+                    errors.append(f"{endpoint}: no dated positive close on or before {asof}")
+                    continue
+                session, close = max(valid, key=lambda x: x[0])
+                return {
+                    "ts_code": code, "name": raw_code, "market": "主板",
+                    "close": close, "total_mv": None, "market_cap_yuan": None,
+                    "pb": None, "turnover_rate": None,
+                    "quote_date": session.isoformat(), "quote_source": endpoint,
+                }, errors
+            except Exception as exc:
+                errors.append(f"{endpoint}: unavailable ({type(exc).__name__})")
+        return None, errors
 
     def report(self, code: str, kind: str, asof: date) -> tuple[dict | None, date | None, date | None, list[str]]:
         if kind not in STATEMENT_FUNCTIONS:
