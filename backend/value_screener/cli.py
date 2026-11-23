@@ -19,15 +19,15 @@ CN_TZ = ZoneInfo("Asia/Shanghai")
 
 def run_scan(args):
     day = date.fromisoformat(args.date) if args.date else datetime.now(CN_TZ).date()
-    token = os.environ.get("TUSHARE_TOKEN", "")
     db = os.environ.get("DATABASE_URL", "")
-    if not token or not db:
-        raise RuntimeError("TUSHARE_TOKEN and DATABASE_URL are required; see README.md")
-    client = TushareClient(token)
+    if not db:
+        raise RuntimeError("DATABASE_URL is required; see README.md")
+    client = TushareClient.from_environment()
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "daily_scan", day)
     stats = {"asof": day.isoformat(), "financial_budget": args.financial_budget,
+             "api_source": client.source,
              "notes": "Research screen, not trade instructions."}
     try:
         if not client.trade_open(day.strftime("%Y%m%d")):
@@ -108,11 +108,10 @@ def run_scan(args):
 
 
 def bootstrap_prices(args):
-    token = os.environ.get("TUSHARE_TOKEN", "")
     db = os.environ.get("DATABASE_URL", "")
-    if not token or not db:
-        raise RuntimeError("TUSHARE_TOKEN and DATABASE_URL are required")
-    client, store = TushareClient(token), Store(db)
+    if not db:
+        raise RuntimeError("DATABASE_URL is required")
+    client, store = TushareClient.from_environment(), Store(db)
     end = date.fromisoformat(args.end_date) if args.end_date else datetime.now(CN_TZ).date()
     start = end - timedelta(days=args.days)
     stocks = client.stocks()
@@ -133,13 +132,12 @@ def bootstrap_prices(args):
 
 def bootstrap_financials(args):
     """Provider-authorized VIP quarter snapshot. Does not publish a daily screen."""
-    token = os.environ.get("TUSHARE_TOKEN", "")
     db = os.environ.get("DATABASE_URL", "")
-    if not token or not db:
-        raise RuntimeError("TUSHARE_TOKEN and DATABASE_URL are required")
+    if not db:
+        raise RuntimeError("DATABASE_URL is required")
     if len(args.period) != 8 or not args.period.isdigit() or args.period[4:] not in ("0331","0630","0930","1231"):
         raise ValueError("--period must be a quarter-end YYYYMMDD")
-    client, store = TushareClient(token), Store(db)
+    client, store = TushareClient.from_environment(), Store(db)
     listed = client.stocks()
     store.upsert_stocks(listed)
     codes = {row["ts_code"] for row in listed if row.get("ts_code")}
@@ -161,10 +159,30 @@ def bootstrap_financials(args):
                 "run the daily scan to publish a snapshot",len(complete),len(codes))
 
 
+def check_api(args):
+    """Read-only connectivity probe, with no Neon database writes."""
+    day = date.fromisoformat(args.date) if args.date else datetime.now(CN_TZ).date()
+    client = TushareClient.from_environment()
+    open_session = client.trade_open(day.strftime("%Y%m%d"))
+    stocks = client.stocks()
+    if not stocks:
+        raise TushareError("stock_basic returned no listed securities")
+    LOGGER.info("API connectivity OK: %s", json.dumps({
+        "api_source": client.source,
+        "session_date": day.isoformat(),
+        "session_open": open_session,
+        "listed_count": len(stocks),
+        "checks": ["trade_cal", "stock_basic"],
+        "database_writes": False
+    }, ensure_ascii=False))
+
+
 def main():
     parser = argparse.ArgumentParser(description="A股Net-Net筛选与每日数据更新")
     subs = parser.add_subparsers(dest="command",required=True)
     subs.add_parser("init-db", help="Create the database tables")
+    check = subs.add_parser("check-api", help="Test the selected Tushare API without database writes")
+    check.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
     scan = subs.add_parser("scan",help="Scan a mainland-China trading day")
     scan.add_argument("--date",help="Asia/Shanghai YYYY-MM-DD; default today")
     scan.add_argument("--financial-budget",type=int,default=30,
@@ -184,6 +202,8 @@ def main():
         schema = Path(__file__).resolve().parents[2] / "database" / "schema.sql"
         Store(os.environ["DATABASE_URL"]).initialize(schema.read_text(encoding="utf-8"))
         LOGGER.info("Schema initialized")
+    elif args.command == "check-api":
+        check_api(args)
     elif args.command == "scan":
         if args.financial_budget < 0:
             parser.error("--financial-budget must be non-negative")

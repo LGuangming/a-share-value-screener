@@ -53,6 +53,33 @@ git push -u origin main
 
 注意：每天默认最多补30家公司的三张报表，属于**逐步补齐数据**，不是第一天就能完整扫描数千家上市公司。如果你的Tushare权限支持VIP批量报表，可以使用下文所述的财报批量初始化。
 
+## 3A. Tushare官方API与第三方中转API双模式
+
+程序保留原有官方地址 `https://api.tushare.pro`，**正式定时任务默认仍使用官方HTTPS API**。同时支持你提供的第三方中转 `http://tus.sxdata.top/tu_share/`，复用同一HTTP JSON请求结构（`api_name`、`token`、`params`、`fields`），不需要安装Tushare Python SDK。中转能否访问各个财务接口以实际测试结果为准，不能假设其绕过官方积分权限。
+
+**安全须知：** 中转地址目前是HTTP而非HTTPS，Token可能在网络传输中被截获，且由第三方服务器处理。程序不会自动把 `TUSHARE_TOKEN` 转发给中转地址，也不会在原始API返回40203时自动切换中转。若确认信任中转服务，建议使用独立的中转Token；如确需使用同一Token，须自行明确承担明文传输风险。
+
+1. GitHub仓库 → **Settings → Secrets and variables → Actions → Secrets**：新增 `TUSHARE_RELAY_TOKEN`，填中转服务实际要求的Token；原有 `TUSHARE_TOKEN` 不变。
+2. GitHub Actions → [A-Share Daily Net-Net Scan](.github/workflows/daily-scan.yml) → **Run workflow**。
+3. 将 `api_source` 设置为 `relay`，`check_api_only` 设为 `true`，先仅检查 `trade_cal` 和 `stock_basic`，**不写入Neon**。
+4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行完整扫描。出现接口缺失或数据不完整时会失败，不伪造选股结果。
+5. 想恢复官方接口，将 `api_source` 切回 `official`。工作日北京时间19:30的自动任务始终按默认 `official` 执行。
+
+默认中转网址已内置；如果服务方提供HTTPS或更换域名，可在GitHub Actions的 **Variables** 添加 `TUSHARE_RELAY_URL`。仅在显式选择中转的运行中生效。
+
+本机CLI可选用环境变量（不要提交真实Token）：
+
+```bash
+# 官方模式（默认）：TUSHARE_TOKEN + DATABASE_URL
+PYTHONPATH=backend python -m value_screener.cli check-api
+
+# 中转模式：显式提供 TUSHARE_API_SOURCE=relay、
+# TUSHARE_RELAY_TOKEN 和 TUSHARE_ALLOW_HTTP=1
+PYTHONPATH=backend python -m value_screener.cli check-api
+```
+
+`check-api` 不写数据库，也不需要 `DATABASE_URL`。 `scan`、`bootstrap-prices`、`bootstrap-financials` 均采用相同的数据源选择配置。官方Token和中转Token都只能放在机密变量中，不能放在GitHub代码、URL参数或公开日志中。
+
 ## 4. 在Vercel部署
 
 1. 登录 [Vercel](https://vercel.com/)，选择 Add New → Project → Import Git Repository，选中刚创建的仓库。

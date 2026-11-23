@@ -3,11 +3,14 @@ Docs: https://tushare.pro/document/2 . Credentials must never be logged.
 """
 from __future__ import annotations
 import json
+import os
 import time
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 API_URL = "https://api.tushare.pro"
+RELAY_API_URL = "http://tus.sxdata.top/tu_share/"
 
 
 class TushareError(RuntimeError):
@@ -15,16 +18,47 @@ class TushareError(RuntimeError):
 
 
 class TushareClient:
-    def __init__(self, token: str, timeout: int = 40):
+    def __init__(self, token: str, timeout: int = 40, *,
+                 api_source: str = "official", relay_url: str | None = None,
+                 allow_insecure_http: bool = False):
         if not token:
-            raise ValueError("TUSHARE_TOKEN is required")
+            raise ValueError("Tushare API token is required")
+        if api_source not in ("official", "relay"):
+            raise ValueError("TUSHARE_API_SOURCE must be official or relay")
+        self.source = api_source
         self._token = token
         self.timeout = timeout
+        if api_source == "official":
+            self.api_url = API_URL  # Unchanged official HTTPS endpoint.
+        else:
+            url = (relay_url or RELAY_API_URL).strip()
+            parsed = urlsplit(url)
+            if (parsed.scheme not in ("https", "http") or not parsed.netloc
+                    or not parsed.hostname or parsed.username or parsed.password
+                    or parsed.query or parsed.fragment):
+                raise ValueError("Relay URL must be a bare HTTP(S) endpoint without credentials, query or fragment")
+            if parsed.scheme == "http" and not allow_insecure_http:
+                raise ValueError("HTTP relay sends the API token unencrypted; explicitly set TUSHARE_ALLOW_HTTP=1 to opt in")
+            self.api_url = url
+
+    @classmethod
+    def from_environment(cls, timeout: int = 40) -> "TushareClient":
+        """Select token and URL explicitly; never forward the official secret to HTTP by default."""
+        source = os.environ.get("TUSHARE_API_SOURCE", "official").strip().lower()
+        if source not in ("official", "relay"):
+            raise ValueError("TUSHARE_API_SOURCE must be official or relay")
+        key = "TUSHARE_TOKEN" if source == "official" else "TUSHARE_RELAY_TOKEN"
+        token = os.environ.get(key, "")
+        if not token:
+            raise ValueError(f"{key} is required for the {source} API source")
+        return cls(token, timeout=timeout, api_source=source,
+                   relay_url=os.environ.get("TUSHARE_RELAY_URL") or None,
+                   allow_insecure_http=os.environ.get("TUSHARE_ALLOW_HTTP") == "1")
 
     def query(self, api_name: str, params: dict | None = None, fields: str = "", retries: int = 3) -> list[dict]:
         body = json.dumps({"api_name": api_name, "token": self._token,
                            "params": params or {}, "fields": fields}).encode("utf-8")
-        request = Request(API_URL, data=body,
+        request = Request(self.api_url, data=body,
                           headers={"Content-Type": "application/json", "User-Agent": "a-share-value-screener/0.1"},
                           method="POST")
         for attempt in range(retries):

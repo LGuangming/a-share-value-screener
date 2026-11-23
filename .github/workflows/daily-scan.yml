@@ -15,6 +15,19 @@ on:
         required: false
         default: '30'
         type: string
+      api_source:
+        description: 'official: HTTPS original; relay: third-party HTTP, token sent unencrypted'
+        required: false
+        default: official
+        type: choice
+        options:
+          - official
+          - relay
+      check_api_only:
+        description: 'Check trade_cal and stock_basic only (no database writes)'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -26,6 +39,11 @@ jobs:
     timeout-minutes: 50
     env:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      TUSHARE_RELAY_TOKEN: ${{ secrets.TUSHARE_RELAY_TOKEN }}
+      TUSHARE_API_SOURCE: ${{ inputs.api_source || 'official' }}
+      TUSHARE_RELAY_URL: ${{ vars.TUSHARE_RELAY_URL || 'http://tus.sxdata.top/tu_share/' }}
+      TUSHARE_ALLOW_HTTP: ${{ inputs.api_source == 'relay' && '1' || '0' }}
+      CHECK_API_ONLY: ${{ inputs.check_api_only || 'false' }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONPATH: backend
     steps:
@@ -37,16 +55,29 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install Python dependencies
         run: pip install -r backend/requirements.txt
-      - name: Verify credentials exist
+      - name: Verify selected API credentials
         run: |
-          test -n "$TUSHARE_TOKEN" || { echo 'TUSHARE_TOKEN secret is missing'; exit 1; }
-          test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
-      - name: Scan and publish snapshot
+          if [ "$TUSHARE_API_SOURCE" = "relay" ]; then
+            test -n "$TUSHARE_RELAY_TOKEN" || { echo 'TUSHARE_RELAY_TOKEN secret is missing'; exit 1; }
+            echo 'Selected relay mode: third-party HTTP may expose its token in transit.'
+          else
+            test -n "$TUSHARE_TOKEN" || { echo 'TUSHARE_TOKEN secret is missing'; exit 1; }
+          fi
+          if [ "$CHECK_API_ONLY" != "true" ]; then
+            test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
+          fi
+      - name: Check API or scan and publish snapshot
         env:
           TRADE_DATE: ${{ inputs.trade_date }}
           FINANCIAL_BUDGET: ${{ inputs.financial_budget || '30' }}
         run: |
-          if [ -n "$TRADE_DATE" ]; then
+          if [ "$CHECK_API_ONLY" = "true" ]; then
+            if [ -n "$TRADE_DATE" ]; then
+              python -m value_screener.cli check-api --date "$TRADE_DATE"
+            else
+              python -m value_screener.cli check-api
+            fi
+          elif [ -n "$TRADE_DATE" ]; then
             python -m value_screener.cli scan --date "$TRADE_DATE" --financial-budget "$FINANCIAL_BUDGET"
           else
             python -m value_screener.cli scan --financial-budget "$FINANCIAL_BUDGET"
