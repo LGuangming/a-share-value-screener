@@ -1,12 +1,13 @@
 import "server-only";
 import postgres from "postgres";
+import { unstable_cache } from "next/cache";
 
 let client: ReturnType<typeof postgres> | null = null;
 
 function connection() {
   const url = process.env.DATABASE_READ_URL;
   if (!url) return null;
-  if (!client) client = postgres(url, { max: 2, idle_timeout: 15, connect_timeout: 8, prepare: false });
+  if (!client) client = postgres(url, { max: 3, idle_timeout: 90, connect_timeout: 5, prepare: false });
   return client;
 }
 
@@ -81,7 +82,7 @@ function normalizeRow(raw: Record<string, unknown>): ScreenerRow {
   };
 }
 
-export async function latestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
+async function readLatestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
   const db = connection();
   if (!db) return { snapshot: null, error: "尚未配置数据库连接" };
   try {
@@ -101,9 +102,9 @@ export async function latestSnapshot(): Promise<{ snapshot: Snapshot | null; err
   }
 }
 
-export async function screeningRows(day: string): Promise<ScreenerRow[]> {
+async function readScreeningRows(day: string, strategy: string): Promise<ScreenerRow[]> {
   const db = connection();
-  if (!db || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  if (!db || !/^\d{4}-\d{2}-\d{2}$/.test(day) || !/^[a-z0-9_]+$/.test(strategy)) return [];
   try {
     const rows = await db`
       SELECT r.*,s.name,s.industry,s.market,
@@ -123,7 +124,7 @@ export async function screeningRows(day: string): Promise<ScreenerRow[]> {
         END AS cashflow_detail
       FROM screen_results r JOIN stocks s USING(ts_code)
       JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
-      WHERE r.trade_date=${day} AND r.strategy='netnet_v1'
+      WHERE r.trade_date=${day} AND r.strategy=${strategy}
       ORDER BY r.is_candidate DESC, r.ncav_coverage DESC NULLS LAST
       LIMIT 3000
     `;
@@ -132,6 +133,18 @@ export async function screeningRows(day: string): Promise<ScreenerRow[]> {
     console.error("Read screening rows failed", error);
     return [];
   }
+}
+
+// Share one short-lived, read-only result across navigation and filter switches.
+// Daily publication uses a date-specific row key; no cross-strategy result fallback.
+const cachedSnapshot = unstable_cache(readLatestSnapshot, ["latest-daily-snapshot-v2"], { revalidate: 30 });
+const cachedScreening = unstable_cache(readScreeningRows, ["strategy-screen-rows-v2"], { revalidate: 90 });
+
+export function latestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
+  return cachedSnapshot();
+}
+export function screeningRows(day: string, strategy: string = "netnet_v1"): Promise<ScreenerRow[]> {
+  return cachedScreening(day, strategy);
 }
 
 export async function stockDetail(code: string): Promise<{ stock: ScreenerRow | null; prices: { day: string; close: number }[]; recent: ScreenerRow[] }> {
