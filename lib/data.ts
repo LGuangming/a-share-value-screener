@@ -129,7 +129,7 @@ export async function stockDetail(code: string): Promise<{ stock: ScreenerRow | 
       SELECT r.*,s.name,s.industry,s.market FROM screen_results r
       JOIN stocks s USING(ts_code)
       JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
-      WHERE r.ts_code=${code}
+      WHERE r.ts_code=${code} AND r.strategy='netnet_v1'
       ORDER BY r.trade_date DESC LIMIT 30
     `;
     const prices = await db`
