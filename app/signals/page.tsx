@@ -62,11 +62,12 @@ export default async function SignalsPage({ searchParams }: { searchParams: Prom
             <td><span className={`review-level review-level-${review.severity.toLowerCase()}`}>{severityLabel[review.severity]}</span></td>
             <td><strong className="review-priority">{priorityLabel[review.priority]}</strong>
               <div className="review-meta">{review.focus}</div></td>
-            <td><div className="review-reasons">
-              {review.reasons.length ? review.reasons.slice(0,3).map(reason =>
+            <td><div className="review-reasons"
+              title={review.reasons.map(reason => reason.label).join("；") || "当前规则未识别到重点风险"}>
+              {review.reasons.length ? review.reasons.slice(0,2).map(reason =>
                 <span className="review-reason" key={reason.code}>{reason.label}</span>
               ) : <span className="review-muted">当前规则未识别到重点风险</span>}
-              {review.reasons.length > 3 && <span className="review-more">另有{review.reasons.length-3}项</span>}
+              {review.reasons.length > 2 && <span className="review-more">另有{review.reasons.length-2}项</span>}
             </div></td>
             <td><span className={`review-conclusion review-conclusion-${review.conclusion === "通过" ? "pass" : review.conclusion === "待补充资料" ? "pending" : "block"}`}>{review.conclusion}</span></td>
             <td>{signalLabel(row.signal)}</td>
