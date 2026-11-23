@@ -9,7 +9,7 @@ on:
         default: '000910,600051,002462'
         type: string
       mode:
-        description: 'smoke = JSON artifact only; publish = isolated Neon test rows'
+        description: 'smoke = no database writes; publish = AKShare-only test snapshot'
         required: false
         default: smoke
         type: choice
