@@ -56,6 +56,24 @@ class Store:
                 """, values)
         return len(values)
 
+    def ensure_experiment_stocks(self, rows: list[dict]):
+        """Insert only missing stock identifiers for experimental FKs.
+
+        Never overwrite official Tushare names, industry, market, list dates,
+        or ST markers with third-party test data.
+        """
+        values = [(str(r["ts_code"]), str(r.get("name") or r["ts_code"]))
+                  for r in rows if str(r.get("ts_code", "")).endswith((".SH", ".SZ"))]
+        if not values:
+            return 0
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                cur.executemany("""
+                    INSERT INTO stocks(ts_code, name) VALUES (%s,%s)
+                    ON CONFLICT (ts_code) DO NOTHING
+                """, values)
+        return len(values)
+
     def upsert_quotes(self, rows: list[dict], day: date):
         values = []
         for row in rows:
