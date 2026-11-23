@@ -1,6 +1,7 @@
--- A-share value screener v0.1. Run on a dedicated Supabase PostgreSQL database.
+-- A-share value screener v0.1. PostgreSQL schema for Neon or Supabase.
 -- Source financials are in CNY yuan; Tushare daily_basic.total_mv is in 万元.
--- Tables are not exposed through the Supabase Data API: revoke anon access.
+-- On Supabase, revoke client-side anon/authenticated access if those roles exist.
+-- On Neon, these Supabase-specific roles usually do not exist.
 
 create table if not exists stocks (
   ts_code text primary key,
@@ -86,11 +87,22 @@ create index if not exists screen_results_candidates_idx on screen_results
   (trade_date desc,is_candidate,ncav_coverage desc);
 
 -- No anonymous/client-side access to tables. Vercel queries with a server-only DB URL.
-revoke all on all tables in schema public from anon, authenticated;
-revoke all on all sequences in schema public from anon, authenticated;
+-- Supabase has anon/authenticated roles; Neon normally does not.
+do $
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    execute 'revoke all on all tables in schema public from anon';
+    execute 'revoke all on all sequences in schema public from anon';
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    execute 'revoke all on all tables in schema public from authenticated';
+    execute 'revoke all on all sequences in schema public from authenticated';
+  end if;
+end;
+$;
 
 -- Optional read-only role; create only after selecting a secure password and
--- granting via Supabase SQL editor. Never put the password into source control.
+-- granting via the PostgreSQL SQL editor. Never put the password into source control.
 -- CREATE ROLE screener_reader LOGIN PASSWORD '...';
 -- GRANT USAGE ON SCHEMA public TO screener_reader;
 -- GRANT SELECT ON stocks,daily_prices,financial_reports,job_runs,screen_results TO screener_reader;
