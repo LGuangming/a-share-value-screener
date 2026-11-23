@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{children: React.ReactNode}>) {
   return <html lang="zh-CN"><body>
     <Nav/><div className="site-main">{children}
-      <footer className="footer">价值雷达 · 作者：Guangming</footer>
+      <footer className="footer">A-share Multi-Strategy Research · 财务筛选与研究信号，不构成交易建议 · 网站归属：Guangming</footer>
     </div>
   </body></html>;
 }
