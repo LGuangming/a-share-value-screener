@@ -62,3 +62,4 @@ export default async function AKShareExperimentalPage() {
       <p>正式每日扫描仍由 <Link href="/">Tushare Pro 页面</Link> 展示，直到其接口权限问题解决。AKShare测试不自动合并进正式排名。</p>
     </div>
   </main>;
+}
