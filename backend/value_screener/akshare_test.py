@@ -124,7 +124,16 @@ def main() -> None:
     if args.publish and (now.weekday() > 4 or now.time() < time(15, 45)):
         raise RuntimeError("Publishing requires a mainland weekday after 15:45 Beijing time; AKShare live spot lacks a verified session date")
 
-    report = scan_codes(AKShareClient(), codes, now.date())
+    try:
+        report = scan_codes(AKShareClient(), codes, now.date())
+    except AKShareError as exc:
+        # Always attach a truthful failure report; never publish fabricated quotes.
+        Path(args.output).write_text(json.dumps({
+            "status": "source_unavailable", "source": "AKShare experimental",
+            "asof": now.date().isoformat(), "sample_codes": codes,
+            "message": str(exc)[:500], "results": []
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        raise
     Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     LOGGER.info("AKShare test: %s quote rows, %s/%s samples with usable balance sheets, %s warnings",
                 report["spot_universe"], report["balancesheets_usable"], len(codes), len(report["failures"]))
