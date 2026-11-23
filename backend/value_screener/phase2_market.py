@@ -37,7 +37,6 @@ CODE = re.compile(r"^\d{6}\.(?:SH|SZ|BJ)$")
 DATE = re.compile(r"^20\d{6}$")
 REQUIRED_POSITIVE = {
     "adj_factor": ("adj_factor",),
-    "stk_limit": ("up_limit", "down_limit"),
     "daily_basic": ("total_mv", "total_share"),
 }
 DAILY_MIN_ROWS = {"adj_factor": 2500, "stk_limit": 2500, "daily_basic": 2500}
@@ -135,7 +134,24 @@ def validate_row(dataset: str, record: dict, day: str):
         if not math.isfinite(val) or val <= 0:
             raise RuntimeError(f"Invalid numeric {dataset}.{col} on {day}")
     if dataset == "stk_limit":
-        if float(record["up_limit"]) < float(record["down_limit"]):
+        # Official source may have no price limit for IPO/relisting sessions
+        # or incomplete exchange data. Preserve zero/NULL without inventing
+        # a valid limit; downstream tradeability must reject these rows.
+        numbers = {}
+        for col in ("up_limit", "down_limit"):
+            raw = record.get(col)
+            if raw in (None, ""):
+                numbers[col] = None
+                continue
+            try:
+                number = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(f"Malformed price limit {col} on {day}") from exc
+            if not math.isfinite(number) or number < 0:
+                raise RuntimeError(f"Invalid price limit {col} on {day}")
+            numbers[col] = number
+        up, down = numbers["up_limit"], numbers["down_limit"]
+        if up is not None and down is not None and up > 0 and down > 0 and up < down:
             raise RuntimeError(f"Crossed limit quotes {day}")
     if dataset == "suspend_d" and record.get("suspend_type") not in ("S", "R"):
         raise RuntimeError(f"Invalid suspension type {day}")
@@ -152,6 +168,7 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
     fields = DATASETS[dataset]
     total = 0
     days_nonempty = 0
+    unknown_limit_rows = 0
     with csv_file.open("w", encoding="utf-8", newline="") as fp:
         writer = csv.writer(fp)
         writer.writerow(fields)
@@ -165,6 +182,10 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
             seen = set()
             for record in records:
                 values = validate_row(dataset, record, day)
+                if dataset == "stk_limit":
+                    if any(record.get(col) in (None, "", 0, 0.0)
+                           for col in ("up_limit", "down_limit")):
+                        unknown_limit_rows += 1
                 key = (values[0], values[1]) + (
                     (values[2],) if dataset == "suspend_d" else ()
                 )
@@ -207,6 +228,7 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
         "year": year, "month": month, "fields": list(fields),
         "rows": count, "sessions": len(days),
         "nonempty_sessions": days_nonempty,
+        "unusable_limit_rows": unknown_limit_rows if dataset == "stk_limit" else None,
         "min_session": days[0], "max_session": days[-1],
         "sha256": sha, "parquet_bytes": pq_file.stat().st_size,
         "object_key": f"{prefix(dataset, year)}/month={month}.parquet",
