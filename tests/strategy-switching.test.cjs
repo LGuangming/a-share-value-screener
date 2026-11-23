@@ -165,17 +165,42 @@ test("strategy selector has compact spacing without hiding its different paramet
   assert.match(css,/overflow-x:auto;overscroll-behavior-x:contain/);
 });
 
-test("review table rows stay compact and reasons display two entries plus a correct extra count",()=>{
+test("review table displays as many complete reasons as fit on two lines",()=>{
   const page=read("app/signals/page.tsx");
-  const css=read("app/globals.css");
-  assert.match(page,/review\.reasons\.slice\(0,2\)/);
-  assert.match(page,/review\.reasons\.length > 2/);
-  assert.match(page,/review\.reasons\.length-2/);
-  assert.match(page,/title=\{review\.reasons\.map\(reason => reason\.label\)\.join/);
-  assert.match(css,/\.review-table tbody tr\{height:74px;\}/);
-  assert.match(css,/\.review-table tbody td\{height:74px;padding:9px 12px;\}/);
-  assert.match(css,/grid-template-rows:repeat\(2,20px\)/);
-  assert.match(css,/\.review-more\{grid-column:2;grid-row:2;/);
+  const client=read("components/review-reasons.tsx");
+  const css=read("app/theme-orange.css");
+  assert.match(page,/import ReviewReasons from/);
+  assert.match(page,/<ReviewReasons reasons=\{review\.reasons\.map/);
+  assert.match(client,/new ResizeObserver\(update\)/);
+  assert.match(client,/if \(line > 2\) return false/);
+  assert.match(client,/const hiddenCount = reasons\.length - visibleCount/);
+  assert.match(client,/另有\{hiddenCount\}项/);
+  assert.match(client,/title=\{reasons\.map\(reason => reason\.label\)\.join/);
+  assert.match(css,/\.review-table tbody tr\{height:72px;\}/);
+  assert.match(css,/\.review-reasons \{/);
+  assert.match(css,/gap:2px 4px/);
+  assert.match(css,/\.review-table th:nth-child\(6\)\{width:31%;\}/);
+});
+
+test("strategy center cards do not force a fixed description height or bottom-pinned link",()=>{
+  const page=read("app/strategies/page.tsx");
+  const css=read("app/theme-orange.css");
+  assert.match(page,/className="strategy-catalog-card"/);
+  assert.match(css,/\.strategy-catalog-card p \{min-height:0;/);
+  assert.match(css,/\.strategy-catalog-card>\.inline-link \{margin-top:1px;\}/);
+  assert.match(css,/\.strategy-catalog-grid \{align-items:start;grid-auto-rows:max-content;/);
+});
+
+test("PwC-inspired orange is the UI accent, with semantic risk colors preserved",()=>{
+  const theme=read("app/theme-orange.css");
+  const layout=read("app/layout.tsx");
+  assert.match(layout,/import "\.\/theme-orange\.css"/);
+  assert.match(theme,/--green: #D04A02;/);
+  assert.match(theme,/--orange: #EB8C00;/);
+  assert.match(theme,/\.nav-link\.is-active/);
+  assert.match(theme,/\.hero-strip \{/);
+  assert.match(theme,/\.review-conclusion-pass/);
+  assert.match(theme,/\.review-conclusion-block/);
 });
 
 test("screener view switches never update Next.js searchParams or remount the loading fallback",()=>{
