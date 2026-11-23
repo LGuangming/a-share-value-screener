@@ -51,3 +51,39 @@ test("database queries are strategy-keyed, cached, and still require published s
 test("loading fallback is present for uncached initial navigation",()=>{
   assert.match(read("app/loading.tsx"),/正在加载研究数据/);
 });
+
+test("Net-Net is the default while explicit URL selection remains navigable",()=>{
+  const sw=read("components/strategy-switch.tsx");
+  assert.match(sw,/findStrategy\(id \?\? ""\)\?\.id \?\? "netnet_v1"/);
+  assert.doesNotMatch(sw,/sessionStorage\.getItem/);
+  const nav=read("components/nav.tsx");
+  assert.match(nav,/href === "\/methodology"/);
+  assert.doesNotMatch(nav,/sessionStorage\.getItem/);
+});
+
+test("screening methods are per strategy and carry explicit research limitations",()=>{
+  const page=read("app/methodology/page.tsx");
+  const method=read("components/strategy-methodology.tsx");
+  assert.match(page,/<StrategySwitch mode="methodology"/);
+  for(const id of ["netnet_v1","ma_trend_research_v0","oversold_reversion_v0","quality_momentum_v0"]){
+    assert.ok(method.includes(id),"Missing strategy guide: "+id);
+  }
+  assert.match(method,/策略尚未正式实现|研究规则|计划开发|尚未/);
+});
+
+test("loading and screen errors do not pretend the saved Net-Net results are zero",()=>{
+  const data=read("lib/data.ts");
+  const page=read("app/page.tsx");
+  assert.match(data,/screeningRowsStatus/);
+  assert.match(data,/不能将其视为筛选结果为零/);
+  assert.match(page,/scan\.error/);
+  assert.match(page,/历史筛选结果暂不可用/);
+});
+
+test("route and strategy change animations respect reduced-motion",()=>{
+  assert.match(read("app/template.tsx"),/route-transition/);
+  const css=read("app/globals.css");
+  assert.match(css,/@keyframes route-fade-in/);
+  assert.match(css,/@keyframes strategy-fade-in/);
+  assert.match(css,/prefers-reduced-motion/);
+});
