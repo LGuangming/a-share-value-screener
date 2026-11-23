@@ -197,7 +197,7 @@ PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 
 本阶段单独增加：Neon容量**只读**审计工作流；2025年全市场Tushare历史日线
 按月ZSTD Parquet归档原型；通用Python持仓/交易成本/T+1模拟内核及自动测试。
-2025年样本**默认只保存在7天后过期的GitHub Actions临时Artifact**；
+当前仓库是公开的，因此仅把 `manifest.json` 体积/校验信息保存为7天后过期的GitHub Artifact，**不公开上传完整历史行情**；完整Parquet只在临时运行器中保留，除非已配置私有对象存储；
 未配置私有对象存储前，不宣称已实现永久历史仓库。通过
 `BACKTEST_ARCHIVE_UPLOAD=true` 与显式 `OBJECT_STORE_*` 配置后才允许上传。
 程序不会把多年历史行情写进Neon，未来正式回测须先补齐历史ST、财报公告日、

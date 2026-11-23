@@ -184,8 +184,7 @@ The standalone capacity audit checks current Neon storage **read-only**. The
 historical 2025 market prototype fetches all completed market sessions into
 monthly ZSTD Parquet partitions, verifies counts and SHA-256 and runs an
 **engineering-only** 5/10/20-session portfolio kernel smoke test. No historical
-market rows are inserted into Neon. By default GitHub keeps the exported files
-as a **7-day temporary artifact only**. Long-term private S3-compatible storage
+market rows are inserted into Neon. Because this repository is public, GitHub publishes **only the manifest** as a 7-day temporary artifact; the full Parquet data remains on the runner unless a private bucket is configured. Long-term private S3-compatible storage
 needs explicit `OBJECT_STORE_*` credentials plus `BACKTEST_ARCHIVE_UPLOAD=true`
 and should first pass real capacity and compression checks.
 

@@ -41,11 +41,13 @@ jobs:
         run: python -m value_screener.history_parquet --year "$HISTORY_YEAR" --out "artifacts/history-$HISTORY_YEAR"
       - name: Real-price backtest kernel smoke test (engineering only)
         run: python -m value_screener.backtest_smoke --root "artifacts/history-$HISTORY_YEAR"
-      - name: Publish temporary Parquet prototype artifact
+      # Repo is public. Do not expose complete provider-licensed price data
+      # as a GitHub artifact; only the metadata/checksum report is published.
+      # Persistent raw Parquet needs a separately configured PRIVATE bucket.
+      - name: Publish validation manifest (no market data)
         uses: actions/upload-artifact@v4
         with:
-          name: history-parquet-${{ env.HISTORY_YEAR }}
-          path: artifacts/history-${{ env.HISTORY_YEAR }}/
+          name: history-manifest-${{ env.HISTORY_YEAR }}
+          path: artifacts/history-${{ env.HISTORY_YEAR }}/manifest.json
           if-no-files-found: error
           retention-days: 7
-          compression-level: 0

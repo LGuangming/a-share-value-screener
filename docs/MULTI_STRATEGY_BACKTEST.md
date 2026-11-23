@@ -16,7 +16,7 @@
 - Tushare官方 `trade_cal` 枚举全年开放交易日；`daily` 每个交易日获取全市场开高低收、成交量和成交额。
 - 每日校验最少3000只、日期、OHLC逻辑及数据完整性；如果某天不足会报错，**不上传冒充完整的数据**。
 - 每月生成一个ZSTD Parquet（`prices/year=2025/month=MM.parquet`），生成含记录数、日期范围、大小与SHA-256的 `manifest.json`，写明价格未复权。
-- 默认存放在GitHub Actions临时artifact中，**7天后过期，不可当永久归档**，也不进入Neon。
+- 仓库是公开的，长期**不允许**将完整行情上传为公开Artifact；仅将体积、SHA和日期等 `manifest.json` 统计作为临时Artifact保留7天，完整Parquet只在Actions运行器上暂存，除非已经配置私有对象存储；无数据库写入。
 - 只有显式配置仓库变量 `BACKTEST_ARCHIVE_UPLOAD=true`、`OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_ACCESS_KEY`、`OBJECT_STORE_SECRET_KEY` 后，才会向私有S3兼容对象存储上传并核对对象字节大小。应首先确保Bucket实际为私有，且S3密钥权限限定为该Bucket。
 - 尚未接入Neon Object Storage时只使用临时artifact，不创建永久付费存储，也不会冒称已归档。扩展到2020年之前先根据2025实际压缩率和可用额度重新计算总大小。
 
