@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Nav from "@/components/nav";
 import "./globals.css";
+import "./theme-orange.css";
 
 export const metadata: Metadata = {
   title: { default: "价值雷达 | A股多策略选股", template: "%s | 价值雷达" },
