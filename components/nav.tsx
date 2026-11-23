@@ -52,7 +52,6 @@ export default function Nav() {
   return <>
     <aside className="sidebar">
       <Link className="brand" href={strategyHref("/")}>
-        <span className="brand-icon"><Radar size={24} strokeWidth={1.9}/></span>
         <span className="brand-text"><strong>价值雷达</strong><small>MULTI-STRATEGY / A-SHARE</small></span>
       </Link>
       <div className="nav-caption">RESEARCH WORKSPACE</div>
@@ -72,7 +71,7 @@ export default function Nav() {
       </div>
     </aside>
     <div className="mobile-header">
-      <Link className="mobile-brand" href={strategyHref("/")}><Radar size={20}/> 价值雷达</Link>
+      <Link className="mobile-brand" href={strategyHref("/")}>价值雷达</Link>
       <SlidersHorizontal size={18} className="muted"/>
     </div>
     <nav className="mobile-nav" aria-label="移动端导航">
