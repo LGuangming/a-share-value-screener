@@ -186,7 +186,7 @@ def main() -> None:
     try:
         stocks = [{"ts_code": r["ts_code"], "name": r["name"], "industry": None, "market": "主板"}
                   for r in report["results"]]
-        store.upsert_stocks(stocks)
+        store.ensure_experiment_stocks(stocks)
         stored = store.publish(now.date(), run_id, report["results"], metrics,
                                strategy=TEST_STRATEGY)
         LOGGER.info("Published %d AKShare rows under %s. Formal Tushare snapshots untouched.",
