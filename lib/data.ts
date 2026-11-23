@@ -20,11 +20,6 @@ export type Snapshot = {
     candidate_count?: number;
     financial_data_gap?: number;
     financial_successes?: number;
-    spot_universe?: number;
-    sample_available?: number;
-    balancesheets_usable?: number;
-    strict_book_candidates_unverified?: number;
-    sample_codes?: string[];
   };
 };
 
@@ -82,13 +77,13 @@ function normalizeRow(raw: Record<string, unknown>): ScreenerRow {
   };
 }
 
-export async function latestSnapshot(jobType: "daily_scan" | "akshare_test" = "daily_scan"): Promise<{ snapshot: Snapshot | null; error: string | null }> {
+export async function latestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
   const db = connection();
   if (!db) return { snapshot: null, error: "尚未配置数据库连接" };
   try {
     const rows = await db`
       SELECT trade_date, finished_at, metrics
-      FROM job_runs WHERE job_type=${jobType} AND status='success'
+      FROM job_runs WHERE job_type='daily_scan' AND status='success'
       ORDER BY finished_at DESC LIMIT 1
     `;
     if (!rows.length) return { snapshot: null, error: "数据库已连接，但尚未发布成功的筛选结果" };
@@ -102,7 +97,7 @@ export async function latestSnapshot(jobType: "daily_scan" | "akshare_test" = "d
   }
 }
 
-export async function screeningRows(day: string, strategy: "netnet_v1" | "akshare_test_v1" = "netnet_v1"): Promise<ScreenerRow[]> {
+export async function screeningRows(day: string): Promise<ScreenerRow[]> {
   const db = connection();
   if (!db || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
   try {
@@ -110,7 +105,7 @@ export async function screeningRows(day: string, strategy: "netnet_v1" | "akshar
       SELECT r.*,s.name,s.industry,s.market
       FROM screen_results r JOIN stocks s USING(ts_code)
       JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
-      WHERE r.trade_date=${day} AND r.strategy=${strategy}
+      WHERE r.trade_date=${day} AND r.strategy='netnet_v1'
       ORDER BY r.is_candidate DESC, r.ncav_coverage DESC NULLS LAST
       LIMIT 3000
     `;

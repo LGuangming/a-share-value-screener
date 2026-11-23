@@ -133,26 +133,6 @@ PYTHONPATH=backend python -m value_screener.cli scan
 
 在Windows PowerShell中，需要先设置 `$env:PYTHONPATH='backend'`，并在**本机环境**设置对应数据库URL和Tushare Token；不要将真实密钥写入脚本或提交到GitHub。
 
-## 5A. AKShare独立测试模式（保留Tushare Pro）
-
-- GitHub Actions → [AKShare Experimental Test](.github/workflows/akshare-test.yml) → Run workflow。
-- `codes`：默认 `000910,600051,002462`，可以填1–8只沪深A股股票代码。
-- `mode=smoke`：仅测试AKShare联网获取样本股票的价格、市值及三张财务报表，生成 `akshare-test-results.json` Artifact；**不需要Tushare Token、不改动Neon数据库、不改变正式筛选结果**。
-- `mode=publish`：需GitHub Secret `DATABASE_URL` 有写入权限，且为北京时间工作日15:45之后；将实验结果写入同一Neon库的隔离记录 `job_type=akshare_test`、`strategy=akshare_test_v1`。在Vercel网站 `/akshare-test` 页面查看。
-- **行情口径**：优先从AKShare `stock_individual_info_em` 获取指定股票的“最新”和“总市值”，而不是抓全市场push2接口。样本行情没有可独立核实的交易日标签，PB也可能缺失；这些问题会明确标记，**不能当作收盘行情或交易信号**。
-- **财报口径**：采用东方财富 `stock_balance_sheet_by_report_em`、`stock_profit_sheet_by_report_em`、`stock_cash_flow_sheet_by_report_em`，仅接受含实际公告日期且公告日早于筛选日期的记录。合并口径等项目缺失时标记为待核实；不会凭空填报表数字。
-- Github托管机器访问国内行情源时可能遭遇IP限流（例如 `Push2RateLimitError`）或网页字段变化。如发生此情况，**视为供应商接口失败，不会产生虚假的股票数据**。可以在国内网络环境用同一代码手工运行对照测试。
-- 本模式不是全A股扫描，也不会自动代替每天19:30的Tushare正式任务。
-
-本机独立测试（不需数据库）：
-
-```bash
-pip install -r backend/requirements-akshare.txt
-PYTHONPATH=backend python -m value_screener.akshare_test --codes 000910,600051,002462
-```
-
-如需将实验结果写入Neon（会更新实验页，但不会修改正式Tushare榜单），额外设置 `DATABASE_URL` 并添加 `--publish` 参数。**建议先运行smoke核查数据质量，再执行publish。**
-
 ## 6. 验证运行与常见问题
 
 - `https://你的网站/api/health`：检查最近成功发布的扫描日期，超出5日返回告警状态；节假日误报需结合交易日历判断。
