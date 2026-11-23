@@ -1,1 +1,2 @@
 One-shot 2026-11-23 phase-2 research data API permission probe. Never print secrets. Do not store raw market or financial records.
+Second pass: test ordinary per-stock financial APIs and report disclosure permissions; do not copy records to logs.
