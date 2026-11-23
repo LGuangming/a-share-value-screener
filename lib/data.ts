@@ -93,14 +93,14 @@ function normalizeRow(raw: Record<string, unknown>): ScreenerRow {
 
 async function readLatestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
   const db = connection();
-  if (!db) return { snapshot: null, error: "尚未配置数据库连接" };
+  if (!db) return { snapshot: null, error: "筛选数据源暂不可用" };
   try {
     const rows = await db`
       SELECT trade_date, finished_at, metrics
       FROM job_runs WHERE job_type='daily_scan' AND status='success'
       ORDER BY finished_at DESC LIMIT 1
     `;
-    if (!rows.length) return { snapshot: null, error: "数据库已连接，但尚未发布成功的筛选结果" };
+    if (!rows.length) return { snapshot: null, error: "暂无已发布的筛选结果" };
     const r = rows[0];
     return { snapshot: { trade_date: dateString(r.trade_date) ?? "",
       finished_at: (r.finished_at instanceof Date ? r.finished_at.toISOString() : String(r.finished_at)),
@@ -155,7 +155,7 @@ export async function latestSnapshot(): Promise<{ snapshot: Snapshot | null; err
   try {
     return await cachedSnapshot();
   } catch {
-    return { snapshot: null, error: "网站暂时无法读取数据库，已发布的筛选结果并未删除。请稍后重试。" };
+    return { snapshot: null, error: "筛选数据暂不可用，请稍后重试。" };
   }
 }
 export async function screeningRowsStatus(day: string, strategy: string = "netnet_v1"):
@@ -163,7 +163,7 @@ export async function screeningRowsStatus(day: string, strategy: string = "netne
   try {
     return { rows: await cachedScreening(day, strategy), error: null };
   } catch {
-    return { rows: [], error: "股票结果读取失败，不能将其视为筛选结果为零。" };
+    return { rows: [], error: "股票筛选结果暂不可用，请稍后重试。" };
   }
 }
 export async function screeningRows(day: string, strategy: string = "netnet_v1"): Promise<ScreenerRow[]> {
