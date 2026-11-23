@@ -1,11 +1,6 @@
 name: A-Share Recent Price History Backfill
 
 on:
-  # One-time 160-day extension, removed after the job starts.
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/history-160-20261123.txt'
   workflow_dispatch:
     inputs:
       days:
