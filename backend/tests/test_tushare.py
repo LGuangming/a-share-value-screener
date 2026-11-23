@@ -10,6 +10,8 @@ class FakeHTTP:
     def __init__(self, body):
         self.body = io.BytesIO(json.dumps(body).encode())
     def __enter__(self):
+        # Each mocked HTTP request must start with fresh response bytes.
+        self.body.seek(0)
         return self.body
     def __exit__(self, *args):
         pass
