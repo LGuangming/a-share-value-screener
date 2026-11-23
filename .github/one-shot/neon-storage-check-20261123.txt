@@ -1,1 +1,0 @@
-Temporary one-time check of private Neon Object Storage: PUT, GET+SHA256, DELETE. No historic data download or database changes.
