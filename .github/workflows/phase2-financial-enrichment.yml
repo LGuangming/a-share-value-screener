@@ -1,0 +1,88 @@
+name: A-Share Phase 2 Financial and Disclosure Enrichment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/one-shot/phase2-financial-start-20261123.txt'
+
+permissions:
+  contents: read
+
+# This is deliberately serialized behind the market enrichment workflow.
+concurrency:
+  group: a-share-backtest-history
+  cancel-in-progress: false
+
+jobs:
+  disclosure-and-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONPATH: backend
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      TUSHARE_API_SOURCE: official
+      NEON_STORAGE_ENDPOINT: ${{ secrets.NEON_STORAGE_ENDPOINT }}
+      NEON_STORAGE_BUCKET: ${{ vars.NEON_STORAGE_BUCKET }}
+      NEON_STORAGE_ACCESS_KEY_ID: ${{ secrets.NEON_STORAGE_ACCESS_KEY_ID }}
+      NEON_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.NEON_STORAGE_SECRET_ACCESS_KEY }}
+      NEON_STORAGE_REGION: ${{ vars.NEON_STORAGE_REGION }}
+      NEON_STORAGE_PRIVATE_CONFIRMED: ${{ vars.NEON_STORAGE_PRIVATE_CONFIRMED || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install archive dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2'
+      - name: Archive 2020-2025 reporting calendars
+        run: python -m value_screener.phase2_disclosures --start-year 2020 --end-year 2025
+      - name: Validate a 50-stock financial snapshot pilot
+        run: python -m value_screener.phase2_financial --start-index 0 --max-codes 50
+
+  financial-shards:
+    needs: disclosure-and-pilot
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - start: 0
+            stop: 1500
+          - start: 1500
+            stop: 3000
+          - start: 3000
+            stop: 4500
+          - start: 4500
+            stop: 6000
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      PYTHONPATH: backend
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      TUSHARE_API_SOURCE: official
+      NEON_STORAGE_ENDPOINT: ${{ secrets.NEON_STORAGE_ENDPOINT }}
+      NEON_STORAGE_BUCKET: ${{ vars.NEON_STORAGE_BUCKET }}
+      NEON_STORAGE_ACCESS_KEY_ID: ${{ secrets.NEON_STORAGE_ACCESS_KEY_ID }}
+      NEON_STORAGE_SECRET_ACCESS_KEY: ${{ secrets.NEON_STORAGE_SECRET_ACCESS_KEY }}
+      NEON_STORAGE_REGION: ${{ vars.NEON_STORAGE_REGION }}
+      NEON_STORAGE_PRIVATE_CONFIRMED: ${{ vars.NEON_STORAGE_PRIVATE_CONFIRMED || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install archive dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2'
+      - name: Checkpoint verified 2018+ issuer financial history
+        env:
+          START_INDEX: ${{ matrix.start }}
+          STOP_INDEX: ${{ matrix.stop }}
+        run: |
+          python -m value_screener.phase2_financial \
+            --all --max-codes 50 --start-index "$START_INDEX" --stop-index "$STOP_INDEX"
