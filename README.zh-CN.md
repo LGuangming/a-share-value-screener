@@ -1,5 +1,23 @@
 # A股价值雷达 v0.1｜中文部署说明
 
+
+## 便捷入口：手动发布网站（不随 Git 推送自动部署）
+
+**固定发布网页：** [价值雷达 — 手动部署](https://github.com/LGuangming/a-share-value-screener/actions/workflows/manual-vercel-deploy.yml)
+
+访问该网页，使用有仓库写入权限的 GitHub 账号登录，在右侧点击 **Run workflow**，选择 `main` 并再次点击 **Run workflow**。操作会调用 Vercel 生产环境的私有 Deploy Hook；页面中的运行记录会显示 Hook 是否接受请求。请到 [Vercel Deployments](https://vercel.com/lguangmings-projects/a-share-value-screener/deployments) 确认最终状态为 READY；**Hook接受请求不等于生产构建成功**。
+
+**首次使用前只需配置一次：**
+
+1. 到 Vercel 项目 **Settings → Git → Deploy Hooks**，新建 Hook，名称可设为 `manual-main-production`，目标分支设为 `main`。
+2. 复制新生成的私密 Hook URL。把它保存为 GitHub 仓库 **Settings → Secrets and variables → Actions → New repository secret** 中的 `VERCEL_DEPLOY_HOOK_URL`，不要公开，也不要发到聊天、README、截图或网页前端。
+3. GitHub Actions 中再次打开上述固定发布网页，点击 **Run workflow** 即可按需请求生产部署。
+
+`vercel.json` 仍使用 `git.deploymentEnabled=false`，因此普通 `git push` 不会触发 Vercel 自动部署。不要改用旧的 `github.enabled=false`，后者会禁用 Deploy Hook。该网页只有登录并具有足够仓库权限的用户才能手动启动工作流，避免向公众暴露部署接口。部署受 Vercel 账户额度限制；若额度用尽，需在限额恢复后再启动。
+
+**无需等待 Hook 配置也可手动部署：** 打开同一 Vercel Deployments 页面，使用 **Create Deployment**，指定 `main`，然后确认创建；这是一条独立的手动发布路径。
+
+
 这是已完成代码的**第一版MVP**，不是已部署上线的成品。主要功能：每日净流动资产折价初筛、低价股列表、基本面初步评价、风险标记、交易观察。回测页面仅为后续开发占位，不能提供实盘已验证的交易建议。
 
 ## 0. 当前状态
