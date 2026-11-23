@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Activity, BookOpenText, ChartNoAxesCombined, Database, FlaskConical, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
@@ -9,7 +13,49 @@ const links = [
   { href: "/methodology", label: "筛选方法", Icon: BookOpenText },
 ];
 
+function currentLink(pathname: string): string {
+  // Exact root match; nested feature routes stay with their parent menu.
+  // Stock details belong to the daily screener.
+  const target = links.find(({ href }) =>
+    href !== "/" && (pathname === href || pathname.startsWith(`${href}/`))
+  );
+  return target?.href ?? "/";
+}
+
 export default function Nav() {
+  const pathname = usePathname();
+  const activeHref = currentLink(pathname);
+  const desktopNavRef = useRef<HTMLElement>(null);
+  const [indicator, setIndicator] = useState<{ top: number; height: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const nav = desktopNavRef.current;
+    if (!nav) return;
+
+    const measure = () => {
+      const selected = nav.querySelector<HTMLElement>(".nav-link.is-active");
+      if (!selected) {
+        setIndicator(null);
+        return;
+      }
+      const parentRect = nav.getBoundingClientRect();
+      const selectedRect = selected.getBoundingClientRect();
+      setIndicator({ top: selectedRect.top - parentRect.top + nav.scrollTop, height: selectedRect.height });
+    };
+
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (observer) {
+      observer.observe(nav);
+      for (const item of nav.querySelectorAll(".nav-link")) observer.observe(item);
+    }
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeHref]);
+
   return <>
     <aside className="sidebar">
       <Link className="brand" href="/">
@@ -17,8 +63,20 @@ export default function Nav() {
         <span className="brand-text"><strong>价值雷达</strong><small>VALUE RADAR / A-SHARE</small></span>
       </Link>
       <div className="nav-caption">RESEARCH WORKSPACE</div>
-      <nav className="nav-main" aria-label="主导航">
-        {links.map(({href,label,Icon}) => <Link key={href} href={href} className="nav-link"><Icon size={18}/><span>{label}</span></Link>)}
+      <nav ref={desktopNavRef} className="nav-main" aria-label="主导航">
+        <span
+          aria-hidden="true"
+          className={`nav-active-indicator${indicator ? " is-ready" : ""}`}
+          style={indicator ? { transform: `translateY(${indicator.top}px)`, height: indicator.height } : undefined}
+        />
+        {links.map(({ href, label, Icon }) => {
+          const isActive = activeHref === href;
+          return <Link key={href} href={href}
+            className={`nav-link${isActive ? " is-active" : ""}`}
+            aria-current={isActive ? "page" : undefined}>
+            <Icon size={18}/><span>{label}</span>
+          </Link>;
+        })}
       </nav>
       <div className="sidebar-bottom">
         <div className="sidebar-info"><Database size={16}/><span>正式：Tushare Pro · 实验：AKShare</span></div>
@@ -30,7 +88,14 @@ export default function Nav() {
       <SlidersHorizontal size={18} className="muted"/>
     </div>
     <nav className="mobile-nav" aria-label="移动端导航">
-      {links.map(({href,label,Icon}) => <Link key={href} href={href}><Icon size={17}/><span>{label}</span></Link>)}
+      {links.map(({ href, label, Icon }) => {
+        const isActive = activeHref === href;
+        return <Link key={href} href={href}
+          className={isActive ? "is-active" : undefined}
+          aria-current={isActive ? "page" : undefined}>
+          <Icon size={17}/><span>{label}</span>
+        </Link>;
+      })}
     </nav>
   </>;
 }
