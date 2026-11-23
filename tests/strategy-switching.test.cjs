@@ -11,7 +11,8 @@ test("both screener and trading observation use a shared strategy switch",()=>{
   assert.match(sw,/strategies\.map/);
   assert.match(sw,/selected\.parameters\.map/);
   assert.match(sw,/selected\.requirements\.map/);
-  assert.match(sw,/sessionStorage\.setItem/);
+  assert.match(sw,/window\.history\.replaceState/);
+  assert.match(sw,/netnet_v1/);
   assert.match(sw,/strategy-state/);
 });
 
