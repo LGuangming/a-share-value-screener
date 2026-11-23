@@ -31,7 +31,8 @@ test("screener tab changes and filtering are client-only and paginated",()=>{
   assert.match(s,/useMemo/);
   assert.match(s,/setView\(/);
   assert.match(s,/aria-selected=\{view === key\}/);
-  assert.match(s,/window\.history\.replaceState/);
+  assert.doesNotMatch(s,/window\.history\.replaceState/);
+  assert.match(s,/Filter views and keystrokes are local-only UI state/);
   assert.match(s,/filtered\.slice\(0,visibleCount\)/);
   assert.match(s,/setVisibleCount\(n=>n\+100\)/);
   assert.doesNotMatch(s,/router\.refresh\(\)|router\.push\(/);
@@ -49,7 +50,10 @@ test("database queries are strategy-keyed, cached, and still require published s
 });
 
 test("loading fallback is present for uncached initial navigation",()=>{
-  assert.match(read("app/loading.tsx"),/正在加载研究数据/);
+  const loading = read("app/loading.tsx");
+  assert.match(loading,/route-loading-indicator/);
+  assert.doesNotMatch(loading,/A-SHARE RESEARCH WORKSPACE/);
+  assert.doesNotMatch(loading,/正在加载研究数据/);
 });
 
 test("Net-Net is the default while explicit URL selection remains navigable",()=>{
@@ -172,4 +176,16 @@ test("review table rows stay compact and reasons display two entries plus a corr
   assert.match(css,/\.review-table tbody td\{height:74px;padding:9px 12px;\}/);
   assert.match(css,/grid-template-rows:repeat\(2,20px\)/);
   assert.match(css,/\.review-more\{grid-column:2;grid-row:2;/);
+});
+
+test("screener view switches never update Next.js searchParams or remount the loading fallback",()=>{
+  const screen = read("components/screener-results.tsx");
+  const loader = read("app/loading.tsx");
+  const css = read("app/globals.css");
+  assert.match(screen,/function setFilter\(_param: string, _value: string, update: \(\) => void\)/);
+  assert.match(screen,/onClick=\{\(\) => setFilter\("view",key,\(\)=>setView\(key\)\)\}/);
+  assert.doesNotMatch(screen,/window\.history\.replaceState/);
+  assert.match(loader,/route-loading-indicator/);
+  assert.doesNotMatch(loader,/A-SHARE RESEARCH WORKSPACE/);
+  assert.match(css,/\.route-loading-indicator\{position:fixed/);
 });
