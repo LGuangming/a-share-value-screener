@@ -51,7 +51,7 @@ git push -u origin main
 3. 进入仓库 Actions → **A-Share Daily Net-Net Scan** → Run workflow，手动执行第一次扫描。
 4. 运行记录中应出现行情股票数、财报获取数量、严格候选数量，以及财报未补齐数量。
 
-注意：每天默认最多补30家公司的三张报表，属于**逐步补齐数据**，不是第一天就能完整扫描数千家上市公司。如果你的Tushare权限支持VIP批量报表，可以使用下文所述的财报批量初始化。
+注意：**每日行情扫描已经与财务报表采集解耦**。每日任务只使用3个基础接口，结合Neon已保存的财务数据计算NCAV；未补齐财报会保留`DATA_GAP`或相应风险标记，不会伪造数据。另有独立`A-Share Financial Statement Refresh`用于增量补齐，默认每批5家公司（每家3个财务API）。
 
 ## 3A. Tushare官方API与第三方中转API双模式
 
@@ -62,7 +62,7 @@ git push -u origin main
 1. GitHub仓库 → **Settings → Secrets and variables → Actions → Secrets**：新增 `TUSHARE_RELAY_TOKEN`，填中转服务实际要求的Token；原有 `TUSHARE_TOKEN` 不变。
 2. GitHub Actions → [A-Share Daily Net-Net Scan](.github/workflows/daily-scan.yml) → **Run workflow**。
 3. 将 `api_source` 设置为 `relay`，`check_api_only` 设为 `true`，先检查 `trade_cal`、`stock_basic`，如为交易日还检查 `daily_basic`，**不写入Neon**。
-4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行完整扫描。**建议先设 `financial_budget=0` 验证全市场行情；确认无429后再设5、10逐步提高。** 出现接口缺失或数据不完整时会失败，不伪造选股结果。
+4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行**仅含行情与缓存财报筛选**的每日任务；财务采集请使用独立`A-Share Financial Statement Refresh`工作流，建议从`budget=1`或`5`开始。行情不完整时仍会失败，不伪造选股结果。
 5. 想恢复官方接口，将 `api_source` 切回 `official`。工作日北京时间19:30的自动任务始终按默认 `official` 执行。
 
 默认中转网址已内置；如果服务方提供HTTPS或更换域名，可在GitHub Actions的 **Variables** 添加 `TUSHARE_RELAY_URL`。仅在显式选择中转的运行中生效。
@@ -82,6 +82,25 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 
 `check-api` 不写数据库，也不需要 `DATABASE_URL`。 `scan`、`bootstrap-prices`、`bootstrap-financials` 均采用相同的数据源选择配置。官方Token和中转Token都只能放在机密变量中，不能放在GitHub代码、URL参数或公开日志中。
 
+## 3B. 每日扫描与独立财务增量更新（2026-11-23升级）
+
+为避免中转接口`balancesheet`、`income`、`cashflow`反复返回429而令当日选股失败，现拆分两个GitHub Actions工作流：
+
+| 任务 | 链接 | 默认调用 |
+|---|---|---|
+| A-Share Daily Net-Net Scan | [每日行情与筛选](.github/workflows/daily-scan.yml) | 交易日历、股票基本信息、每日行情，各1次；**不下载财报** |
+| A-Share Financial Statement Refresh | [独立财务补齐](.github/workflows/financial-refresh.yml) | 每批默认5家公司，最多约15次财务请求（未计失败重试） |
+
+**建议的首次执行顺序：**
+
+1. 先运行每日筛选（`api_source=relay`、`check_api_only=false`）。该步骤会更新Neon行情，以缓存中**公告日早于交易日**的财务数据进行NCAV计算，财务缺失即标记为数据缺口。
+2. 如需要补齐财报，打开独立财务工作流 → Run workflow，`api_source=relay`、`budget=1`或`5`。财务API再次429时，只会使**财务工作流**失败，并保留此前已成功写入的个股财报；不会回滚或标记每日行情任务失败。
+3. 财报补齐后需**再运行一次每日筛选**，才会刷新网站的当日已发布NCAV结果；财务任务本身不会直接修改网站上的选股榜单。
+4. 每个失败的股票会写入`financial_fetch_log`，至少隔6小时才会进入新一轮候选财务补齐队列；已成功的股票默认约30天后才会被重新排入刷新队列。当前为按时间和缺口选取的**增量补齐**，尚不是完全基于交易所新公告事件的实时触发。
+5. 如需启用财务自动更新，在仓库Settings → Secrets and variables → Actions → **Variables** 添加 `ENABLE_FINANCIAL_SCHEDULE=true`；开启后工作日北京时间23:00执行。定时默认选择官方Tushare API；需要专门为定时财务任务使用中转时，可以再加 `FINANCIAL_SCHEDULE_API_SOURCE=relay`。由于当前中转经常429，**建议先不要开启定时财务更新**，待服务商稳定后再启用。
+
+每日扫描与财务补齐共用一个GitHub并发组，避免同仓库两项任务同时调用API。此机制不能限制仓库以外使用同一Token的其他客户端。中转地址目前为HTTP，建议服务商提供HTTPS后再考虑常态化自动采集。
+
 ## 4. 在Vercel部署
 
 1. 登录 [Vercel](https://vercel.com/)，选择 Add New → Project → Import Git Repository，选中刚创建的仓库。
@@ -100,7 +119,8 @@ Vercel仅渲染结果，不参与数千只股票数据采集，不需要Tushare 
 pip install -r backend/requirements.txt
 PYTHONPATH=backend python -m value_screener.cli init-db
 PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 110
-PYTHONPATH=backend python -m value_screener.cli scan --financial-budget 50
+PYTHONPATH=backend python -m value_screener.cli scan
+PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 5
 ```
 
 如果有Tushare Pro VIP全市场财务接口权限，建议再执行：
@@ -108,7 +128,7 @@ PYTHONPATH=backend python -m value_screener.cli scan --financial-budget 50
 ```bash
 PYTHONPATH=backend python -m value_screener.cli bootstrap-financials --period 20260930
 PYTHONPATH=backend python -m value_screener.cli bootstrap-financials --period 20260630
-PYTHONPATH=backend python -m value_screener.cli scan --financial-budget 0
+PYTHONPATH=backend python -m value_screener.cli scan
 ```
 
 在Windows PowerShell中，需要先设置 `$env:PYTHONPATH='backend'`，并在**本机环境**设置对应数据库URL和Tushare Token；不要将真实密钥写入脚本或提交到GitHub。
@@ -138,7 +158,7 @@ PYTHONPATH=backend python -m value_screener.akshare_test --codes 000910,600051,0
 - `https://你的网站/api/health`：检查最近成功发布的扫描日期，超出5日返回告警状态；节假日误报需结合交易日历判断。
 - 首页显示“尚未配置数据库”：检查Vercel `DATABASE_READ_URL`。
 - 首页显示“数据库已连接但没有结果”：检查GitHub Actions运行日志，确认首次财务扫描成功。
-- 股票数量偏少：检查Tushare接口权限、财报覆盖率及每日获取预算。**数据缺口不等于没有符合筛选条件的股票。**
+- 股票数量偏少：检查Tushare行情接口、已有财报的覆盖率和独立财务补齐工作流。**数据缺口不等于没有符合筛选条件的股票。**
 - 买入信号显示“历史行情不足”：先运行 `bootstrap-prices` 回填至少50个交易日。
 - 回测页面没有收益：回测引擎尚未开发，不能将技术观察信号误认为已回测策略。
 
