@@ -45,7 +45,7 @@ def build_archive(root,year=2025):
     base.mkdir(parents=True)
     parts=[]
     for month in range(1,13):
-        payload=b"PAR1"+"sample-"+f"{year}-{month}".encode("ascii")
+        payload=b"PAR1"+b"sample-"+f"{year}-{month}".encode("ascii")
         file=base/f"month={month:02d}.parquet"
         file.write_bytes(payload)
         parts.append({
