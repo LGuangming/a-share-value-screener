@@ -281,6 +281,7 @@ def snapshot_universe(s3, bucket, client):
         return
     fields = "ts_code,name,market,list_status,list_date,delist_date"
     all_rows = []
+    excluded = []
     for status in ("L", "D"):
         rows = client.query("stock_basic", {"exchange": "", "list_status": status},
                             fields)
@@ -288,20 +289,27 @@ def snapshot_universe(s3, bucket, client):
             raise RuntimeError(f"Missing stock_basic status={status}")
         for row in rows:
             if not CODE.fullmatch(str(row.get("ts_code") or "")):
-                raise RuntimeError("Invalid stock universe code")
-            all_rows.append(row)
+                excluded.append(row)
+            else:
+                all_rows.append(row)
+    # A few legacy/unrecognized codes can exist in the provider's delisted
+    # records. Preserve them privately rather than silently dropping them.
+    if len(excluded) > 100:
+        raise RuntimeError("Too many unrecognized stock symbols in source universe")
     codes = [row["ts_code"] for row in all_rows]
     if len(set(codes)) != len(codes):
         raise RuntimeError("Duplicate universe codes across statuses")
     doc = {
         "format_version": 1, "dataset": "stock_basic_snapshot",
         "source": "Tushare official", "rows": len(all_rows),
+        "excluded_unrecognized_rows": len(excluded),
+        "excluded_unrecognized_records": excluded,
         "status": "current_snapshot_not_historical",
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "records": all_rows,
     }
     put_manifest(s3, bucket, key, doc)
-    print(f"PHASE2_UNIVERSE status=saved rows={len(all_rows)}", flush=True)
+    print(f"PHASE2_UNIVERSE status=saved rows={len(all_rows)} excluded={len(excluded)}", flush=True)
 
 
 def main():
