@@ -1,9 +1,5 @@
 name: A-Share Backtest Data Permission Probe
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/probe-backtest-permissions-20261123.txt'
   workflow_dispatch:
 permissions:
   contents: read
