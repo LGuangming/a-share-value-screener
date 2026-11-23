@@ -6,9 +6,36 @@ Provider data is experimental and may be blocked or changed upstream.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from contextlib import contextmanager
+import signal
+import threading
 import math
 import re
 from typing import Any
+
+
+@contextmanager
+def _source_deadline(seconds: int = 15):
+    """Bound unreliable upstream calls on Linux CI.
+
+    Signals operate on the main thread only; non-Unix local Python has no
+    alarm support, so the CI workflow also carries a job-level time limit.
+    """
+    if (not hasattr(signal, "setitimer") or
+            threading.current_thread() is not threading.main_thread()):
+        yield
+        return
+    previous = signal.getsignal(signal.SIGALRM)
+    def expired(_signum, _frame):
+        raise TimeoutError("AKShare upstream call deadline reached")
+    signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
 
 
 class AKShareError(RuntimeError):
@@ -173,7 +200,8 @@ class AKShareClient:
             for ts_code in codes:
                 raw_code = ts_code.split(".")[0]
                 try:
-                    info = self.ak.stock_individual_info_em(symbol=raw_code)
+                    with _source_deadline():
+                        info = self.ak.stock_individual_info_em(symbol=raw_code)
                     rows = self._rows(info, "stock_individual_info_em")
                     values = {str(r.get("item")): r.get("value") for r in rows}
                     if str(values.get("股票代码", raw_code)).zfill(6) != raw_code:
@@ -198,7 +226,8 @@ class AKShareClient:
 
         # Optional full-market quote check; kept separate from bounded tests.
         try:
-            raw = self.ak.stock_zh_a_spot_em()
+            with _source_deadline():
+                raw = self.ak.stock_zh_a_spot_em()
             rows = self._rows(raw, "stock_zh_a_spot_em")
             result = normalize_spot(rows)
         except AKShareError:
@@ -235,7 +264,9 @@ class AKShareClient:
                 kwargs = {"symbol": symbol, "start_date": start, "end_date": end, "adjust": ""}
                 if endpoint.endswith("_sina"):
                     kwargs["period"] = "daily"
-                rows = self._rows(func(**kwargs), endpoint)
+                with _source_deadline():
+                    raw_history = func(**kwargs)
+                rows = self._rows(raw_history, endpoint)
                 valid = []
                 for row in rows:
                     fields = {str(k).lower(): v for k, v in row.items()}
@@ -263,7 +294,8 @@ class AKShareClient:
         method = STATEMENT_FUNCTIONS[kind]
         sym = code.split(".")[1] + code.split(".")[0]
         try:
-            raw = getattr(self.ak, method)(symbol=sym)
+            with _source_deadline():
+                raw = getattr(self.ak, method)(symbol=sym)
             rows = self._rows(raw, method)
         except AKShareError:
             raise
