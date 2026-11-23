@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test:review": "node --test tests/review.test.cjs",
     "test:price-history": "node --test tests/price-history.test.cjs",
-    "test:strategies": "node --test tests/strategy-catalog.test.cjs"
+    "test:strategies": "node --test tests/strategy-catalog.test.cjs tests/strategy-switching.test.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
