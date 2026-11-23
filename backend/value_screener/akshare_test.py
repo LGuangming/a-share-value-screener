@@ -46,7 +46,7 @@ def code_list(raw: str) -> list[str]:
 
 
 def scan_codes(client: AKShareClient, codes: list[str], asof: date) -> dict:
-    spot = client.spot()
+    spot = client.spot(codes)
     results: list[dict] = []
     failures: list[dict] = []
     financial_ok = 0
@@ -81,6 +81,8 @@ def scan_codes(client: AKShareClient, codes: list[str], asof: date) -> dict:
         record["flags"] += sorted(set(flags))
         record["flags"].append("AKSHARE_EXPERIMENTAL")
         record["flags"].append("LIVE_QUOTE_DATE_UNVERIFIED")
+        if quote.get("pb") is None:
+            record["flags"].append("PB_NOT_VERIFIED")
         income_day = periods["income"][0]
         cash_day = periods["cashflow"][0]
         if balance_day and ((income_day and income_day != balance_day) or
