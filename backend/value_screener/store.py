@@ -98,6 +98,15 @@ class Store:
                     fetched_at timestamptz NOT NULL DEFAULT now()
                 )
             """)
+            # The website can use a dedicated read-only Neon login created
+            # before price_history existed. PostgreSQL does not automatically
+            # grant that older login SELECT on newly created tables.
+            # Never grant price history to PUBLIC or an unknown role.
+            reader_exists = conn.execute("""
+                SELECT 1 FROM pg_roles WHERE rolname='screener_reader'
+            """).fetchone()
+            if reader_exists:
+                conn.execute("GRANT SELECT ON TABLE price_history TO screener_reader")
 
     def completed_history_days(self, start: date, end: date,
                                min_full_quotes: int) -> set[date]:

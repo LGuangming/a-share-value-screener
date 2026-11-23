@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:review": "node --test tests/review.test.cjs"
+    "test:review": "node --test tests/review.test.cjs",
+    "test:price-history": "node --test tests/price-history.test.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

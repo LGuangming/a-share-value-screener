@@ -56,7 +56,7 @@ export default async function StockPage({params}: Props) {
       </section>}
       <div className="detail-grid">
         <section className="panel"><div className="panel-heading"><div><div className="section-kicker">PRICE HISTORY</div><h2>收盘价变化</h2></div><TrendingUp size={18} className="muted"/></div>
-          <Sparkline prices={prices}/><p className="note">历史价格为原始收盘价，尚未进行复权和交易成本处理，不代表策略收益。</p>
+          <Sparkline prices={prices}/><p className="note">已加载 {prices.length} 个交易日收盘价（最近最多120个交易日）；合并近期历史缓存与每日行情，按交易日去重。历史价格未复权、未考虑交易成本，不代表策略收益。</p>
         </section>
         <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
           <dl className="detail-list">

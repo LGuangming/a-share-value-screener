@@ -7,7 +7,7 @@
 - 代码：Next.js + TypeScript网站，Python数据采集/筛选程序，Supabase PostgreSQL建表脚本，GitHub Actions每日定时任务。
 - 页面：每日选股看板、股票详情、交易观察、筛选方法、回测开发占位。
 - 数据：**默认不内置假股票或假行情**。必须配置Tushare Token与数据库，第一次任务成功后页面才有真实数据。
-- 时间：工作日19:30补行情、每天08:17补财报，数据有实质变化后事件驱动重算NCAV；近期历史价格通过独立补齐工作流回填。
+- 时间：工作日19:30补行情、每天08:17补财报，数据有实质变化后事件驱动重算NCAV；近期历史价格通过独立补齐工作流回填，默认总覆盖160自然日。
 - 股票范围：第一版先按沪深主板非ST低价股筛选；其他板块、退市历史、重大风险公告暂不覆盖完整。
 
 ## 1. 创建一个独立的私人GitHub仓库
@@ -111,7 +111,7 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 
 [**A-Share Recent Price History Backfill**](.github/workflows/recent-price-history.yml) 是一次性历史数据建设工作流，与行情、财务、NCAV三项定时任务相互独立。首次发布会自动启动一次，后续需要重试可在GitHub Actions手动使用 **Run workflow**。不设长期Cron，避免补齐完成后每天反复调用接口。
 
-- 默认回填**最近120个自然日**，结束日为Neon最近已保存的交易日；有至少50个有效交易日，才能消除20日/50日均线的 `INSUFFICIENT_HISTORY` 提示。
+- 默认回填**最近160个自然日**，结束日为Neon最近已保存的交易日；有至少50个有效交易日，才能消除20日/50日均线的 `INSUFFICIENT_HISTORY` 提示。
 - 只使用Tushare官方HTTPS的 `trade_cal`、`stock_basic` 和按交易日调用的 `daily_basic`。每个历史交易日最多调用一次 `daily_basic`；已完成的日期跳过，重复运行只请求仍缺少的交易日。
 - 新增**精简表** `price_history(ts_code,trade_date,close)` 保存未复权收盘价，`price_history_fetches` 保存每个交易日的完成记录；程序启动时自动创建这两张表，不需要手工运行数据库迁移。已有 `daily_prices` 的完整交易日也会跳过。单日数据与其完成标记在同一事务中写入，失败可断点续跑。
 - `Recalculate NCAV` 读取 `price_history` 和 `daily_prices` 合并去重后的最近90日价格；优先保留正式行情表的相同交易日收盘价。回填完成后自动运行一次独立NCAV计算，更新网站交易观察信号，不重复请求行情。
@@ -130,6 +130,13 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 
 这三类现金流数据问题都不等于现金流为负或为零。已发布快照中的原泛化标记 `CASHFLOW_NOT_VERIFIED` 可由页面联查财报证据并细分；不需要重新调用Tushare。规则分类由 `lib/review.ts` 实现，`npm run test:review` 执行相关边界测试。
 
+
+### 个股收盘价变化修复
+
+个股详情页原来仅查 `daily_prices`，导致即使后端MA50已从 `price_history` 取得完整历史数据，前端仍显示“历史行情少于2个交易日”。现在页面合并 `daily_prices` 与 `price_history`，按交易日去重，优先采用当天正式行情收盘价，并取最近至多120个交易日展示。近期历史回填默认**160个自然日（总区间）**，已有日期跳过，仅下载额外缺失日期。
+
+如果网站使用专门的只读角色 `screener_reader`，回填程序会自动赋予该角色新表 `price_history` 的读取权限；若使用其它自定义只读角色，需要在Neon中由有权账户执行 `GRANT SELECT ON price_history TO 你的只读角色;`。不会开放给PUBLIC。
+
 ## 4. 在Vercel部署
 
 1. 登录 [Vercel](https://vercel.com/)，选择 Add New → Project → Import Git Repository，选中刚创建的仓库。
@@ -147,7 +154,7 @@ Vercel仅渲染结果，不参与数千只股票数据采集，不需要Tushare 
 ```bash
 pip install -r backend/requirements.txt
 PYTHONPATH=backend python -m value_screener.cli init-db
-PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 120 --min-sessions 50
+PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 160 --min-sessions 50
 PYTHONPATH=backend python -m value_screener.cli fetch-market
 PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 40
@@ -170,7 +177,7 @@ PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 - 首页显示“尚未配置数据库”：检查Vercel `DATABASE_READ_URL`。
 - 首页显示“数据库已连接但没有结果”：检查GitHub Actions运行日志，确认首次财务扫描成功。
 - 股票数量偏少：检查Tushare行情接口、已有财报的覆盖率和独立财务补齐工作流。**数据缺口不等于没有符合筛选条件的股票。**
-- 交易观察显示“历史行情不足”：运行独立的 `A-Share Recent Price History Backfill`，默认自动回填最近120自然日的未复权收盘价并在完成后重算。
+- 交易观察显示“历史行情不足”：运行独立的 `A-Share Recent Price History Backfill`，默认自动回填最近160自然日的未复权收盘价并在完成后重算。
 - 回测页面没有收益：回测引擎尚未开发，不能将技术观察信号误认为已回测策略。
 
 ## 7. 算法提醒

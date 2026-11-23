@@ -114,3 +114,4 @@ create index if not exists screen_results_candidates_idx on screen_results
 -- CREATE ROLE screener_reader LOGIN PASSWORD '...';
 -- GRANT USAGE ON SCHEMA public TO screener_reader;
 -- GRANT SELECT ON stocks,daily_prices,financial_reports,job_runs,screen_results TO screener_reader;
+-- GRANT SELECT ON price_history TO screener_reader; -- chart access to backfilled closes

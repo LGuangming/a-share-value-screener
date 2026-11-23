@@ -159,15 +159,47 @@ export async function stockDetail(code: string): Promise<{ stock: ScreenerRow | 
       WHERE r.ts_code=${code} AND r.strategy='netnet_v1'
       ORDER BY r.trade_date DESC LIMIT 30
     `;
-    const prices = await db`
-      SELECT trade_date,close FROM (
-        SELECT trade_date,close FROM daily_prices WHERE ts_code=${code}
-        ORDER BY trade_date DESC LIMIT 100
-      ) p ORDER BY trade_date ASC
-    `;
     const recent = rows.map((row) => normalizeRow(row as Record<string, unknown>));
-    return { stock: recent[0] ?? null,
-      prices: prices.map((row) => ({ day: dateString(row.trade_date) ?? "", close: Number(row.close) })), recent };
+    // Charts and technical signals must use the same compact historical close
+    // source. Prefer the verified daily snapshot on duplicate trade dates.
+    // Keep history-query failures separate from the stock's research record.
+    let prices: { day: string; close: number }[] = [];
+    try {
+      const history = await db`
+        WITH combined AS (
+          SELECT trade_date, close, 2 AS source_priority
+          FROM daily_prices WHERE ts_code=${code}
+          UNION ALL
+          SELECT trade_date, close, 1 AS source_priority
+          FROM price_history WHERE ts_code=${code}
+        ), unique_sessions AS (
+          SELECT DISTINCT ON (trade_date) trade_date, close
+          FROM combined
+          ORDER BY trade_date DESC, source_priority DESC
+        )
+        SELECT trade_date, close FROM (
+          SELECT trade_date, close FROM unique_sessions
+          ORDER BY trade_date DESC LIMIT 120
+        ) p ORDER BY trade_date ASC
+      `;
+      prices = history.map(row => ({
+        day: dateString(row.trade_date) ?? "", close: Number(row.close),
+      }));
+    } catch (historyError) {
+      // If a newly created price_history table has not been granted to
+      // DATABASE_READ_URL yet, keep the stock page available and log the issue.
+      console.error("Read compact price history failed; verify SELECT privileges", historyError);
+      const fallback = await db`
+        SELECT trade_date, close FROM (
+          SELECT trade_date, close FROM daily_prices WHERE ts_code=${code}
+          ORDER BY trade_date DESC LIMIT 120
+        ) p ORDER BY trade_date ASC
+      `;
+      prices = fallback.map(row => ({
+        day: dateString(row.trade_date) ?? "", close: Number(row.close),
+      }));
+    }
+    return { stock: recent[0] ?? null, prices, recent };
   } catch (error) {
     console.error("Read stock failed", error);
     return { stock: null, prices: [], recent: [] };

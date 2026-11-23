@@ -24,6 +24,19 @@ create table if not exists daily_prices (
 );
 create index if not exists daily_prices_date_idx on daily_prices (trade_date desc);
 
+-- Compact recent unadjusted closes used for charts and technical signals.
+create table if not exists price_history (
+  ts_code text not null references stocks(ts_code),
+  trade_date date not null,
+  close numeric(16,4) not null check(close > 0),
+  primary key(ts_code, trade_date)
+);
+create table if not exists price_history_fetches (
+  trade_date date primary key,
+  rows_saved integer not null check(rows_saved > 0),
+  fetched_at timestamptz not null default now()
+);
+
 create table if not exists financial_reports (
   ts_code text not null references stocks(ts_code),
   kind text not null check(kind in ('balancesheet','income','cashflow')),

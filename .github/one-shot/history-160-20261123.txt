@@ -1,0 +1,2 @@
+User-requested one-time extension to a TOTAL of 160 calendar days of compact recent closing prices.
+Backfill only missing dates; recalculate NCAV after success.

@@ -67,14 +67,14 @@ export TUSHARE_TOKEN='YOUR_TOKEN'
 export DATABASE_URL='postgresql://...'
 
 python -m value_screener.cli init-db
-python -m value_screener.cli bootstrap-prices --days 120 --min-sessions 50
+python -m value_screener.cli bootstrap-prices --days 160 --min-sessions 50
 python -m value_screener.cli fetch-market
 python -m value_screener.cli recalculate-ncav
 python -m value_screener.cli refresh-financials --budget 40
 python -m value_screener.cli recalculate-ncav
 ```
 
-The dedicated [A-Share Recent Price History Backfill](.github/workflows/recent-price-history.yml) initializes a compact `price_history` table of unadjusted closing prices and `price_history_fetches` completion markers, then backfills the last 120 calendar days and recalculates NCAV. Historical sessions already fully cached in Neon are skipped. This is a one-time workflow with manual retry, not an extra permanent daily schedule. The 20/50-day signals use a deduplicated union of compact history and normal daily prices. Historical `daily_basic.close` is unadjusted and does not constitute a survivorship-bias-free backtest.
+The dedicated [A-Share Recent Price History Backfill](.github/workflows/recent-price-history.yml) initializes a compact `price_history` table of unadjusted closing prices and `price_history_fetches` completion markers, then backfills the last 160 calendar days and recalculates NCAV. Historical sessions already fully cached in Neon are skipped. This is a one-time workflow with manual retry, not an extra permanent daily schedule. The 20/50-day signals use a deduplicated union of compact history and normal daily prices. Historical `daily_basic.close` is unadjusted and does not constitute a survivorship-bias-free backtest.
 
 For unattended recurring scans, keep the default financial budget modest and monitor `financial_data_gap`, `financial_successes` and `listed_stocks` in `job_runs.metrics`. Access to the financial APIs may require additional Tushare points.
 
@@ -170,3 +170,5 @@ PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 ```
 
 The importer checks returned coverage and logs shortfalls; some endpoints/permissions may truncate or reject the data. It does **not** silently claim all A shares were retrieved. Only listed tickers with valid consolidated `report_type=1` statements are ingested. Perform additional earlier quarters if needed. The daily task continues with bounded per-company incremental refresh.
+
+Stock detail charts now merge the compact `price_history` cache with `daily_prices` (daily quotes take precedence on duplicate dates) for up to 120 sessions. The backfill covers a total of 160 calendar days by default, skipping already-complete sessions. The backfill grants SELECT on `price_history` to an existing `screener_reader` role; custom read-only roles need an explicit grant.

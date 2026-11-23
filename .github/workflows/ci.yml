@@ -27,6 +27,8 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Fundamental review classification tests
         run: npm run test:review
+      - name: Stock detail chart and history integration regression tests
+        run: npm run test:price-history
       - name: Typecheck
         run: npm run typecheck
       - name: Build

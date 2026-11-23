@@ -1,12 +1,17 @@
 name: A-Share Recent Price History Backfill
 
 on:
+  # One-time 160-day extension, removed after the job starts.
+  push:
+    branches: [main]
+    paths:
+      - '.github/one-shot/history-160-20261123.txt'
   workflow_dispatch:
     inputs:
       days:
-        description: 'Recent calendar days to backfill, 70-365 (default 120)'
+        description: 'Total recent calendar days, 70-365 (default 160)'
         required: false
-        default: '120'
+        default: '160'
         type: string
       min_sessions:
         description: 'Minimum market sessions needed for MA20/MA50 (default 50)'
@@ -32,7 +37,7 @@ jobs:
       TUSHARE_API_SOURCE: official
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONPATH: backend
-      HISTORY_DAYS: ${{ inputs.days || '120' }}
+      HISTORY_DAYS: ${{ github.event_name == 'push' && '160' || inputs.days || '160' }}
       MIN_SESSIONS: ${{ inputs.min_sessions || '50' }}
     steps:
       - uses: actions/checkout@v4
