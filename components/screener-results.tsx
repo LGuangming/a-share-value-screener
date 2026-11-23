@@ -83,15 +83,13 @@ export default function ScreenerResults({ rows, initial }: {
   const filtered = needle ? matches : tabRows;
   const suggestions = matches.slice(0, 8);
 
-  function setFilter(param: string, value: string, update: () => void) {
+  function setFilter(_param: string, _value: string, update: () => void) {
+    // Filter views and keystrokes are local-only UI state. Updating the
+    // URL's searchParams here may route through Next.js App Router and
+    // momentarily mount the global loading boundary while the server page
+    // re-evaluates. Explicit links can still initialize filters from a URL.
     update();
     setVisibleCount(100);
-    // Native history API changes the shareable filters without re-running SQL
-    // or fetching a new React Server Component tree.
-    const url = new URL(window.location.href);
-    if (param === "q" && !value.trim()) url.searchParams.delete(param);
-    else url.searchParams.set(param, value);
-    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
   }
 
   function updateSearch(value: string) {
