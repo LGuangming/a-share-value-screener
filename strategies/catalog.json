@@ -5,7 +5,7 @@
     "name": "Net-Net 资产折价",
     "family": "基本面价值",
     "status": "live",
-    "description": "使用已披露的合并资产负债表计算净流动资产价值，结合压力测试与财务风险复核。",
+    "description": "以净流动资产价值、压力价值及财务风险筛选沪深主板股票。",
     "universe": "沪深主板低价/低PB预筛，排除ST风险",
     "requirements": [
       "daily_basic",
@@ -43,7 +43,7 @@
         "max": 5
       }
     ],
-    "notes": "目前唯一已部署的正式每日筛选策略；不代表通过回测。"
+    "notes": "每日筛选NCAV覆盖率、压力价值和风险标记。"
   },
   {
     "id": "ma_trend_research_v0",
@@ -51,8 +51,8 @@
     "name": "MA20/50 趋势观察",
     "family": "技术趋势",
     "status": "research",
-    "description": "基于历史收盘价和趋势方向生成研究信号；回测引擎可用于工程验证。",
-    "universe": "历史A股日线样本，尚未完成完整复权和可成交性校验",
+    "description": "观察MA20/MA50趋势及短期价格回踩信号。",
+    "universe": "沪深主板历史日线股票池（拟）",
     "requirements": [
       "daily_ohlcv",
       "adj_factor",
@@ -79,7 +79,7 @@
         "max": 200
       }
     ],
-    "notes": "仅研究测试，尚未上线正式每日选股或宣称投资收益。"
+    "notes": "研究中，暂无每日筛选结果。"
   },
   {
     "id": "oversold_reversion_v0",
@@ -87,7 +87,7 @@
     "name": "短期超跌反转",
     "family": "均值回归",
     "status": "planned",
-    "description": "未来结合短期超跌、成交量和反弹确认，研究5至20个交易日持仓。",
+    "description": "结合短期跌幅、成交量和价格反弹确认，研究5–20个交易日持仓。",
     "universe": "沪深主板（拟）",
     "requirements": [
       "daily_ohlcv",
@@ -107,7 +107,7 @@
         "max": 30
       }
     ],
-    "notes": "尚未完成历史股票池及完整回测，不提供正式筛选。"
+    "notes": "计划开发，尚未发布每日筛选结果。"
   },
   {
     "id": "quality_momentum_v0",
@@ -115,7 +115,7 @@
     "name": "质量动量多因子",
     "family": "基本面量化",
     "status": "planned",
-    "description": "未来组合盈利质量、现金流、估值与价格动量，并按披露日严格控制前视偏差。",
+    "description": "结合盈利质量、现金流、估值和价格动量构建多因子筛选。",
     "universe": "沪深主板（拟）",
     "requirements": [
       "daily_ohlcv",
@@ -135,6 +135,6 @@
         "max": 60
       }
     ],
-    "notes": "未取得完整的历史财报和ST时点资料前，不产生正式历史绩效。"
+    "notes": "计划开发，尚未发布每日筛选结果。"
   }
 ]
