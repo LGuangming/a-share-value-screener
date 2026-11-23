@@ -1,6 +1,11 @@
 name: A-Share Financial Statement Refresh
 
 on:
+  # One-time operator-requested 40-company production run; removed after dispatch.
+  push:
+    branches: [main]
+    paths:
+      - '.github/one-shot/financial-40-20261123.txt'
   # Scheduled jobs are opt-in via ENABLE_FINANCIAL_SCHEDULE=true.
   # Set repository variable ENABLE_FINANCIAL_SCHEDULE=true when ready.
   schedule:
@@ -46,13 +51,13 @@ jobs:
     env:
       TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       TUSHARE_RELAY_TOKEN: ${{ secrets.TUSHARE_RELAY_TOKEN }}
-      TUSHARE_API_SOURCE: ${{ inputs.api_source || vars.FINANCIAL_SCHEDULE_API_SOURCE || 'official' }}
+      TUSHARE_API_SOURCE: ${{ github.event_name == 'push' && 'official' || inputs.api_source || vars.FINANCIAL_SCHEDULE_API_SOURCE || 'official' }}
       TUSHARE_RELAY_URL: ${{ vars.TUSHARE_RELAY_URL || 'http://tus.sxdata.top/tu_share/' }}
       TUSHARE_RELAY_MIN_INTERVAL_SECONDS: ${{ inputs.relay_min_interval_seconds || '5' }}
       TUSHARE_ALLOW_HTTP: ${{ (inputs.api_source || vars.FINANCIAL_SCHEDULE_API_SOURCE) == 'relay' && '1' || '0' }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONPATH: backend
-      FINANCIAL_BUDGET: ${{ inputs.budget || vars.FINANCIAL_SCHEDULE_BUDGET || '40' }}
+      FINANCIAL_BUDGET: ${{ github.event_name == 'push' && '40' || inputs.budget || vars.FINANCIAL_SCHEDULE_BUDGET || '40' }}
       FINANCIAL_ASOF: ${{ inputs.asof }}
     steps:
       - uses: actions/checkout@v4
