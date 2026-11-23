@@ -7,7 +7,7 @@ let client: ReturnType<typeof postgres> | null = null;
 function connection() {
   const url = process.env.DATABASE_READ_URL;
   if (!url) return null;
-  if (!client) client = postgres(url, { max: 3, idle_timeout: 90, connect_timeout: 5, prepare: false });
+  if (!client) client = postgres(url, { max: 1, idle_timeout: 10, connect_timeout: 15, prepare: false });
   return client;
 }
 
@@ -98,7 +98,8 @@ async function readLatestSnapshot(): Promise<{ snapshot: Snapshot | null; error:
       metrics: r.metrics ?? {} }, error: null };
   } catch (error) {
     console.error("Read snapshot failed", error);
-    return { snapshot: null, error: "数据库查询失败，请检查只读账号及建表状态" };
+    // Do not return a cacheable failure: transient Neon cold-starts should retry.
+    throw error;
   }
 }
 
@@ -131,7 +132,8 @@ async function readScreeningRows(day: string, strategy: string): Promise<Screene
     return rows.map((row) => normalizeRow(row as Record<string, unknown>));
   } catch (error) {
     console.error("Read screening rows failed", error);
-    return [];
+    // Never cache a transient query failure as a legitimate empty selection.
+    throw error;
   }
 }
 
@@ -140,11 +142,24 @@ async function readScreeningRows(day: string, strategy: string): Promise<Screene
 const cachedSnapshot = unstable_cache(readLatestSnapshot, ["latest-daily-snapshot-v2"], { revalidate: 30 });
 const cachedScreening = unstable_cache(readScreeningRows, ["strategy-screen-rows-v2"], { revalidate: 90 });
 
-export function latestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
-  return cachedSnapshot();
+export async function latestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
+  try {
+    return await cachedSnapshot();
+  } catch {
+    return { snapshot: null, error: "网站暂时无法读取数据库，已发布的筛选结果并未删除。请稍后重试。" };
+  }
 }
-export function screeningRows(day: string, strategy: string = "netnet_v1"): Promise<ScreenerRow[]> {
-  return cachedScreening(day, strategy);
+export async function screeningRowsStatus(day: string, strategy: string = "netnet_v1"):
+  Promise<{ rows: ScreenerRow[]; error: string | null }> {
+  try {
+    return { rows: await cachedScreening(day, strategy), error: null };
+  } catch {
+    return { rows: [], error: "股票结果读取失败，不能将其视为筛选结果为零。" };
+  }
+}
+export async function screeningRows(day: string, strategy: string = "netnet_v1"): Promise<ScreenerRow[]> {
+  const result = await screeningRowsStatus(day, strategy);
+  return result.rows;
 }
 
 export async function stockDetail(code: string): Promise<{ stock: ScreenerRow | null; prices: { day: string; close: number }[]; recent: ScreenerRow[] }> {
