@@ -28,7 +28,7 @@ export const strategies: StrategyDefinition[] =
 
 export const strategyStatusLabel: Record<StrategyStatus,string> = {
   live: "每日筛选运行中",
-  research: "工程测试",
+  research: "研究测试",
   planned: "计划开发",
 };
 
@@ -46,7 +46,7 @@ export const requirementLabels: Record<string,string> = {
   adj_factor: "历史复权因子",
   stk_limit: "历史涨跌停价格",
   suspend_d: "历史停复牌记录",
-  historic_st: "历史ST状态（目前权限不足）",
-  historic_financials: "历史时点三大财报（仍需补齐）",
+  historic_st: "历史ST状态",
+  historic_financials: "历史时点三大财报",
   corporate_actions: "历史分红及其他公司行为",
 };
