@@ -98,3 +98,30 @@ test("Vercel read-only results use the Neon HTTPS driver, never raw PostgreSQL T
   assert.match(data,/process\.env\.DATABASE_READ_URL/);
   assert.doesNotMatch(data,/postgres\(url|process\.env\.DATABASE_URL\b/);
 });
+
+test("Value Radar branding uses text only on desktop and mobile", () => {
+  const nav = read("components/nav.tsx");
+  assert.match(nav,/<strong>价值雷达<\/strong>/);
+  assert.match(nav,/className="mobile-brand"[^>]*>价值雷达<\/Link>/);
+  assert.doesNotMatch(nav,/className="brand-icon"/);
+  assert.doesNotMatch(nav,/<Radar size=\{20\}/);
+});
+
+test("stock lookup filters on every keystroke, ranks exact and prefix codes first", () => {
+  const search = read("components/screener-results.tsx");
+  assert.match(search,/onChange=\{e => updateSearch\(e\.target\.value\)\}/);
+  assert.match(search,/if \(code === needle\) return 0/);
+  assert.match(search,/if \(name === needle\) return 1/);
+  assert.match(search,/if \(code\.startsWith\(needle\)\) return 2/);
+  assert.match(search,/if \(name\.startsWith\(needle\)\) return 3/);
+  assert.match(search,/if \(needle\) return matches/);
+  assert.match(search,/const suggestions = matches\.slice\(0, 8\)/);
+  assert.match(search,/role="combobox"/);
+  assert.match(search,/role="listbox"/);
+  assert.match(search,/role="option"/);
+  assert.match(search,/event\.key === "ArrowDown"/);
+  assert.match(search,/event\.key === "Enter"/);
+  assert.match(search,/onClick=\{\(\) => chooseSuggestion\(row\.ts_code\)\}/);
+  assert.match(search,/搜索范围为当前Net-Net已发布的/);
+  assert.doesNotMatch(search,/fetch\(|router\.refresh\(|router\.push\(/);
+});
