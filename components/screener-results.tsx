@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Filter, Search } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
@@ -21,6 +21,21 @@ function tagClass(status: string) {
   return "pill pill-neutral";
 }
 
+/** Search the published Net-Net universe instantly, with exact/prefix matches first. */
+function matchRank(row: ScreenTableRow, needle: string): number | null {
+  const code = row.ts_code.toLowerCase();
+  const name = row.name.toLocaleLowerCase();
+  const industry = (row.industry ?? "").toLocaleLowerCase();
+  if (code === needle) return 0;
+  if (name === needle) return 1;
+  if (code.startsWith(needle)) return 2;
+  if (name.startsWith(needle)) return 3;
+  if (code.includes(needle)) return 4;
+  if (name.includes(needle)) return 5;
+  if (industry.includes(needle)) return 6;
+  return null;
+}
+
 export default function ScreenerResults({ rows, initial }: {
   rows: ScreenTableRow[]; initial: Filters;
 }) {
@@ -35,11 +50,26 @@ export default function ScreenerResults({ rows, initial }: {
     ? Number(initial.max_pb) : 1.2);
   const [order, setOrder] = useState(initial.order === "stress" ? "stress" : "ncav");
   const [visibleCount, setVisibleCount] = useState(100);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const suggestionListId = useId();
+  const needle = q.trim().toLocaleLowerCase();
+
+  const matches = useMemo(() => {
+    if (!needle) return [];
+    return rows.map(row => ({ row, rank: matchRank(row, needle) }))
+      .filter((match): match is { row: ScreenTableRow; rank: number } => match.rank !== null)
+      .sort((a,b) => a.rank - b.rank || a.row.ts_code.localeCompare(b.row.ts_code))
+      .map(match => match.row);
+  }, [rows, needle]);
+  const suggestions = matches.slice(0, 8);
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    // Searching is global within the published strategy's pre-screen rows.
+    // Do not hide a matching stock merely because "strict" or a PB/price
+    // threshold is selected; those filters resume when search is cleared.
+    if (needle) return matches;
     return rows.filter(row => {
-      if (needle && !`${row.name} ${row.ts_code} ${row.industry ?? ""}`.toLowerCase().includes(needle)) return false;
       if (row.price !== null && row.price > maxPrice) return false;
       if (row.pb !== null && row.pb > maxPb) return false;
       if (view === "strict") return row.is_candidate && row.ncav_coverage !== null
@@ -49,7 +79,7 @@ export default function ScreenerResults({ rows, initial }: {
     }).sort((a, b) => order === "stress"
       ? (b.stress_coverage ?? -Infinity) - (a.stress_coverage ?? -Infinity)
       : (b.ncav_coverage ?? -Infinity) - (a.ncav_coverage ?? -Infinity));
-  }, [rows, q, view, order, maxPrice, minCoverage, maxPb]);
+  }, [rows, needle, matches, view, order, maxPrice, minCoverage, maxPb]);
 
   function setFilter(param: string, value: string, update: () => void) {
     update();
@@ -57,13 +87,44 @@ export default function ScreenerResults({ rows, initial }: {
     // Native history API changes the shareable filters without re-running SQL
     // or fetching a new React Server Component tree.
     const url = new URL(window.location.href);
-    url.searchParams.set(param, value);
+    if (param === "q" && !value.trim()) url.searchParams.delete(param);
+    else url.searchParams.set(param, value);
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  }
+
+  function updateSearch(value: string) {
+    setFilter("q", value, () => setQ(value));
+    setSuggestionsOpen(true);
+    setHighlightedIndex(-1);
+  }
+
+  function chooseSuggestion(code: string) {
+    setFilter("q", code, () => setQ(code));
+    setSuggestionsOpen(false);
+    setHighlightedIndex(-1);
+  }
+
+  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setSuggestionsOpen(false);
+      setHighlightedIndex(-1);
+    }
+    if (!suggestions.length || !suggestionsOpen) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setHighlightedIndex(i => (i + 1) % suggestions.length);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setHighlightedIndex(i => (i <= 0 ? suggestions.length - 1 : i - 1));
+    } else if (event.key === "Enter" && highlightedIndex >= 0) {
+      event.preventDefault();
+      chooseSuggestion(suggestions[highlightedIndex].ts_code);
+    }
   }
 
   return <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
-      <h2>Net-Net筛选结果 <span className="count-badge">{filtered.length}</span></h2>
+      <h2>{needle ? "股票即时搜索" : "Net-Net筛选结果"} <span className="count-badge">{filtered.length}</span></h2>
       <p>只有当前已上线的Net-Net使用以下NCAV筛选条件；修改标签和参数仅在本地过滤，无需重新读取数据库。</p>
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
@@ -74,9 +135,36 @@ export default function ScreenerResults({ rows, initial }: {
             onClick={() => setFilter("view",key,()=>setView(key))}>{label}</button>)}
       </div>
       <div className="filter-form">
-        <label className="search-field"><Search size={16}/><input aria-label="搜索股票"
-          placeholder="公司名称 / 证券代码" value={q}
-          onChange={e => setFilter("q",e.target.value,()=>setQ(e.target.value))}/></label>
+        <div className="stock-search">
+          <div className="search-field"><Search size={16}/>
+            <input aria-label="搜索股票" autoComplete="off" type="search"
+              placeholder="实时搜索名称 / 代码" value={q}
+              role="combobox" aria-autocomplete="list"
+              aria-expanded={Boolean(needle && suggestionsOpen && suggestions.length)}
+              aria-controls={suggestionListId}
+              aria-activedescendant={highlightedIndex >= 0 && suggestionsOpen && suggestions[highlightedIndex]
+                ? `${suggestionListId}-${highlightedIndex}` : undefined}
+              onFocus={() => setSuggestionsOpen(true)}
+              onBlur={() => {setSuggestionsOpen(false);setHighlightedIndex(-1);}}
+              onKeyDown={handleSearchKeyDown}
+              onChange={e => updateSearch(e.target.value)}/>
+          </div>
+          {needle && suggestionsOpen && suggestions.length > 0 && <div
+            id={suggestionListId} role="listbox" aria-label="匹配的股票"
+            className="stock-suggestions">
+            <div className="stock-suggestions-heading">实时匹配 {matches.length} 只 · 显示最相关的 {suggestions.length} 只</div>
+            {suggestions.map((row,i) => <button type="button"
+              id={`${suggestionListId}-${i}`}
+              role="option" aria-selected={highlightedIndex === i}
+              className={`stock-suggestion${highlightedIndex === i ? " is-highlighted" : ""}`}
+              key={row.ts_code}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => chooseSuggestion(row.ts_code)}>
+              <strong>{row.name}</strong><span>{row.ts_code}</span>
+              <small>{row.industry || "行业待补充"}</small>
+            </button>)}
+          </div>}
+        </div>
         <select aria-label="最高价格" value={maxPrice}
           onChange={e=>setFilter("max_price",e.target.value,()=>setMaxPrice(Number(e.target.value)))}>
           <option value={5}>股价≤5元</option><option value={8}>股价≤8元</option>
@@ -99,6 +187,10 @@ export default function ScreenerResults({ rows, initial }: {
         <span className="filter-local-hint"><Filter size={14}/> 即时筛选</span>
       </div>
     </div>
+    {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
+      已即时匹配 {matches.length} 只股票。搜索范围为当前Net-Net已发布的 {rows.length} 只预筛股票；
+      搜索期间暂不应用“严格候选”、股价和PB条件，清空搜索后恢复原筛选设置。
+    </div>}
     {filtered.length ? <div className="table-scroll"><table className="results-table">
       <thead><tr><th>股票 / 行业</th><th>收盘价</th><th>总市值</th>
         <th>NCAV / 市值</th><th>压力价值覆盖率</th><th>市净率</th>
@@ -117,7 +209,8 @@ export default function ScreenerResults({ rows, initial }: {
         <td><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           <ArrowRight size={16}/></Link></td>
       </tr>)}</tbody></table></div>
-    : <Empty title="暂无匹配的股票" detail="可调整筛选条件或切换到“全部预筛”视图。"/>}
+    : <Empty title={needle ? "暂无匹配的股票" : "暂无符合筛选条件的股票"}
+      detail={needle ? "试试更短的股票代码或公司名称；搜索仅覆盖当前已发布的Net-Net预筛股票。" : "可调整筛选条件或切换到“全部预筛”视图。"}/>}
     {filtered.length > visibleCount && <button type="button" className="filter-button screener-load-more"
       onClick={()=>setVisibleCount(n=>n+100)}>
       再显示100条（已显示{Math.min(visibleCount,filtered.length)} / {filtered.length}）
