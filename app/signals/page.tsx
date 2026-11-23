@@ -6,13 +6,15 @@ import {
   evaluateFundamentalReview, severityLabel, priorityLabel,
 } from "@/lib/review";
 import { Empty } from "@/components/empty";
+import StrategySwitch from "@/components/strategy-switch";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "交易观察" };
 
-export default async function SignalsPage() {
+export default async function SignalsPage({ searchParams }: { searchParams: Promise<{strategy?: string}> }) {
+  const query = await searchParams;
   const {snapshot} = await latestSnapshot();
-  const rows = snapshot ? await screeningRows(snapshot.trade_date) : [];
+  const rows = snapshot ? await screeningRows(snapshot.trade_date, "netnet_v1") : [];
   const observed = rows
     .filter(row => row.is_candidate && row.signal !== "NOT_ELIGIBLE")
     .map(row => ({row, review: evaluateFundamentalReview(row)}))
@@ -28,22 +30,23 @@ export default async function SignalsPage() {
 
   return <main className="page-container">
     <div className="page-top"><div>
-      <div className="eyebrow">TRADING OBSERVATIONS / FUNDAMENTAL REVIEW</div><h1>交易观察</h1>
-      <p className="page-lead">先分辨数据缺口、资产质量与经营风险，再结合技术走势观察候选股票。</p>
+      <div className="eyebrow">TRADING OBSERVATIONS / MULTI-STRATEGY</div><h1>交易观察</h1>
+      <p className="page-lead">选择策略后查看各自的交易观察条件与股票池。仅对已上线的Net-Net提供规则化基本面初评。</p>
     </div><div className="date-tag"><Activity size={17}/> {snapshot?.trade_date ?? "等待发布"}</div></div>
+    <StrategySwitch mode="signals" requestedId={query.strategy}>
     <div className="panel signal-alert"><AlertTriangle size={20}/><p>
       风险等级、优先级与结论是<strong>系统规则初评</strong>，不是人工尽调结论或投资建议。
       “通过”只代表当前固定规则未发现阻断项，不能替代财报附注、应收回款、负债及经营持续性的核验。
     </p></div>
     <div className="review-overview" aria-label="观察池自动复核概况">
-      <div><span>候选观察股票</span><strong>{observed.length}</strong><small>仅统计符合Net-Net条件的股票</small></div>
+      <div><span>候选观察股票</span><strong>{observed.length}</strong><small>仅统计Net-Net真实筛选候选</small></div>
       <div><span>初评通过</span><strong>{approved}</strong><small>规则未发现复核事项</small></div>
       <div><span>待补充资料</span><strong>{pending}</strong><small>数据缺口或需进一步核查</small></div>
       <div><span>不建议进入买入观察</span><strong>{blocked}</strong><small>触发较高风险规则</small></div>
     </div>
     <section className="panel"><div className="panel-heading"><div>
       <div className="section-kicker">MONITORING LIST / RULE-BASED REVIEW</div>
-      <h2>候选股票复核清单</h2>
+      <h2>Net-Net候选股票复核清单</h2>
       <p>按P0、P1、P2排序。现金流待核验拆分为报表缺失、经营现金流关键字段缺失、截至筛选日尚未披露；点击股票查看完整原因。</p>
     </div></div>
       {observed.length ? <div className="table-scroll"><table className="results-table review-table">
@@ -72,5 +75,6 @@ export default async function SignalsPage() {
       </table></div> : <Empty title="当前没有可显示的交易观察信号" detail="完成财务扫描和历史价格回填后，符合条件的候选股票将显示在这里。"/>}
       <div className="review-footnote">P0：较高风险优先核查；P1：资料或中等风险尽快核查；P2：常规跟踪。数据缺失不等于现金流为零或实际财务恶化。</div>
     </section>
+    </StrategySwitch>
   </main>;
 }
