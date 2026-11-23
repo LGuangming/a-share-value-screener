@@ -1,2 +1,0 @@
-One-time direct production financial refresh requested 2026-11-23.
-Tushare official HTTPS API, maximum 40 companies, no 5-company test.
