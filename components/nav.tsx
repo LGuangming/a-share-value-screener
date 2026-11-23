@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { findStrategy } from "@/lib/strategies";
 import { Activity, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
@@ -26,7 +28,7 @@ export default function Nav() {
   const activeHref = currentLink(pathname);
   return <>
     <aside className="sidebar">
-      <Link className="brand" href="/">
+      <Link className="brand" href={strategyHref("/")}>
         <span className="brand-icon"><Radar size={24} strokeWidth={1.9}/></span>
         <span className="brand-text"><strong>价值雷达</strong><small>MULTI-STRATEGY / A-SHARE</small></span>
       </Link>
@@ -34,7 +36,7 @@ export default function Nav() {
       <nav className="nav-main" aria-label="主导航">
         {links.map(({ href, label, Icon }) => {
           const isActive = activeHref === href;
-          return <Link key={href} href={href}
+          return <Link key={href} href={strategyHref(href)}
             className={`nav-link${isActive ? " is-active" : ""}`}
             aria-current={isActive ? "page" : undefined}>
             <Icon size={18}/><span>{label}</span>
@@ -47,7 +49,7 @@ export default function Nav() {
       </div>
     </aside>
     <div className="mobile-header">
-      <Link className="mobile-brand" href="/"><Radar size={20}/> 价值雷达</Link>
+      <Link className="mobile-brand" href={strategyHref("/")}><Radar size={20}/> 价值雷达</Link>
       <SlidersHorizontal size={18} className="muted"/>
     </div>
     <nav className="mobile-nav" aria-label="移动端导航">
