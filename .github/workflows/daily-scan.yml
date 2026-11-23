@@ -1,4 +1,4 @@
-name: A-Share Daily Net-Net Scan
+name: A-Share Market Data Refresh
 on:
   schedule:
     # 19:30 China Standard Time, Monday-Friday (11:30 UTC).
@@ -67,7 +67,7 @@ jobs:
           if [ "$CHECK_API_ONLY" != "true" ]; then
             test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
           fi
-      - name: Check API or scan and publish snapshot
+      - name: Verify API or fetch and cache market quotes (never publish NCAV)
         env:
           TRADE_DATE: ${{ inputs.trade_date }}
         run: |
@@ -78,7 +78,7 @@ jobs:
               python -m value_screener.cli check-api
             fi
           elif [ -n "$TRADE_DATE" ]; then
-            python -m value_screener.cli scan --date "$TRADE_DATE"
+            python -m value_screener.cli fetch-market --date "$TRADE_DATE"
           else
-            python -m value_screener.cli scan
+            python -m value_screener.cli fetch-market
           fi

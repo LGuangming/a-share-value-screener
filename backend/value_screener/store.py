@@ -88,6 +88,29 @@ class Store:
             ).fetchone()
         return row["quote_day"] if row else None
 
+    def has_successful_data_trigger(self, github_run_id: int) -> bool:
+        """Guard workflow_run chaining (API-only probes must never write data)."""
+        with self.connect() as conn:
+            row = conn.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM job_runs
+                    WHERE job_type IN ('market_refresh', 'financial_refresh')
+                      AND status='success'
+                      AND metrics->>'github_run_id' = %s
+                ) AS changed
+            """, (str(github_run_id),)).fetchone()
+        return bool(row["changed"])
+
+    def quote_coverage(self, quote_day: date) -> dict:
+        """Verify cached market completeness without any provider API calls."""
+        with self.connect() as conn:
+            row = conn.execute("""
+                SELECT (SELECT COUNT(*) FROM stocks) AS listed_stocks,
+                       (SELECT COUNT(*) FROM daily_prices WHERE trade_date=%s) AS quoted_stocks
+            """, (quote_day,)).fetchone()
+        return {"listed_stocks": int(row["listed_stocks"]),
+                "quoted_stocks": int(row["quoted_stocks"])}
+
     def financial_backlog(self, quote_day: date, asof: date, budget: int) -> dict:
         """Find missing / mismatched financial statements for current candidates.
 

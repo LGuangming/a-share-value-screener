@@ -48,10 +48,10 @@ git push -u origin main
 2. GitHub仓库 → Settings → Secrets and variables → Actions → 新建两个Repository secrets：
    - `TUSHARE_TOKEN`：你的行情及财务数据Token
    - `DATABASE_URL`：有写权限的PostgreSQL连接字符串
-3. 进入仓库 Actions → **A-Share Daily Net-Net Scan** → Run workflow，手动执行第一次扫描。
+3. 进入仓库 Actions → **A-Share Market Data Refresh** → Run workflow，手动执行第一次扫描。
 4. 运行记录中应出现行情股票数、财报获取数量、严格候选数量，以及财报未补齐数量。
 
-注意：**每日行情与财报采集已解耦**。每日行情任务使用Neon已有财报筛选NCAV；独立财务工作流每周7天、每次最多40家公司，先补齐缺失报表，再根据实际披露日期增量更新。财务缺口保留显式风险标记。
+注意：**每日行情与财报采集已解耦**。行情、财务采集和NCAV计算分为三个独立工作流。行情任务不下载财报，NCAV计算不调用Tushare，财务缺口保留显式风险标记。
 
 ## 3A. Tushare官方API与第三方中转API双模式
 
@@ -60,9 +60,9 @@ git push -u origin main
 **安全须知：** 中转地址目前是HTTP而非HTTPS，Token可能在网络传输中被截获，且由第三方服务器处理。程序不会自动把 `TUSHARE_TOKEN` 转发给中转地址，也不会在原始API返回40203时自动切换中转。若确认信任中转服务，建议使用独立的中转Token；如确需使用同一Token，须自行明确承担明文传输风险。
 
 1. GitHub仓库 → **Settings → Secrets and variables → Actions → Secrets**：新增 `TUSHARE_RELAY_TOKEN`，填中转服务实际要求的Token；原有 `TUSHARE_TOKEN` 不变。
-2. GitHub Actions → [A-Share Daily Net-Net Scan](.github/workflows/daily-scan.yml) → **Run workflow**。
+2. GitHub Actions → [A-Share Market Data Refresh](.github/workflows/daily-scan.yml) → **Run workflow**。
 3. 将 `api_source` 设置为 `relay`，`check_api_only` 设为 `true`，先检查 `trade_cal`、`stock_basic`，如为交易日还检查 `daily_basic`，**不写入Neon**。
-4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行**仅含行情与缓存财报筛选**的每日任务；财务采集请使用独立`A-Share Financial Statement Refresh`工作流，建议从`budget=1`或`5`开始。行情不完整时仍会失败，不伪造选股结果。
+4. 如果连接测试通过，再用 `api_source=relay` 和 `check_api_only=false` 运行**只保存行情数据**的任务；成功后将自动触发独立NCAV缓存重算；财务采集由`A-Share Financial Statement Refresh`工作流负责，建议从`budget=1`或`5`开始。行情不完整时仍会失败，不伪造选股结果。
 5. 想恢复官方接口，将 `api_source` 切回 `official`。工作日北京时间19:30的自动任务始终按默认 `official` 执行。
 
 默认中转网址已内置；如果服务方提供HTTPS或更换域名，可在GitHub Actions的 **Variables** 添加 `TUSHARE_RELAY_URL`。仅在显式选择中转的运行中生效。
@@ -82,23 +82,28 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 
 `check-api` 不写数据库，也不需要 `DATABASE_URL`。 `scan`、`bootstrap-prices`、`bootstrap-financials` 均采用相同的数据源选择配置。官方Token和中转Token都只能放在机密变量中，不能放在GitHub代码、URL参数或公开日志中。
 
-## 3B. 每日行情和两阶段财报补齐（2026-11-23）
+## 3B. 三个独立工作流：行情、财务、NCAV重算
 
-| 工作流 | 北京时间 | 默认参数 | 用途 |
+| 工作流 | 执行时间（北京时间） | Tushare调用 | 用途 |
 |---|---|---|---|
-| [A-Share Daily Net-Net Scan](.github/workflows/daily-scan.yml) | **周一至周五19:30** | `api_source=official` | 更新行情并发布NCAV筛选 |
-| [A-Share Financial Statement Refresh](.github/workflows/financial-refresh.yml) | **每天23:00（含周六、周日）** | `api_source=official`, `budget=40` | 历史补齐，完成后按实际披露增量获取 |
+| [A-Share Market Data Refresh](.github/workflows/daily-scan.yml) | 周一至周五19:30 | 交易日历、股票列表、日行情 | 验证行情完整性并缓存到Neon，不计算NCAV |
+| [A-Share Financial Statement Refresh](.github/workflows/financial-refresh.yml) | 每天23:00（含周末，需开启） | 最多40家，优先缺失报表 | 补齐历史财报，之后根据实际披露日期增量更新 |
+| [A-Share Recalculate NCAV](.github/workflows/recalculate-ncav.yml) | 每次采集成功后自动触发；也可手动运行 | **0次** | 读取Neon缓存行情与财报，计算并原子发布NCAV榜单 |
 
-在仓库 Settings → Secrets and variables → Actions → Variables 添加 `ENABLE_FINANCIAL_SCHEDULE=true` 才会开启定时财务任务。当前工作流同时支持可选变量 `FINANCIAL_SCHEDULE_BUDGET`；**若已设置该变量，请将其值设为40**，否则变量值会覆盖默认40。手动运行时可通过 `budget` 调整（程序允许0至50家公司）。定时任务默认调用 **Tushare官方HTTPS API**，不自动切换中转。
+在 **Settings → Secrets and variables → Actions → Variables** 设置 `ENABLE_FINANCIAL_SCHEDULE=true` 才会启用定时财务任务。财务更新默认 `budget=40`，若已配置 `FINANCIAL_SCHEDULE_BUDGET`，请设为40或删除该变量。两类采集任务和重算任务共享 `a-share-data-pipeline` 并发组，避免读取不完整的数据。
 
-**无需手动切换阶段，也无需执行Neon数据库迁移：**
+数据流：**行情采集/财报补齐 → Neon数据库 → Recalculate NCAV → 网站榜单**。
 
-1. **补齐阶段（backlog）**：从最近一次行情筛出的低价、低PB、非ST股票中，识别缺少三张财报、报告期不一致或资产负债表期末超过280天的公司。每次最多40家；同一公司若已有有效报表，只下载缺失的报表种类；失败后至少6小时冷却。已保存完整且报告期一致的公司不再仅因过去30天而重复采集。
-2. **实际披露驱动阶段（disclosure_incremental）**：上述缺口清零后，利用2,000积分可调用的 `disclosure_date` 查询最新两个已结束季度，**只接受 `actual_date` 为真实过去披露日期的记录**，不把计划披露日 `pre_date` 视为已披露。与Neon中已有的报告期及公告日比较，只有缺失新报告或有更新披露的公司才触发报表API请求，每次不超过40家；多余公司将在之后的日期继续排队。
-3. **周末处理**：周末不调用行情API，复用Neon最后一个交易日的行情选股池；最近行情超过14个自然日会中止财务任务，以防旧名单长期使用。新增报表在下一次正式交易日扫描后才会反映于网站榜单。
-4. **安全与验证**：仅使用带可核实披露日期的合并报表；超过 `disclosure_date` 单次6000条上限会停止并报警，防止遗漏。失败任务不覆盖正式选股快照，成功采集的数据继续保留。
+行情工作流仍可手动选择 `check_api_only=true` 检查API。该模式不写数据库；Recalculate NCAV 会通过前置GitHub运行ID核对Neon中是否存在成功的采集任务，没有则安全跳过、不发布。工作日休市时行情任务也会跳过写入。旧的手工CLI `scan` 保留兼容，但自动工作流使用分开的 `fetch-market` 和 `recalculate-ncav`。
 
-**限制**：`disclosure_date`提供计划披露及实际披露日期，不是完整的逐条历史报表更正公告。最新两个季度之外的更正、上游延迟录入或缺失实际披露日期，仍可能需要专项核查，不能保证自动发现所有历史重述。两个工作流共用并发组，避免本仓库内同时占用同一Tushare令牌；仓库外其他任务不受约束。
+**财务补齐与增量更新：**
+
+1. 初始阶段选择财报缺失、三表报告期不一致或报告期过旧的低价、低PB股票。每天最多补齐40家公司；只下载需要的报表种类。失败至少冷却6小时。
+2. 上述缺口完成后，使用2,000积分可调用的 `disclosure_date` 检查最近两个已结束季度，仅采纳 `actual_date` 已实际披露的公司；未出现真实新披露的，不重复请求财务报表。已保存的完整财报不再因满30天而自动全部重下。
+3. 周末不更新股票行情，但可以继续财报补齐和NCAV缓存重算。**历史时点安全规则**：重算使用最后一个已保存的交易日行情，且只纳入该交易日之前已披露的财报（`disclosed_at < trade_date`）。如果周五收盘后、周末新披露报表，这些资料必须等下一交易日行情入库后才能进入正式榜单，不能回填周五快照。
+4. 重算仅需GitHub Secret `DATABASE_URL`，不使用Tushare Token；行情或财报API限流不会影响已发布快照。对于当日多次重算，数据库会在同一事务中替换同一交易日的筛选结果。
+
+**补充限制**：披露日历并非完整历史财报修订事件流，最新两季以外的更正、源站延迟、缺失公告日期仍需单独核查。已有成功的快照不会因下游任务失败被标记为成功或清空。
 
 ## 4. 在Vercel部署
 
@@ -118,8 +123,10 @@ Vercel仅渲染结果，不参与数千只股票数据采集，不需要Tushare 
 pip install -r backend/requirements.txt
 PYTHONPATH=backend python -m value_screener.cli init-db
 PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 110
-PYTHONPATH=backend python -m value_screener.cli scan
+PYTHONPATH=backend python -m value_screener.cli fetch-market
+PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 40
+PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 ```
 
 如果有Tushare Pro VIP全市场财务接口权限，建议再执行：
@@ -127,7 +134,7 @@ PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 40
 ```bash
 PYTHONPATH=backend python -m value_screener.cli bootstrap-financials --period 20260930
 PYTHONPATH=backend python -m value_screener.cli bootstrap-financials --period 20260630
-PYTHONPATH=backend python -m value_screener.cli scan
+PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 ```
 
 在Windows PowerShell中，需要先设置 `$env:PYTHONPATH='backend'`，并在**本机环境**设置对应数据库URL和Tushare Token；不要将真实密钥写入脚本或提交到GitHub。

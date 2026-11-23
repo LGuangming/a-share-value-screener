@@ -18,68 +18,139 @@ LOGGER = logging.getLogger("value_screener")
 CN_TZ = ZoneInfo("Asia/Shanghai")
 
 
-def run_scan(args):
+def fetch_market(args) -> bool:
+    """Fetch validated daily quotes only; do not calculate or publish NCAV.
+
+    Returns False on exchange holidays so the legacy combined CLI can skip
+    recalculation. The scheduled workflow uses this command independently.
+    """
     day = date.fromisoformat(args.date) if args.date else datetime.now(CN_TZ).date()
     db = os.environ.get("DATABASE_URL", "")
     if not db:
-        raise RuntimeError("DATABASE_URL is required; see README.md")
+        raise RuntimeError("DATABASE_URL is required")
     client = TushareClient.from_environment()
     store = Store(db)
     run_id = uuid4()
-    store.start_run(run_id, "daily_scan", day)
+    store.start_run(run_id, "market_refresh", day)
     stats = {"asof": day.isoformat(), "api_source": client.source,
-             "financial_source": "cached_disclosed_reports",
-             "financial_api_calls": 0,
-             "notes": "Daily scan never fetches financial reports; missing or stale data stays flagged."}
+             "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+             "notes": "Market data only. NCAV publication is handled by recalculate-ncav."}
     try:
         if not client.trade_open(day.strftime("%Y%m%d")):
-            LOGGER.info("Closed session %s; skipping", day)
             store.finish_run(run_id, "skipped", stats)
-            return
+            LOGGER.info("Closed trading session %s; market refresh skipped", day)
+            return False
         stocks = client.stocks()
-        stats["listed_stocks"] = store.upsert_stocks(stocks)
+        if not stocks:
+            raise RuntimeError("No stock list returned")
+        stats["listed_stocks"] = len(stocks)
         quotes = client.daily(day.strftime("%Y%m%d"))
-        # Avoid publishing false 'zero candidate' results when provider only returns partial quotes.
-        min_rows = max(1000, round(stats["listed_stocks"] * 0.70))
+        min_rows = max(1000, round(len(stocks) * 0.70))
         if len(quotes) < min_rows:
-            raise RuntimeError(f"Daily quotes incomplete: {len(quotes)} versus {min_rows} minimum")
+            raise RuntimeError(
+                f"Daily quotes incomplete: {len(quotes)} versus {min_rows} minimum"
+            )
+        store.upsert_stocks(stocks)
         stats["quoted_stocks"] = store.upsert_quotes(quotes, day)
-        # Financials are updated by the isolated refresh-financials command.
-        # Keep the daily close and cached-as-of screening independent of API 429s.
-        rows = store.screen_inputs(day)
+        if stats["quoted_stocks"] < min_rows:
+            raise RuntimeError(
+                f"Valid daily quotes incomplete: {stats['quoted_stocks']} versus {min_rows} minimum"
+            )
+        store.finish_run(run_id, "success", stats)
+        LOGGER.info("Market refresh successful: %s", json.dumps(stats, ensure_ascii=False))
+        return True
+    except Exception as exc:
+        store.finish_run(run_id, "failed", stats, str(exc))
+        LOGGER.exception("Market refresh failed; no successful market run published")
+        raise
+
+
+def recalculate_ncav(args):
+    """Calculate the latest stored close using only earlier disclosed financials.
+
+    No external API calls, no extra Tushare permissions, no look-ahead leakage.
+    Replacing an existing same-trade-date snapshot is atomic.
+    """
+    asof = date.fromisoformat(args.date) if getattr(args, "date", None) else datetime.now(CN_TZ).date()
+    db = os.environ.get("DATABASE_URL", "")
+    if not db:
+        raise RuntimeError("DATABASE_URL is required")
+    store = Store(db)
+    trigger_run_id = getattr(args, "trigger_run_id", None)
+    if trigger_run_id is not None and not store.has_successful_data_trigger(trigger_run_id):
+        LOGGER.info("Skipping recalculate-ncav: triggering workflow did not save new market or finance data (run %s)",
+                    trigger_run_id)
+        return
+    quote_day = store.latest_quote_date(asof)
+    if quote_day is None:
+        raise RuntimeError("No cached daily quotes available; fetch market data first")
+    if (asof - quote_day).days > 14:
+        raise RuntimeError(
+            f"Latest cached quote date {quote_day} is more than 14 days old; "
+            "refusing to publish a stale NCAV snapshot"
+        )
+    coverage = store.quote_coverage(quote_day)
+    min_rows = max(1000, round(coverage["listed_stocks"] * 0.70))
+    if coverage["quoted_stocks"] < min_rows:
+        raise RuntimeError(
+            f"Cached daily quotes incomplete: {coverage['quoted_stocks']} versus {min_rows} minimum"
+        )
+    run_id = uuid4()
+    store.start_run(run_id, "daily_scan", quote_day)
+    stats = {"asof": quote_day.isoformat(), "quote_day": quote_day.isoformat(),
+             "calculated_at": asof.isoformat(),
+             "api_source": "cached_market_quotes",
+             "financial_source": "cached_disclosed_reports",
+             "market_api_calls": 0, "financial_api_calls": 0,
+             "listed_stocks": coverage["listed_stocks"],
+             "quoted_stocks": coverage["quoted_stocks"],
+             "notes": "Recalculated with Neon data; disclosures strictly earlier than quote day."}
+    try:
+        rows = store.screen_inputs(quote_day)
         stats["pre_screened"] = len(rows)
         results = []
         for row in rows:
             stock = {"ts_code": row["ts_code"], "name": row["name"], "is_st": row["is_st"]}
-            r = assess(stock,row["quote"],row["balance"],row["income"],row["cashflow"],ScreenConfig())
+            r = assess(stock, row["quote"], row["balance"], row["income"],
+                       row["cashflow"], ScreenConfig())
             r["report_date"] = row["report_date"]
             r["ann_date"] = row["ann_date"]
             if row["report_date"] is not None:
-                if (row.get("income_end_date") is not None and row["income_end_date"] != row["report_date"]) or (row.get("cashflow_end_date") is not None and row["cashflow_end_date"] != row["report_date"]):
+                if ((row.get("income_end_date") is not None and
+                     row["income_end_date"] != row["report_date"]) or
+                    (row.get("cashflow_end_date") is not None and
+                     row["cashflow_end_date"] != row["report_date"])):
                     r["flags"].append("FINANCIAL_PERIOD_MISMATCH")
                     r["assessment"] += " 利润或现金流与资产负债表报告期间不一致，需核对口径。"
-            # No outdated balance can be used indefinitely without a stale-data flag.
-            if row["report_date"] and (day - row["report_date"]).days > 280:
+            if row["report_date"] and (quote_day - row["report_date"]).days > 280:
                 r["flags"].append("STALE_FINANCIALS")
                 r["is_candidate"] = False
                 r["status"] = "STALE_FINANCIALS"
                 r["assessment"] += " 财报报告期距今超过280天，暂不进入候选池。"
             results.append(r)
         selected = [r["ts_code"] for r in results if r["is_candidate"]]
-        histories = store.price_history(selected,day)
+        histories = store.price_history(selected, quote_day)
         for r in results:
             if r["is_candidate"]:
-                r["signal"] = technical_signal(histories.get(r["ts_code"], []),True,r["flags"])
+                r["signal"] = technical_signal(
+                    histories.get(r["ts_code"], []), True, r["flags"]
+                )
         stats["candidate_count"] = len(selected)
         stats["financial_data_gap"] = sum(r["status"] == "DATA_GAP" for r in results)
         stats["rows_published"] = len(results)
-        store.publish(day,run_id,results,stats)
-        # Successful status and rows are committed atomically in Store.publish.
-        LOGGER.info("Scan successful: %s",json.dumps(stats,ensure_ascii=False))
+        store.publish(quote_day, run_id, results, stats)
+        LOGGER.info("NCAV recalculation published: %s",
+                    json.dumps(stats, ensure_ascii=False))
     except Exception as exc:
-        store.finish_run(run_id,"failed",stats,str(exc))
-        LOGGER.exception("Scan failed; no success marker published")
+        store.finish_run(run_id, "failed", stats, str(exc))
+        LOGGER.exception("NCAV recalculation failed; previous snapshot is preserved")
         raise
+
+
+def run_scan(args):
+    """Legacy combined CLI (manual only). Workflows use independent commands."""
+    if fetch_market(args):
+        recalculate_ncav(args)
 
 
 def run_financial_refresh(args):
@@ -97,7 +168,8 @@ def run_financial_refresh(args):
     run_id = uuid4()
     store.start_run(run_id, "financial_refresh", day)
     stats = {"asof": day.isoformat(), "budget": args.budget,
-             "api_source": client.source, "mode": None, "attempted": 0,
+             "api_source": client.source, "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+             "mode": None, "attempted": 0,
              "succeeded": 0, "failed": 0, "financial_api_calls": 0,
              "disclosure_api_calls": 0,
              "notes": "Fill incomplete statements first, then poll actual disclosures. No daily snapshot modified."}
@@ -278,12 +350,18 @@ def main():
     subs.add_parser("init-db", help="Create the database tables")
     check = subs.add_parser("check-api", help="Test the selected Tushare API without database writes")
     check.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
-    scan = subs.add_parser("scan",help="Scan a mainland-China trading day")
-    scan.add_argument("--date",help="Asia/Shanghai YYYY-MM-DD; default today")
+    market = subs.add_parser("fetch-market", help="Update stock universe and quotes only")
+    market.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
+    recalc = subs.add_parser("recalculate-ncav", help="Publish NCAV using cached market and financial data")
+    recalc.add_argument("--date", help="Optional latest date bound (default today)")
+    recalc.add_argument("--trigger-run-id", type=int,
+                        help="Only recalculate if triggering Actions run successfully saved market/finance data")
+    scan = subs.add_parser("scan", help="Legacy combined market fetch and NCAV calculation")
+    scan.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
     finance = subs.add_parser("refresh-financials", help="Independently refresh selected financial reports")
     finance.add_argument("--asof", help="Reference date in Asia/Shanghai (YYYY-MM-DD); default today")
     finance.add_argument("--budget", type=int, default=40,
-                         help="Companies to refresh (3 financial calls each); default 5")
+                         help="Maximum companies to refresh (missing report kinds only); default 40")
     vip = subs.add_parser("bootstrap-financials",help="Bulk quarter reports (requires Tushare VIP access)")
     vip.add_argument("--period",required=True,help="Quarter-end YYYYMMDD, e.g. 20260930")
     vip.add_argument("--min-coverage",type=float,default=0.80,
@@ -301,6 +379,10 @@ def main():
         LOGGER.info("Schema initialized")
     elif args.command == "check-api":
         check_api(args)
+    elif args.command == "fetch-market":
+        fetch_market(args)
+    elif args.command == "recalculate-ncav":
+        recalculate_ncav(args)
     elif args.command == "scan":
         run_scan(args)
     elif args.command == "refresh-financials":

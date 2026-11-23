@@ -14,7 +14,7 @@ A deployable MVP for low-priced A-share Net-Net / distressed-value research. The
 - Labels operating cash flow, profitability, leverage, receivables/inventory concentration, stale reports and data gaps.
 - Uses actual reported **disclosure dates** (`f_ann_date` then `ann_date`) and a conservative one-calendar-day lag to block same-day after-close look-ahead in historical trading-day screens.
 - Research-only MA20 / MA50 observation signals requiring >=50 completed price sessions, with no order routing.
-- Daily Python GitHub Actions job (weekday 19:30 Asia/Shanghai, i.e. 11:30 UTC), GitHub manual dispatch, idempotent daily snapshot publishing, job logs and partial-data alerts.
+- Three independent GitHub Actions workflows: weekday market ingestion (19:30 Asia/Shanghai), seven-day financial refresh (23:00, opt-in), and Tushare-free NCAV recalculation triggered after successful data updates.
 - Read-only Vercel server rendering; no synthetic rankings and no market-provider secrets in browser code.
 - Responsive dashboard, per-company analysis, signal list and methodology documentation. **Backtest page is intentionally labeled unimplemented.**
 
@@ -54,7 +54,7 @@ In GitHub → Repository → Settings → Secrets and variables → Actions:
 - `TUSHARE_TOKEN`: Tushare Pro token
 - `DATABASE_URL`: Postgres connection string for ingestion
 
-Daily schedule is in [`.github/workflows/daily-scan.yml`](.github/workflows/daily-scan.yml). Monday–Friday 11:30 UTC is 19:30 Asia/Shanghai year-round. Chinese holidays are checked via Tushare's SSE trading calendar. GitHub cron is **best-effort**, so scheduled runs may be delayed or skipped. Set up external monitoring or manually rerun on missed days. Only a successful complete scan becomes the website's latest published result.
+Market ingestion schedule is in [`.github/workflows/daily-scan.yml`](.github/workflows/daily-scan.yml); financial refresh and NCAV recalculation have their own workflows. The recalc job reads only Neon data, requires no Tushare token, and never uses reports disclosed on or after the market quote date.  Monday–Friday 11:30 UTC is 19:30 Asia/Shanghai year-round. Chinese holidays are checked via Tushare's SSE trading calendar. GitHub cron is **best-effort**, so scheduled runs may be delayed or skipped. Set up external monitoring or manually rerun on missed days. Only a successful complete scan becomes the website's latest published result.
 
 First-time backfill (in local shell / an adequately provisioned runner):
 
@@ -68,7 +68,10 @@ export DATABASE_URL='postgresql://...'
 
 python -m value_screener.cli init-db
 python -m value_screener.cli bootstrap-prices --days 110
-python -m value_screener.cli scan --financial-budget 50
+python -m value_screener.cli fetch-market
+python -m value_screener.cli recalculate-ncav
+python -m value_screener.cli refresh-financials --budget 40
+python -m value_screener.cli recalculate-ncav
 ```
 
 The `bootstrap-prices` job may require numerous API requests. Watch provider limits before increasing its run size. Its `daily_basic` history is sufficient for basic MA observation, not for a survivorship-bias-free backtest.
@@ -163,7 +166,7 @@ If your Tushare plan permits `balancesheet_vip`, `income_vip`, and `cashflow_vip
 ```bash
 PYTHONPATH=backend python -m value_screener.cli bootstrap-financials --period 20260930
 PYTHONPATH=backend python -m value_screener.cli bootstrap-financials --period 20260630
-PYTHONPATH=backend python -m value_screener.cli scan --financial-budget 0
+PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 ```
 
 The importer checks returned coverage and logs shortfalls; some endpoints/permissions may truncate or reject the data. It does **not** silently claim all A shares were retrieved. Only listed tickers with valid consolidated `report_type=1` statements are ingested. Perform additional earlier quarters if needed. The daily task continues with bounded per-company incremental refresh.

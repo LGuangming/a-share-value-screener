@@ -1,0 +1,46 @@
+name: A-Share Recalculate NCAV
+
+on:
+  workflow_run:
+    workflows:
+      - A-Share Market Data Refresh
+      - A-Share Financial Statement Refresh
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not read a partial financial/market update or publish two snapshots together.
+concurrency:
+  group: a-share-data-pipeline
+  cancel-in-progress: false
+
+jobs:
+  recalculate:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PYTHONPATH: backend
+      TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Verify database access
+        run: test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
+      - name: Recalculate and publish using cached Neon data (no Tushare requests)
+        run: |
+          if [ -n "$TRIGGER_RUN_ID" ]; then
+            python -m value_screener.cli recalculate-ncav --trigger-run-id "$TRIGGER_RUN_ID"
+          else
+            python -m value_screener.cli recalculate-ncav
+          fi

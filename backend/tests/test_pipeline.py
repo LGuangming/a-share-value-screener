@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 # replaces the Store factory with an isolated mock.
 from unittest.mock import Mock as _Mock
 with patch.dict("sys.modules", {"value_screener.store": _Mock(Store=_Mock())}):
-    from value_screener.cli import run_scan, run_financial_refresh, TushareError
+    from value_screener.cli import run_scan, fetch_market, recalculate_ncav, run_financial_refresh, TushareError
 
 
 class PipelineIsolationTests(unittest.TestCase):
@@ -24,6 +24,8 @@ class PipelineIsolationTests(unittest.TestCase):
         store = Mock()
         store.upsert_stocks.return_value = 1000
         store.upsert_quotes.return_value = 1000
+        store.quote_coverage.return_value = {"listed_stocks": 1000, "quoted_stocks": 1000}
+        store.has_successful_data_trigger.return_value = True
         store.screen_inputs.return_value = []
         store.latest_quote_date.return_value = date(2026, 11, 20)
         store.financial_backlog.return_value = {"remaining": 1, "queue": ["000910.SZ"]}
@@ -46,10 +48,78 @@ class PipelineIsolationTests(unittest.TestCase):
         store.financial_backlog.assert_not_called()
         store.ingest_reports.assert_not_called()
         store.publish.assert_called_once()
+        store.finish_run.assert_called_once()
+        self.assertEqual(store.finish_run.call_args.args[1], "success")
         metrics = store.publish.call_args.args[3]
         self.assertEqual(metrics["financial_api_calls"], 0)
         self.assertEqual(metrics["financial_source"], "cached_disclosed_reports")
-        store.finish_run.assert_not_called()
+        self.assertEqual(metrics["market_api_calls"], 0)
+
+    def test_fetch_market_is_only_a_data_ingestion_step(self):
+        client, store = self.prepare()
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            self.assertTrue(fetch_market(SimpleNamespace(date="2026-11-20")))
+        store.upsert_stocks.assert_called_once()
+        store.upsert_quotes.assert_called_once()
+        store.publish.assert_not_called()
+        store.screen_inputs.assert_not_called()
+        store.finish_run.assert_called_once()
+        self.assertEqual(store.finish_run.call_args.args[1], "success")
+
+    def test_recalculate_uses_no_tushare_requests(self):
+        client, store = self.prepare()
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment",
+                           side_effect=AssertionError("No Tushare client allowed")),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            recalculate_ncav(SimpleNamespace(date="2026-11-23", trigger_run_id=None))
+        store.quote_coverage.assert_called_once_with(date(2026, 11, 20))
+        store.publish.assert_called_once()
+        self.assertEqual(store.publish.call_args.args[3]["market_api_calls"], 0)
+        self.assertEqual(store.publish.call_args.args[3]["financial_api_calls"], 0)
+
+    def test_readonly_probe_does_not_trigger_recalculation(self):
+        client, store = self.prepare()
+        store.has_successful_data_trigger.return_value = False
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            recalculate_ncav(SimpleNamespace(date="2026-11-23", trigger_run_id=12345))
+        store.has_successful_data_trigger.assert_called_once_with(12345)
+        store.latest_quote_date.assert_not_called()
+        store.start_run.assert_not_called()
+        store.publish.assert_not_called()
+
+    def test_successful_workflow_run_triggers_recalculation(self):
+        client, store = self.prepare()
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            recalculate_ncav(SimpleNamespace(date="2026-11-23", trigger_run_id=12345))
+        store.has_successful_data_trigger.assert_called_once_with(12345)
+        store.publish.assert_called_once()
+
+    def test_market_holiday_does_not_publish(self):
+        client, store = self.prepare()
+        client.trade_open.return_value = False
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            self.assertFalse(fetch_market(SimpleNamespace(date="2026-11-21")))
+        client.stocks.assert_not_called()
+        store.upsert_quotes.assert_not_called()
+        store.publish.assert_not_called()
+        self.assertEqual(store.finish_run.call_args.args[1], "skipped")
+
+    def test_incomplete_cached_quotes_block_recalculation(self):
+        client, store = self.prepare()
+        store.quote_coverage.return_value = {"listed_stocks": 5500, "quoted_stocks": 500}
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            with self.assertRaisesRegex(RuntimeError, "Cached daily quotes incomplete"):
+                recalculate_ncav(SimpleNamespace(date="2026-11-23", trigger_run_id=None))
+        store.publish.assert_not_called()
+        store.start_run.assert_not_called()
 
     def test_financial_refresh_is_independent_from_publication(self):
         client, store = self.prepare()
