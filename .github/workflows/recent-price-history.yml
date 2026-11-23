@@ -1,11 +1,6 @@
 name: A-Share Recent Price History Backfill
 
 on:
-  # Initial one-shot launch; removed after the first job is queued.
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/recent-history-20261123.txt'
   workflow_dispatch:
     inputs:
       days:
