@@ -41,6 +41,7 @@ export type ScreenerRow = {
   disclosed_at: string | null;
   operating_cf_yuan: number | null;
   net_profit_yuan: number | null;
+  cashflow_detail: "VERIFIED" | "REPORT_MISSING" | "FIELD_MISSING" | "NOT_YET_DISCLOSED";
   is_candidate: boolean;
   status: string;
   signal: string;
@@ -70,6 +71,9 @@ function normalizeRow(raw: Record<string, unknown>): ScreenerRow {
     stress_coverage: numeric(raw.stress_coverage), liability_ratio: numeric(raw.liability_ratio),
     report_date: dateString(raw.report_date), disclosed_at: dateString(raw.disclosed_at),
     operating_cf_yuan: numeric(raw.operating_cf_yuan), net_profit_yuan: numeric(raw.net_profit_yuan),
+    cashflow_detail: raw.cashflow_detail === "FIELD_MISSING" ||
+      raw.cashflow_detail === "NOT_YET_DISCLOSED" || raw.cashflow_detail === "VERIFIED"
+      ? raw.cashflow_detail : "REPORT_MISSING",
     is_candidate: raw.is_candidate === true, status: String(raw.status ?? "DATA_GAP"),
     signal: String(raw.signal ?? "NOT_EVALUATED"),
     flags: Array.isArray(raw.flags) ? raw.flags.map(String) : [],
@@ -102,7 +106,21 @@ export async function screeningRows(day: string): Promise<ScreenerRow[]> {
   if (!db || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
   try {
     const rows = await db`
-      SELECT r.*,s.name,s.industry,s.market
+      SELECT r.*,s.name,s.industry,s.market,
+        CASE
+          WHEN r.operating_cf_yuan IS NOT NULL THEN 'VERIFIED'
+          WHEN EXISTS (
+            SELECT 1 FROM financial_reports f
+            WHERE f.ts_code=r.ts_code AND f.kind='cashflow'
+              AND f.disclosed_at < r.trade_date AND f.end_date <= r.trade_date
+          ) THEN 'FIELD_MISSING'
+          WHEN EXISTS (
+            SELECT 1 FROM financial_reports f
+            WHERE f.ts_code=r.ts_code AND f.kind='cashflow'
+              AND f.disclosed_at >= r.trade_date AND f.end_date <= r.trade_date
+          ) THEN 'NOT_YET_DISCLOSED'
+          ELSE 'REPORT_MISSING'
+        END AS cashflow_detail
       FROM screen_results r JOIN stocks s USING(ts_code)
       JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
       WHERE r.trade_date=${day} AND r.strategy='netnet_v1'
@@ -121,7 +139,21 @@ export async function stockDetail(code: string): Promise<{ stock: ScreenerRow | 
   if (!db || !/^\d{6}\.(SH|SZ|BJ)$/.test(code)) return { stock: null, prices: [], recent: [] };
   try {
     const rows = await db`
-      SELECT r.*,s.name,s.industry,s.market FROM screen_results r
+      SELECT r.*,s.name,s.industry,s.market,
+        CASE
+          WHEN r.operating_cf_yuan IS NOT NULL THEN 'VERIFIED'
+          WHEN EXISTS (
+            SELECT 1 FROM financial_reports f
+            WHERE f.ts_code=r.ts_code AND f.kind='cashflow'
+              AND f.disclosed_at < r.trade_date AND f.end_date <= r.trade_date
+          ) THEN 'FIELD_MISSING'
+          WHEN EXISTS (
+            SELECT 1 FROM financial_reports f
+            WHERE f.ts_code=r.ts_code AND f.kind='cashflow'
+              AND f.disclosed_at >= r.trade_date AND f.end_date <= r.trade_date
+          ) THEN 'NOT_YET_DISCLOSED'
+          ELSE 'REPORT_MISSING'
+        END AS cashflow_detail FROM screen_results r
       JOIN stocks s USING(ts_code)
       JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
       WHERE r.ts_code=${code} AND r.strategy='netnet_v1'

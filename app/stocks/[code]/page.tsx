@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { ArrowLeft, CalendarClock, FileCheck2, ShieldAlert, TrendingUp, AlertTriangle } from "lucide-react";
 import { stockDetail } from "@/lib/data";
 import { fixed, pct, moneyCny, stateLabel, signalLabel, flagLabel } from "@/lib/format";
+import { evaluateFundamentalReview, severityLabel, priorityLabel } from "@/lib/review";
 import { Sparkline } from "@/components/sparkline";
 import { Empty } from "@/components/empty";
 
@@ -17,6 +18,7 @@ export async function generateMetadata({params}: Props): Promise<Metadata> {
 export default async function StockPage({params}: Props) {
   const {code} = await params;
   const {stock,prices,recent} = await stockDetail(decodeURIComponent(code));
+  const review = stock ? evaluateFundamentalReview(stock) : null;
   return <main className="page-container">
     <Link className="back-link" href="/"><ArrowLeft size={16}/> 返回每日选股</Link>
     {!stock ? <div className="panel"><Empty title="暂未找到该股票的已发布研究记录" detail="可能尚未进入低价预筛范围，或者数据库还未完成首轮扫描。"/></div> : <>
@@ -31,6 +33,27 @@ export default async function StockPage({params}: Props) {
         <div className="stat-card"><span>压力价值覆盖率</span><strong>{pct(stock.stress_coverage,1)}</strong><small>假设性回收率测算</small></div>
         <div className="stat-card"><span>当前信号</span><strong className="status-stat">{signalLabel(stock.signal)}</strong><small>并非交易指令</small></div>
       </div>
+      {review && <section className="panel review-detail-panel">
+        <div className="panel-heading"><div>
+          <div className="section-kicker">FUNDAMENTAL RISK REVIEW</div>
+          <h2>基本面复核摘要</h2>
+          <p>按已取得的结构化数据自动判断，并非人工财务尽调或资产可回收性核查。</p>
+        </div></div>
+        <div className="review-summary-grid">
+          <div><span>风险等级</span><strong className={`review-level review-level-${review.severity.toLowerCase()}`}>{severityLabel[review.severity]}</strong></div>
+          <div><span>复核优先级</span><strong>{priorityLabel[review.priority]}</strong></div>
+          <div><span>主要复核类别</span><strong>{review.focus}</strong></div>
+          <div><span>系统初评结论</span><strong className={`review-conclusion review-conclusion-${review.conclusion === "通过" ? "pass" : review.conclusion === "待补充资料" ? "pending" : "block"}`}>{review.conclusion}</strong></div>
+        </div>
+        <h3 className="review-subhead">复核原因与建议核查事项</h3>
+        {review.reasons.length ? <div className="review-findings">
+          {review.reasons.map(reason => <div className="review-finding" key={reason.code}>
+            <div className="review-finding-heading"><strong>{reason.label}</strong>
+              <span>{reason.focus} · 风险{severityLabel[reason.severity]}</span></div>
+            <p>{reason.explanation}</p>
+          </div>)}
+        </div> : <p className="review-muted">当前规则未识别到需重点复核的事项，但仍须核实财报附注、资产受限、重大诉讼及非结构化信息。</p>}
+      </section>}
       <div className="detail-grid">
         <section className="panel"><div className="panel-heading"><div><div className="section-kicker">PRICE HISTORY</div><h2>收盘价变化</h2></div><TrendingUp size={18} className="muted"/></div>
           <Sparkline prices={prices}/><p className="note">历史价格为原始收盘价，尚未进行复权和交易成本处理，不代表策略收益。</p>
@@ -53,7 +76,7 @@ export default async function StockPage({params}: Props) {
           <div className="research-disclaimer"><ShieldAlert size={18}/><span>根据财务数据和固定规则自动生成，不是经过人工审计的深入尽调报告。需要进一步核对附注、账龄、受限资金及关联交易。</span></div>
         </section>
         <section className="panel"><div className="section-kicker">RISK CHECKS</div><h2>财务风险和未核验项目</h2>
-          {stock.flags.length ? <div className="flag-list">{stock.flags.map((flag,i)=><span key={`${flag}-${i}`} className="risk-flag"><AlertTriangle size={14}/>{flagLabel(flag)}</span>)}</div>
+          {stock.flags.length ? <div className="flag-list">{stock.flags.map((flag,i)=><span key={`${flag}-${i}`} className="risk-flag"><AlertTriangle size={14}/>{flag === "CASHFLOW_NOT_VERIFIED" ? review?.reasons.find(x => x.code.startsWith("CASHFLOW_"))?.label ?? flagLabel(flag) : flagLabel(flag)}</span>)}</div>
           : <div className="no-flags"><FileCheck2 size={20}/> 未由当前自动规则识别到风险标记；不代表不存在未披露或非结构化风险。</div>}
           <div className="dates"><div><CalendarClock size={15}/> 财务报告期：{stock.report_date || "未取得"}</div>
             <div><CalendarClock size={15}/> 财报披露日：{stock.disclosed_at || "未取得"}</div></div>

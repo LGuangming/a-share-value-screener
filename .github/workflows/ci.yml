@@ -25,6 +25,8 @@ jobs:
           node-version: '22'
       - name: Install
         run: npm install --no-audit --no-fund
+      - name: Fundamental review classification tests
+        run: npm run test:review
       - name: Typecheck
         run: npm run typecheck
       - name: Build
