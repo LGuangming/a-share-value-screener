@@ -1,16 +1,16 @@
 name: A-Share Financial Statement Refresh
 
 on:
-  # Scheduled jobs are disabled until a reliable provider is configured.
+  # Scheduled jobs are opt-in via ENABLE_FINANCIAL_SCHEDULE=true.
   # Set repository variable ENABLE_FINANCIAL_SCHEDULE=true when ready.
   schedule:
-    - cron: '0 15 * * 1-5' # 23:00 China Standard Time weekdays
+    - cron: '0 15 * * *' # 23:00 China Standard Time every day (including weekends)
   workflow_dispatch:
     inputs:
       budget:
-        description: 'Number of stocks to refresh (3 report APIs each)'
+        description: 'Company cap per day (only missing/newly disclosed report kinds)'
         required: false
-        default: '5'
+        default: '40'
         type: string
       asof:
         description: 'Optional reference date YYYY-MM-DD (China time)'

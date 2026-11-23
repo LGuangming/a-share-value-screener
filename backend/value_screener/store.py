@@ -88,23 +88,102 @@ class Store:
             ).fetchone()
         return row["quote_day"] if row else None
 
-    def financial_queue(self, day: date, budget: int) -> list[str]:
-        # Prioritize genuine low-price/low-PB candidates and unsynced companies.
-        # Missing PB is allowed because rejecting missing data can hide NCAV ideas.
+    def financial_backlog(self, quote_day: date, asof: date, budget: int) -> dict:
+        """Find missing / mismatched financial statements for current candidates.
+
+        Do not query complete companies every 30 days. Count cooling companies
+        as incomplete, but exclude them from today's limited attempt budget.
+        """
+        cutoff = asof - timedelta(days=280)
         with self.connect() as conn:
             rows = conn.execute("""
-                SELECT p.ts_code FROM daily_prices p
+                SELECT p.ts_code,
+                       (log.attempted_at IS NULL OR
+                        log.attempted_at < now() - interval '6 hours') AS ready
+                FROM daily_prices p
                 JOIN stocks s USING(ts_code)
-                LEFT JOIN financial_fetch_log f USING(ts_code)
-                WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
-                  AND NOT s.is_st AND s.market NOT IN ('科创板','创业板','北交所')
-                  AND (f.succeeded_at IS NULL OR f.succeeded_at < now()-interval '30 days')
-                  AND (f.attempted_at IS NULL OR f.attempted_at < now()-interval '6 hours')
-                ORDER BY (f.succeeded_at IS NOT NULL), f.succeeded_at ASC NULLS FIRST,
+                LEFT JOIN financial_fetch_log log USING(ts_code)
+                LEFT JOIN financial_reports r
+                  ON r.ts_code=p.ts_code AND r.disclosed_at<=%s AND r.end_date<=%s
+                WHERE p.trade_date=%s
+                  AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
+                  AND NOT s.is_st
+                  AND s.market NOT IN ('科创板','创业板','北交所')
+                GROUP BY p.ts_code, p.pb, p.market_cap_yuan, log.attempted_at
+                HAVING MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') IS NULL
+                    OR MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') < %s
+                    OR MAX(r.end_date) FILTER (WHERE r.kind='income') IS DISTINCT FROM
+                       MAX(r.end_date) FILTER (WHERE r.kind='balancesheet')
+                    OR MAX(r.end_date) FILTER (WHERE r.kind='cashflow') IS DISTINCT FROM
+                       MAX(r.end_date) FILTER (WHERE r.kind='balancesheet')
+                ORDER BY log.attempted_at ASC NULLS FIRST,
                          p.pb ASC NULLS LAST, p.market_cap_yuan ASC
+            """, (asof, asof, quote_day, cutoff)).fetchall()
+        return {"remaining": len(rows),
+                "queue": [row["ts_code"] for row in rows if row["ready"]][:budget]}
+
+    def financial_disclosure_queue(self, quote_day: date, asof: date,
+                                    events: list[dict], budget: int) -> list[dict]:
+        """Only poll confirmed new quarter releases not yet stored completely."""
+        if not events or budget <= 0:
+            return []
+        codes = [e["ts_code"] for e in events]
+        periods = [e["period"] for e in events]
+        actuals = [e["actual_date"] for e in events]
+        with self.connect() as conn:
+            rows = conn.execute("""
+                WITH event_input AS (
+                    SELECT DISTINCT ON (ts_code) ts_code, period, actual_date
+                    FROM unnest(%s::text[], %s::date[], %s::date[])
+                         AS e(ts_code, period, actual_date)
+                    ORDER BY ts_code, period DESC, actual_date DESC
+                )
+                SELECT e.ts_code, e.period, e.actual_date
+                FROM event_input e
+                JOIN daily_prices p ON p.ts_code=e.ts_code AND p.trade_date=%s
+                JOIN stocks s ON s.ts_code=e.ts_code
+                LEFT JOIN financial_fetch_log log ON log.ts_code=e.ts_code
+                LEFT JOIN financial_reports r
+                  ON r.ts_code=e.ts_code AND r.end_date=e.period
+                 AND r.disclosed_at<=%s AND r.report_type='1'
+                WHERE p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
+                  AND NOT s.is_st
+                  AND s.market NOT IN ('科创板','创业板','北交所')
+                  AND (log.attempted_at IS NULL OR
+                       log.attempted_at < now()-interval '6 hours')
+                GROUP BY e.ts_code, e.period, e.actual_date, p.pb, p.market_cap_yuan
+                HAVING COUNT(DISTINCT r.kind) FILTER
+                     (WHERE r.disclosed_at>=e.actual_date) < 3
+                ORDER BY e.actual_date ASC, p.pb ASC NULLS LAST,
+                         p.market_cap_yuan ASC
                 LIMIT %s
-            """, (day, budget)).fetchall()
-        return [r["ts_code"] for r in rows]
+            """, (codes, periods, actuals, quote_day, asof, budget)).fetchall()
+        return [dict(row) for row in rows]
+
+    def financial_missing_kinds(self, code: str, asof: date,
+                                period: date | None = None,
+                                actual_date: date | None = None) -> list[str]:
+        """Fetch only missing statement kinds (or all if a newer revision exists)."""
+        kinds = ("balancesheet", "income", "cashflow")
+        with self.connect() as conn:
+            rows = conn.execute("""
+                SELECT kind, MAX(end_date) AS report_period,
+                       MAX(disclosed_at) AS announced
+                FROM financial_reports
+                WHERE ts_code=%s AND disclosed_at<=%s
+                  AND (%s::date IS NULL OR end_date=%s::date)
+                GROUP BY kind
+            """, (code, asof, period, period)).fetchall()
+        stored = {row["kind"]: row for row in rows}
+        if period is not None:
+            return [kind for kind in kinds
+                    if kind not in stored or
+                    (actual_date is not None and stored[kind]["announced"] < actual_date)]
+        newest = max((row["report_period"] for row in rows), default=None)
+        if newest is None or newest < asof - timedelta(days=280):
+            return list(kinds)
+        return [kind for kind in kinds
+                if kind not in stored or stored[kind]["report_period"] != newest]
 
     def ingest_reports(self, code: str, kind: str, rows: list[dict]):
         payload = []

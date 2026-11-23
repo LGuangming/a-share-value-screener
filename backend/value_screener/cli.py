@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from .rules import assess, technical_signal, ScreenConfig
 from .store import Store
 from .tushare_client import TushareClient, TushareError
+from .financial_schedule import confirmed_disclosures, recent_closed_quarters
 
 LOGGER = logging.getLogger("value_screener")
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -82,10 +83,10 @@ def run_scan(args):
 
 
 def run_financial_refresh(args):
-    """Refresh a bounded batch separately from the daily published snapshot.
+    """Daily 40-company limit: finish coverage backlog before disclosure updates.
 
-    Successful report inserts survive later provider errors. This command NEVER
-    calls Store.publish or changes job_runs of type daily_scan.
+    On non-trading days reuse the last saved quote universe. The independent
+    financial job never modifies the published daily scan snapshot.
     """
     day = date.fromisoformat(args.asof) if args.asof else datetime.now(CN_TZ).date()
     db = os.environ.get("DATABASE_URL", "")
@@ -95,12 +96,11 @@ def run_financial_refresh(args):
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "financial_refresh", day)
-    stats = {
-        "asof": day.isoformat(), "budget": args.budget,
-        "api_source": client.source, "attempted": 0,
-        "succeeded": 0, "failed": 0, "financial_api_calls_planned_max": args.budget * 3,
-        "notes": "Independent financial refresh; existing daily snapshots remain unchanged.",
-    }
+    stats = {"asof": day.isoformat(), "budget": args.budget,
+             "api_source": client.source, "mode": None, "attempted": 0,
+             "succeeded": 0, "failed": 0, "financial_api_calls": 0,
+             "disclosure_api_calls": 0,
+             "notes": "Fill incomplete statements first, then poll actual disclosures. No daily snapshot modified."}
     try:
         if args.budget == 0:
             store.finish_run(run_id, "skipped", stats)
@@ -115,30 +115,59 @@ def run_financial_refresh(args):
                 "refusing to refresh against an obsolete stock universe"
             )
         stats["quote_day"] = quote_day.isoformat()
-        queue = store.financial_queue(quote_day, args.budget)
+        backlog = store.financial_backlog(quote_day, day, args.budget)
+        stats["backlog_remaining_before"] = backlog["remaining"]
+        if backlog["remaining"] > 0:
+            stats["mode"] = "backlog"
+            queue = [{"ts_code": code, "period": None, "actual_date": None}
+                     for code in backlog["queue"]]
+        else:
+            stats["mode"] = "disclosure_incremental"
+            events = []
+            for period in recent_closed_quarters(day):
+                rows = client.disclosure_rows(period.strftime("%Y%m%d"))
+                stats["disclosure_api_calls"] += 1
+                if len(rows) >= 6000:
+                    raise RuntimeError(
+                        f"disclosure_date for {period} hit the 6000-row maximum; "
+                        "cannot verify complete new-disclosure coverage"
+                    )
+                events.extend(confirmed_disclosures(rows, period, day))
+            stats["confirmed_disclosures"] = len(events)
+            queue = store.financial_disclosure_queue(quote_day, day, events, args.budget)
         stats["queued"] = len(queue)
         if not queue:
             store.finish_run(run_id, "skipped", stats)
-            LOGGER.info("Financial refresh skipped: no due stocks in the cached candidate queue")
+            LOGGER.info("Financial refresh skipped: %s", json.dumps(stats, ensure_ascii=False))
             return
 
-        begin = (day - timedelta(days=540)).strftime("%Y%m%d")
-        end = day.strftime("%Y%m%d")
-        for code in queue:
+        for event in queue:
+            code = event["ts_code"]
+            period, actual_date = event["period"], event["actual_date"]
+            kinds = store.financial_missing_kinds(code, day, period, actual_date)
+            if not kinds:
+                LOGGER.info("No report kinds due for %s; skipping", code)
+                continue
             stats["attempted"] += 1
+            begin = (day - timedelta(days=540)).strftime("%Y%m%d")
+            end_date = day.strftime("%Y%m%d")
+            counts = {}
             try:
-                counts = {}
-                for kind in ("balancesheet", "income", "cashflow"):
-                    reports = client.report_rows(kind, code, begin, end)
+                for kind in kinds:
+                    stats["financial_api_calls"] += 1
+                    reports = client.report_rows(kind, code, begin, end_date)
                     counts[kind] = store.ingest_reports(code, kind, reports)
                 if all(counts.values()):
                     store.mark_financial_fetch(code, True)
                     stats["succeeded"] += 1
                 else:
                     missing = [kind for kind, count in counts.items() if not count]
-                    store.mark_financial_fetch(code, False, "missing eligible report: " + ",".join(missing))
+                    store.mark_financial_fetch(
+                        code, False, "missing eligible report: " + ",".join(missing)
+                    )
                     stats["failed"] += 1
-                    LOGGER.warning("Financial reports incomplete for %s: %s", code, ",".join(missing))
+                    LOGGER.warning("Financial reports incomplete for %s: %s",
+                                   code, ",".join(missing))
             except TushareError as exc:
                 store.mark_financial_fetch(code, False, str(exc)[:400])
                 stats["failed"] += 1
@@ -146,23 +175,21 @@ def run_financial_refresh(args):
                 error_lower = str(exc).lower()
                 if ("rate-limited" in error_lower or "provider server error" in error_lower or
                         "permission" in error_lower or "quota" in error_lower or
-                        "权限" in str(exc) or "积分" in str(exc) or
-                        "40203" in str(exc)):
+                        "权限" in str(exc) or "积分" in str(exc) or "40203" in str(exc)):
                     raise RuntimeError(
                         "Financial provider throttled or lacks permissions. "
-                        "Stopping this independent refresh; previously published "
-                        "daily snapshot remains available."
+                        "Stopping independent refresh; published scan remains intact."
                     ) from exc
             if stats["failed"] >= 3:
                 raise RuntimeError(
                     "Three incomplete financial-company refreshes; stopping this batch. "
-                    "Successful financial records remain saved."
+                    "Previously saved statements remain intact."
                 )
         store.finish_run(run_id, "success", stats)
         LOGGER.info("Financial refresh finished: %s", json.dumps(stats, ensure_ascii=False))
     except Exception as exc:
         store.finish_run(run_id, "failed", stats, str(exc))
-        LOGGER.exception("Financial refresh failed; saved statements remain, daily scan is unaffected")
+        LOGGER.exception("Financial refresh failed; stored statements and daily scan remain intact")
         raise
 
 
@@ -255,7 +282,7 @@ def main():
     scan.add_argument("--date",help="Asia/Shanghai YYYY-MM-DD; default today")
     finance = subs.add_parser("refresh-financials", help="Independently refresh selected financial reports")
     finance.add_argument("--asof", help="Reference date in Asia/Shanghai (YYYY-MM-DD); default today")
-    finance.add_argument("--budget", type=int, default=5,
+    finance.add_argument("--budget", type=int, default=40,
                          help="Companies to refresh (3 financial calls each); default 5")
     vip = subs.add_parser("bootstrap-financials",help="Bulk quarter reports (requires Tushare VIP access)")
     vip.add_argument("--period",required=True,help="Quarter-end YYYYMMDD, e.g. 20260930")

@@ -205,6 +205,11 @@ class TushareClient:
                           {"ts_code": code, "start_date": start_date, "end_date": end_date},
                           self.report_fields(api_name))
 
+    def disclosure_rows(self, period: str) -> list[dict]:
+        """Official 2000-point disclosure API; actual_date must be confirmed."""
+        return self.query("disclosure_date", {"end_date": period},
+                          "ts_code,end_date,actual_date,ann_date,pre_date")
+
     def bulk_report_rows(self, kind: str, period: str) -> list[dict]:
         """Tushare Pro VIP: all companies for a given reporting quarter.
 

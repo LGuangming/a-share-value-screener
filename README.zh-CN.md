@@ -51,7 +51,7 @@ git push -u origin main
 3. 进入仓库 Actions → **A-Share Daily Net-Net Scan** → Run workflow，手动执行第一次扫描。
 4. 运行记录中应出现行情股票数、财报获取数量、严格候选数量，以及财报未补齐数量。
 
-注意：**每日行情扫描已经与财务报表采集解耦**。每日任务只使用3个基础接口，结合Neon已保存的财务数据计算NCAV；未补齐财报会保留`DATA_GAP`或相应风险标记，不会伪造数据。另有独立`A-Share Financial Statement Refresh`用于增量补齐，默认每批5家公司（每家3个财务API）。
+注意：**每日行情与财报采集已解耦**。每日行情任务使用Neon已有财报筛选NCAV；独立财务工作流每周7天、每次最多40家公司，先补齐缺失报表，再根据实际披露日期增量更新。财务缺口保留显式风险标记。
 
 ## 3A. Tushare官方API与第三方中转API双模式
 
@@ -82,24 +82,23 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 
 `check-api` 不写数据库，也不需要 `DATABASE_URL`。 `scan`、`bootstrap-prices`、`bootstrap-financials` 均采用相同的数据源选择配置。官方Token和中转Token都只能放在机密变量中，不能放在GitHub代码、URL参数或公开日志中。
 
-## 3B. 每日扫描与独立财务增量更新（2026-11-23升级）
+## 3B. 每日行情和两阶段财报补齐（2026-11-23）
 
-为避免中转接口`balancesheet`、`income`、`cashflow`反复返回429而令当日选股失败，现拆分两个GitHub Actions工作流：
+| 工作流 | 北京时间 | 默认参数 | 用途 |
+|---|---|---|---|
+| [A-Share Daily Net-Net Scan](.github/workflows/daily-scan.yml) | **周一至周五19:30** | `api_source=official` | 更新行情并发布NCAV筛选 |
+| [A-Share Financial Statement Refresh](.github/workflows/financial-refresh.yml) | **每天23:00（含周六、周日）** | `api_source=official`, `budget=40` | 历史补齐，完成后按实际披露增量获取 |
 
-| 任务 | 链接 | 默认调用 |
-|---|---|---|
-| A-Share Daily Net-Net Scan | [每日行情与筛选](.github/workflows/daily-scan.yml) | 交易日历、股票基本信息、每日行情，各1次；**不下载财报** |
-| A-Share Financial Statement Refresh | [独立财务补齐](.github/workflows/financial-refresh.yml) | 每批默认5家公司，最多约15次财务请求（未计失败重试） |
+在仓库 Settings → Secrets and variables → Actions → Variables 添加 `ENABLE_FINANCIAL_SCHEDULE=true` 才会开启定时财务任务。当前工作流同时支持可选变量 `FINANCIAL_SCHEDULE_BUDGET`；**若已设置该变量，请将其值设为40**，否则变量值会覆盖默认40。手动运行时可通过 `budget` 调整（程序允许0至50家公司）。定时任务默认调用 **Tushare官方HTTPS API**，不自动切换中转。
 
-**建议的首次执行顺序：**
+**无需手动切换阶段，也无需执行Neon数据库迁移：**
 
-1. 先运行每日筛选（`api_source=relay`、`check_api_only=false`）。该步骤会更新Neon行情，以缓存中**公告日早于交易日**的财务数据进行NCAV计算，财务缺失即标记为数据缺口。
-2. 如需要补齐财报，打开独立财务工作流 → Run workflow，`api_source=relay`、`budget=1`或`5`。财务API再次429时，只会使**财务工作流**失败，并保留此前已成功写入的个股财报；不会回滚或标记每日行情任务失败。
-3. 财报补齐后需**再运行一次每日筛选**，才会刷新网站的当日已发布NCAV结果；财务任务本身不会直接修改网站上的选股榜单。
-4. 每个失败的股票会写入`financial_fetch_log`，至少隔6小时才会进入新一轮候选财务补齐队列；已成功的股票默认约30天后才会被重新排入刷新队列。当前为按时间和缺口选取的**增量补齐**，尚不是完全基于交易所新公告事件的实时触发。
-5. 如需启用财务自动更新，在仓库Settings → Secrets and variables → Actions → **Variables** 添加 `ENABLE_FINANCIAL_SCHEDULE=true`；开启后工作日北京时间23:00执行。定时默认选择官方Tushare API；需要专门为定时财务任务使用中转时，可以再加 `FINANCIAL_SCHEDULE_API_SOURCE=relay`。由于当前中转经常429，**建议先不要开启定时财务更新**，待服务商稳定后再启用。
+1. **补齐阶段（backlog）**：从最近一次行情筛出的低价、低PB、非ST股票中，识别缺少三张财报、报告期不一致或资产负债表期末超过280天的公司。每次最多40家；同一公司若已有有效报表，只下载缺失的报表种类；失败后至少6小时冷却。已保存完整且报告期一致的公司不再仅因过去30天而重复采集。
+2. **实际披露驱动阶段（disclosure_incremental）**：上述缺口清零后，利用2,000积分可调用的 `disclosure_date` 查询最新两个已结束季度，**只接受 `actual_date` 为真实过去披露日期的记录**，不把计划披露日 `pre_date` 视为已披露。与Neon中已有的报告期及公告日比较，只有缺失新报告或有更新披露的公司才触发报表API请求，每次不超过40家；多余公司将在之后的日期继续排队。
+3. **周末处理**：周末不调用行情API，复用Neon最后一个交易日的行情选股池；最近行情超过14个自然日会中止财务任务，以防旧名单长期使用。新增报表在下一次正式交易日扫描后才会反映于网站榜单。
+4. **安全与验证**：仅使用带可核实披露日期的合并报表；超过 `disclosure_date` 单次6000条上限会停止并报警，防止遗漏。失败任务不覆盖正式选股快照，成功采集的数据继续保留。
 
-每日扫描与财务补齐共用一个GitHub并发组，避免同仓库两项任务同时调用API。此机制不能限制仓库以外使用同一Token的其他客户端。中转地址目前为HTTP，建议服务商提供HTTPS后再考虑常态化自动采集。
+**限制**：`disclosure_date`提供计划披露及实际披露日期，不是完整的逐条历史报表更正公告。最新两个季度之外的更正、上游延迟录入或缺失实际披露日期，仍可能需要专项核查，不能保证自动发现所有历史重述。两个工作流共用并发组，避免本仓库内同时占用同一Tushare令牌；仓库外其他任务不受约束。
 
 ## 4. 在Vercel部署
 
@@ -120,7 +119,7 @@ pip install -r backend/requirements.txt
 PYTHONPATH=backend python -m value_screener.cli init-db
 PYTHONPATH=backend python -m value_screener.cli bootstrap-prices --days 110
 PYTHONPATH=backend python -m value_screener.cli scan
-PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 5
+PYTHONPATH=backend python -m value_screener.cli refresh-financials --budget 40
 ```
 
 如果有Tushare Pro VIP全市场财务接口权限，建议再执行：

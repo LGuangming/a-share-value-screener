@@ -26,7 +26,10 @@ class PipelineIsolationTests(unittest.TestCase):
         store.upsert_quotes.return_value = 1000
         store.screen_inputs.return_value = []
         store.latest_quote_date.return_value = date(2026, 11, 20)
-        store.financial_queue.return_value = ["000910.SZ"]
+        store.financial_backlog.return_value = {"remaining": 1, "queue": ["000910.SZ"]}
+        store.financial_missing_kinds.return_value = ["balancesheet", "income", "cashflow"]
+        store.financial_disclosure_queue.return_value = []
+        client.disclosure_rows.return_value = []
         store.ingest_reports.return_value = 1
         return client, store
 
@@ -40,7 +43,7 @@ class PipelineIsolationTests(unittest.TestCase):
         client.stocks.assert_called_once()
         client.daily.assert_called_once_with("20261120")
         client.report_rows.assert_not_called()
-        store.financial_queue.assert_not_called()
+        store.financial_backlog.assert_not_called()
         store.ingest_reports.assert_not_called()
         store.publish.assert_called_once()
         metrics = store.publish.call_args.args[3]
@@ -55,6 +58,7 @@ class PipelineIsolationTests(unittest.TestCase):
               patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=1))
         self.assertEqual(client.report_rows.call_count, 3)
+        client.disclosure_rows.assert_not_called()
         self.assertEqual([call.args[0] for call in client.report_rows.call_args_list],
                          ["balancesheet", "income", "cashflow"])
         store.mark_financial_fetch.assert_called_once_with("000910.SZ", True)
@@ -69,7 +73,7 @@ class PipelineIsolationTests(unittest.TestCase):
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
               patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
               patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
-            with self.assertRaisesRegex(RuntimeError, "Stopping this independent refresh"):
+            with self.assertRaisesRegex(RuntimeError, "Stopping independent refresh"):
                 run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=1))
         self.assertEqual(store.finish_run.call_args.args[1], "failed")
         self.assertEqual(store.finish_run.call_args.args[2]["failed"], 1)
@@ -78,13 +82,61 @@ class PipelineIsolationTests(unittest.TestCase):
 
     def test_no_financial_queue_skips_without_fetch(self):
         client, store = self.prepare()
-        store.financial_queue.return_value = []
+        store.financial_backlog.return_value = {"remaining": 0, "queue": []}
         with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
               patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
               patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
             run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=5))
         client.report_rows.assert_not_called()
+        self.assertEqual(client.disclosure_rows.call_count, 2)
         self.assertEqual(store.finish_run.call_args.args[1], "skipped")
+        store.publish.assert_not_called()
+
+    def test_incremental_fetches_only_newly_disclosed_missing_kind(self):
+        client, store = self.prepare()
+        store.financial_backlog.return_value = {"remaining": 0, "queue": []}
+        store.financial_disclosure_queue.return_value = [
+            {"ts_code": "000910.SZ", "period": date(2026, 9, 30),
+             "actual_date": date(2026, 10, 28)}
+        ]
+        store.financial_missing_kinds.return_value = ["cashflow"]
+        client.disclosure_rows.side_effect = [
+            [{"ts_code": "000910.SZ", "end_date": "20260930",
+              "actual_date": "20261028"}],
+            [],
+        ]
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=40))
+        client.report_rows.assert_called_once()
+        self.assertEqual(client.report_rows.call_args.args[0], "cashflow")
+        self.assertEqual(store.finish_run.call_args.args[2]["mode"], "disclosure_incremental")
+        self.assertEqual(store.finish_run.call_args.args[2]["financial_api_calls"], 1)
+        store.publish.assert_not_called()
+
+    def test_weekend_uses_last_trading_day_quotes(self):
+        client, store = self.prepare()
+        store.latest_quote_date.return_value = date(2026, 11, 27)
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            run_financial_refresh(SimpleNamespace(asof="2026-11-29", budget=40))
+        store.financial_backlog.assert_called_once_with(date(2026, 11, 27), date(2026, 11, 29), 40)
+        client.trade_open.assert_not_called()
+        client.daily.assert_not_called()
+        client.stocks.assert_not_called()
+
+    def test_incremental_provider_error_cannot_publish_scan(self):
+        client, store = self.prepare()
+        store.financial_backlog.return_value = {"remaining": 0, "queue": []}
+        client.disclosure_rows.side_effect = TushareError("disclosure_date: provider error 40203")
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            with self.assertRaises(TushareError):
+                run_financial_refresh(SimpleNamespace(asof="2026-11-29", budget=40))
+        self.assertEqual(store.finish_run.call_args.args[1], "failed")
         store.publish.assert_not_called()
 
     def test_empty_financial_budget_skips_without_cached_quotes(self):
