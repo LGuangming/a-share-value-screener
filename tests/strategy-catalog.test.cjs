@@ -41,10 +41,10 @@ test("parameter editor is explicitly a non-executing draft",()=>{
   assert.match(editor,/draft_not_executable/);
   assert.match(editor,/setValues/);
   assert.match(editor,/navigator\.clipboard\.writeText/);
-  assert.match(editor,/不写入数据库/);
+  assert.doesNotMatch(editor,/fetch\(|localStorage\.setItem/);
 });
 
 test("production homepage still labels the running Net-Net strategy",()=>{
-  assert.match(file("app/page.tsx"),/Net-Net每日选股/);
-  assert.match(file("app/backtest/page.tsx"),/尚未具备可正式发布的Net-Net历史收益数据/);
+  assert.match(file("app/page.tsx"),/NET-NET \/ 已上线策略/);
+  assert.match(file("app/backtest/page.tsx"),/暂无已发布的历史回测绩效/);
 });
