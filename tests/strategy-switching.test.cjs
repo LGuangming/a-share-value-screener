@@ -87,3 +87,14 @@ test("route and strategy change animations respect reduced-motion",()=>{
   assert.match(css,/@keyframes strategy-fade-in/);
   assert.match(css,/prefers-reduced-motion/);
 });
+
+test("Vercel read-only results use the Neon HTTPS driver, never raw PostgreSQL TCP",()=>{
+  const data=read("lib/data.ts");
+  const pkg=JSON.parse(read("package.json"));
+  assert.equal(typeof pkg.dependencies["@neondatabase/serverless"],"string");
+  assert.equal(pkg.dependencies.postgres,undefined);
+  assert.match(data,/import \{ neon \} from "@neondatabase\/serverless"/);
+  assert.match(data,/neon\(url\)/);
+  assert.match(data,/process\.env\.DATABASE_READ_URL/);
+  assert.doesNotMatch(data,/postgres\(url|process\.env\.DATABASE_URL\b/);
+});
