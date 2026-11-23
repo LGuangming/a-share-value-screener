@@ -149,3 +149,27 @@ test("Git pushes do not automatically deploy; manually select the release commit
   const config=JSON.parse(read("vercel.json"));
   assert.equal(config.git.deploymentEnabled,false);
 });
+
+test("strategy selector has compact spacing without hiding its different parameters",()=>{
+  const component=read("components/strategy-switch.tsx");
+  const css=read("app/globals.css");
+  assert.match(component,/selected\.parameters\.map/);
+  assert.match(component,/selected\.requirements\.map/);
+  assert.match(css,/\.strategy-switch-panel\{padding:16px 20px;margin-bottom:14px;/);
+  assert.match(css,/\.strategy-switch-options\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(css,/\.strategy-switch-details\{display:flex;flex-wrap:nowrap;/);
+  assert.match(css,/overflow-x:auto;overscroll-behavior-x:contain/);
+});
+
+test("review table rows stay compact and reasons display two entries plus a correct extra count",()=>{
+  const page=read("app/signals/page.tsx");
+  const css=read("app/globals.css");
+  assert.match(page,/review\.reasons\.slice\(0,2\)/);
+  assert.match(page,/review\.reasons\.length > 2/);
+  assert.match(page,/review\.reasons\.length-2/);
+  assert.match(page,/title=\{review\.reasons\.map\(reason => reason\.label\)\.join/);
+  assert.match(css,/\.review-table tbody tr\{height:74px;\}/);
+  assert.match(css,/\.review-table tbody td\{height:74px;padding:9px 12px;\}/);
+  assert.match(css,/grid-template-rows:repeat\(2,20px\)/);
+  assert.match(css,/\.review-more\{grid-column:2;grid-row:2;/);
+});
