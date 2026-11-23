@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Filter, Search } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
@@ -104,7 +104,7 @@ export default function ScreenerResults({ rows, initial }: {
     setHighlightedIndex(-1);
   }
 
-  function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  function handleSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
       setSuggestionsOpen(false);
       setHighlightedIndex(-1);
@@ -141,7 +141,7 @@ export default function ScreenerResults({ rows, initial }: {
               placeholder="实时搜索名称 / 代码" value={q}
               role="combobox" aria-autocomplete="list"
               aria-expanded={Boolean(needle && suggestionsOpen && suggestions.length)}
-              aria-controls={suggestionListId}
+              aria-controls={needle && suggestions.length ? suggestionListId : undefined}
               aria-activedescendant={highlightedIndex >= 0 && suggestionsOpen && suggestions[highlightedIndex]
                 ? `${suggestionListId}-${highlightedIndex}` : undefined}
               onFocus={() => setSuggestionsOpen(true)}
