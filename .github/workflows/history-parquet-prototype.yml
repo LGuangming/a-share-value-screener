@@ -6,11 +6,6 @@ on:
         description: 'Completed historical calendar year; default 2025'
         default: '2025'
         type: string
-  # Temporary initial launch, removed immediately after queueing.
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/history-2025-parquet-20261123.txt'
 permissions:
   contents: read
 concurrency:

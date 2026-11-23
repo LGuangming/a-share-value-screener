@@ -1,11 +1,6 @@
 name: A-Share Neon Capacity Audit
 on:
   workflow_dispatch:
-  # One-time initial audit, removed immediately after first launch.
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/storage-audit-20261123.txt'
 permissions:
   contents: read
 jobs:
