@@ -163,7 +163,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-codes", type=int, default=50)
-    parser.add_argument("--all", action="store_true", help="Resume all frozen universe batches")
+    parser.add_argument("--all", action="store_true", help="Resume all batches in the selected interval")
+    parser.add_argument("--stop-index", type=int, default=None, help="Exclusive index for bounded bulk mode")
     parser.add_argument("--kinds", default="balancesheet,income,cashflow,fina_indicator")
     args = parser.parse_args()
     if args.start_index < 0 or args.max_codes < 1 or args.max_codes > 250:
@@ -177,10 +178,14 @@ def main():
     codes = universe_codes(s3, config.bucket)
     if args.start_index >= len(codes):
         parser.error("Batch start beyond stock universe")
-    if args.all and args.start_index != 0:
-        parser.error("--all requires --start-index=0")
+    stop = min(args.stop_index if args.stop_index is not None else len(codes),
+               len(codes))
+    if stop <= args.start_index:
+        parser.error("No stock codes in the selected index interval")
+    if args.all and ((args.start_index % args.max_codes) or (stop < len(codes) and stop % args.max_codes)):
+        parser.error("Bulk shard bounds must align with batch size")
     client = TushareClient.from_environment()
-    starts = (range(0, len(codes), args.max_codes) if args.all
+    starts = (range(args.start_index, stop, args.max_codes) if args.all
               else [args.start_index])
     verified_batches = 0
     for start in starts:
