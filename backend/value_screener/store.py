@@ -98,6 +98,14 @@ class Store:
                 """, values)
         return len(values)
 
+    def latest_quote_date(self, asof: date) -> date | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT MAX(trade_date) AS quote_day FROM daily_prices WHERE trade_date <= %s",
+                (asof,),
+            ).fetchone()
+        return row["quote_day"] if row else None
+
     def financial_queue(self, day: date, budget: int) -> list[str]:
         # Prioritize genuine low-price/low-PB candidates and unsynced companies.
         # Missing PB is allowed because rejecting missing data can hide NCAV ideas.
@@ -109,6 +117,7 @@ class Store:
                 WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
                   AND NOT s.is_st AND s.market NOT IN ('科创板','创业板','北交所')
                   AND (f.succeeded_at IS NULL OR f.succeeded_at < now()-interval '30 days')
+                  AND (f.attempted_at IS NULL OR f.attempted_at < now()-interval '6 hours')
                 ORDER BY (f.succeeded_at IS NOT NULL), f.succeeded_at ASC NULLS FIRST,
                          p.pb ASC NULLS LAST, p.market_cap_yuan ASC
                 LIMIT %s

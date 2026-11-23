@@ -10,11 +10,6 @@ on:
         description: 'Optional Asia/Shanghai session date: YYYY-MM-DD'
         required: false
         type: string
-      financial_budget:
-        description: 'Companies to refresh (each requires 3 financial API calls)'
-        required: false
-        default: '30'
-        type: string
       api_source:
         description: 'official: HTTPS original; relay: third-party HTTP, token sent unencrypted'
         required: false
@@ -36,7 +31,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: a-share-daily-scan
+  group: a-share-data-pipeline
   cancel-in-progress: false
 jobs:
   scan:
@@ -75,7 +70,6 @@ jobs:
       - name: Check API or scan and publish snapshot
         env:
           TRADE_DATE: ${{ inputs.trade_date }}
-          FINANCIAL_BUDGET: ${{ inputs.financial_budget || '30' }}
         run: |
           if [ "$CHECK_API_ONLY" = "true" ]; then
             if [ -n "$TRADE_DATE" ]; then
@@ -84,7 +78,7 @@ jobs:
               python -m value_screener.cli check-api
             fi
           elif [ -n "$TRADE_DATE" ]; then
-            python -m value_screener.cli scan --date "$TRADE_DATE" --financial-budget "$FINANCIAL_BUDGET"
+            python -m value_screener.cli scan --date "$TRADE_DATE"
           else
-            python -m value_screener.cli scan --financial-budget "$FINANCIAL_BUDGET"
+            python -m value_screener.cli scan
           fi

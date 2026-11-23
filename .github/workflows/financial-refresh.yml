@@ -1,0 +1,82 @@
+name: A-Share Financial Statement Refresh
+
+on:
+  # Scheduled jobs are disabled until a reliable provider is configured.
+  # Set repository variable ENABLE_FINANCIAL_SCHEDULE=true when ready.
+  schedule:
+    - cron: '0 15 * * 1-5' # 23:00 China Standard Time weekdays
+  workflow_dispatch:
+    inputs:
+      budget:
+        description: 'Number of stocks to refresh (3 report APIs each)'
+        required: false
+        default: '5'
+        type: string
+      asof:
+        description: 'Optional reference date YYYY-MM-DD (China time)'
+        required: false
+        type: string
+      api_source:
+        description: 'Official HTTPS or explicit third-party relay'
+        required: false
+        default: official
+        type: choice
+        options:
+          - official
+          - relay
+      relay_min_interval_seconds:
+        description: 'Minimum spacing between relay requests'
+        required: false
+        default: '5'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: a-share-data-pipeline
+  cancel-in-progress: false
+
+jobs:
+  finance:
+    if: ${{ github.event_name != 'schedule' || vars.ENABLE_FINANCIAL_SCHEDULE == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      TUSHARE_RELAY_TOKEN: ${{ secrets.TUSHARE_RELAY_TOKEN }}
+      TUSHARE_API_SOURCE: ${{ inputs.api_source || vars.FINANCIAL_SCHEDULE_API_SOURCE || 'official' }}
+      TUSHARE_RELAY_URL: ${{ vars.TUSHARE_RELAY_URL || 'http://tus.sxdata.top/tu_share/' }}
+      TUSHARE_RELAY_MIN_INTERVAL_SECONDS: ${{ inputs.relay_min_interval_seconds || '5' }}
+      TUSHARE_ALLOW_HTTP: ${{ (inputs.api_source || vars.FINANCIAL_SCHEDULE_API_SOURCE) == 'relay' && '1' || '0' }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PYTHONPATH: backend
+      FINANCIAL_BUDGET: ${{ inputs.budget || '5' }}
+      FINANCIAL_ASOF: ${{ inputs.asof }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install Python dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Verify credentials
+        run: |
+          test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
+          if [ "$TUSHARE_API_SOURCE" = "relay" ]; then
+            test -n "$TUSHARE_RELAY_TOKEN" || { echo 'TUSHARE_RELAY_TOKEN secret is missing'; exit 1; }
+            echo 'Third-party relay uses HTTP unless TUSHARE_RELAY_URL is set to a verified HTTPS address.'
+          elif [ "$TUSHARE_API_SOURCE" = "official" ]; then
+            test -n "$TUSHARE_TOKEN" || { echo 'TUSHARE_TOKEN secret is missing'; exit 1; }
+          else
+            echo 'Invalid TUSHARE_API_SOURCE'; exit 1
+          fi
+      - name: Independently refresh financial statements
+        run: |
+          if [ -n "$FINANCIAL_ASOF" ]; then
+            python -m value_screener.cli refresh-financials --budget "$FINANCIAL_BUDGET" --asof "$FINANCIAL_ASOF"
+          else
+            python -m value_screener.cli refresh-financials --budget "$FINANCIAL_BUDGET"
+          fi

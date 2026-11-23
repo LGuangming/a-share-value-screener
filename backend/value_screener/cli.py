@@ -26,9 +26,10 @@ def run_scan(args):
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "daily_scan", day)
-    stats = {"asof": day.isoformat(), "financial_budget": args.financial_budget,
-             "api_source": client.source,
-             "notes": "Research screen, not trade instructions."}
+    stats = {"asof": day.isoformat(), "api_source": client.source,
+             "financial_source": "cached_disclosed_reports",
+             "financial_api_calls": 0,
+             "notes": "Daily scan never fetches financial reports; missing or stale data stays flagged."}
     try:
         if not client.trade_open(day.strftime("%Y%m%d")):
             LOGGER.info("Closed session %s; skipping", day)
@@ -42,35 +43,8 @@ def run_scan(args):
         if len(quotes) < min_rows:
             raise RuntimeError(f"Daily quotes incomplete: {len(quotes)} versus {min_rows} minimum")
         stats["quoted_stocks"] = store.upsert_quotes(quotes, day)
-        queue = store.financial_queue(day, args.financial_budget)
-        stats["financial_attempts"] = len(queue)
-        stats["financial_successes"] = 0
-        start = (day - timedelta(days=540)).strftime("%Y%m%d")
-        today = day.strftime("%Y%m%d")
-        errors = []
-        for index, code in enumerate(queue):
-            try:
-                balance_count = 0
-                for kind in ("balancesheet", "income", "cashflow"):
-                    rows = client.report_rows(kind, code, start, today)
-                    inserted = store.ingest_reports(code, kind, rows)
-                    if kind == "balancesheet":
-                        balance_count = inserted
-                if balance_count == 0:
-                    # Listed firms may lack a report within the lookback window;
-                    # do not mislabel a zero-row response as a successful sync.
-                    store.mark_financial_fetch(code, False, "no consolidated balance sheet in fetch window")
-                    LOGGER.info("Financial balance sheet missing for %s", code)
-                else:
-                    store.mark_financial_fetch(code, True)
-                    stats["financial_successes"] += 1
-            except TushareError as exc:
-                errors.append(f"{code}:{str(exc)[:180]}")
-                store.mark_financial_fetch(code, False, str(exc)[:400])
-                LOGGER.warning("Financial source unavailable for %s: %s", code, exc)
-                if any(word in str(exc) for word in ("权限", "积分", "quota", "permission")) or len(errors) >= 3:
-                    raise RuntimeError("Financial provider unavailable or permissions insufficient; "
-                                       "no new snapshot published") from exc
+        # Financials are updated by the isolated refresh-financials command.
+        # Keep the daily close and cached-as-of screening independent of API 429s.
         rows = store.screen_inputs(day)
         stats["pre_screened"] = len(rows)
         results = []
@@ -104,6 +78,91 @@ def run_scan(args):
     except Exception as exc:
         store.finish_run(run_id,"failed",stats,str(exc))
         LOGGER.exception("Scan failed; no success marker published")
+        raise
+
+
+def run_financial_refresh(args):
+    """Refresh a bounded batch separately from the daily published snapshot.
+
+    Successful report inserts survive later provider errors. This command NEVER
+    calls Store.publish or changes job_runs of type daily_scan.
+    """
+    day = date.fromisoformat(args.asof) if args.asof else datetime.now(CN_TZ).date()
+    db = os.environ.get("DATABASE_URL", "")
+    if not db:
+        raise RuntimeError("DATABASE_URL is required")
+    client = TushareClient.from_environment()
+    store = Store(db)
+    run_id = uuid4()
+    store.start_run(run_id, "financial_refresh", day)
+    stats = {
+        "asof": day.isoformat(), "budget": args.budget,
+        "api_source": client.source, "attempted": 0,
+        "succeeded": 0, "failed": 0, "financial_api_calls_planned_max": args.budget * 3,
+        "notes": "Independent financial refresh; existing daily snapshots remain unchanged.",
+    }
+    try:
+        if args.budget == 0:
+            store.finish_run(run_id, "skipped", stats)
+            LOGGER.info("Financial refresh skipped: budget=0")
+            return
+        quote_day = store.latest_quote_date(day)
+        if quote_day is None:
+            raise RuntimeError("No cached daily quotes found; run the daily scan first")
+        if (day - quote_day).days > 14:
+            raise RuntimeError(
+                f"Latest cached quote date {quote_day} is more than 14 days old; "
+                "refusing to refresh against an obsolete stock universe"
+            )
+        stats["quote_day"] = quote_day.isoformat()
+        queue = store.financial_queue(quote_day, args.budget)
+        stats["queued"] = len(queue)
+        if not queue:
+            store.finish_run(run_id, "skipped", stats)
+            LOGGER.info("Financial refresh skipped: no due stocks in the cached candidate queue")
+            return
+
+        begin = (day - timedelta(days=540)).strftime("%Y%m%d")
+        end = day.strftime("%Y%m%d")
+        for code in queue:
+            stats["attempted"] += 1
+            try:
+                counts = {}
+                for kind in ("balancesheet", "income", "cashflow"):
+                    reports = client.report_rows(kind, code, begin, end)
+                    counts[kind] = store.ingest_reports(code, kind, reports)
+                if all(counts.values()):
+                    store.mark_financial_fetch(code, True)
+                    stats["succeeded"] += 1
+                else:
+                    missing = [kind for kind, count in counts.items() if not count]
+                    store.mark_financial_fetch(code, False, "missing eligible report: " + ",".join(missing))
+                    stats["failed"] += 1
+                    LOGGER.warning("Financial reports incomplete for %s: %s", code, ",".join(missing))
+            except TushareError as exc:
+                store.mark_financial_fetch(code, False, str(exc)[:400])
+                stats["failed"] += 1
+                LOGGER.warning("Financial refresh failed for %s: %s", code, exc)
+                error_lower = str(exc).lower()
+                if ("rate-limited" in error_lower or "provider server error" in error_lower or
+                        "permission" in error_lower or "quota" in error_lower or
+                        "权限" in str(exc) or "积分" in str(exc) or
+                        "40203" in str(exc)):
+                    raise RuntimeError(
+                        "Financial provider throttled or lacks permissions. "
+                        "Stopping this independent refresh; previously published "
+                        "daily snapshot remains available."
+                    ) from exc
+            if stats["failed"] >= 3:
+                raise RuntimeError(
+                    "Three incomplete financial-company refreshes; stopping this batch. "
+                    "Successful financial records remain saved."
+                )
+        store.finish_run(run_id, "success", stats)
+        LOGGER.info("Financial refresh finished: %s", json.dumps(stats, ensure_ascii=False))
+    except Exception as exc:
+        store.finish_run(run_id, "failed", stats, str(exc))
+        LOGGER.exception("Financial refresh failed; saved statements remain, daily scan is unaffected")
         raise
 
 
@@ -194,8 +253,10 @@ def main():
     check.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
     scan = subs.add_parser("scan",help="Scan a mainland-China trading day")
     scan.add_argument("--date",help="Asia/Shanghai YYYY-MM-DD; default today")
-    scan.add_argument("--financial-budget",type=int,default=30,
-                      help="Maximum companies to refresh (3 statement API calls each); default 30")
+    finance = subs.add_parser("refresh-financials", help="Independently refresh selected financial reports")
+    finance.add_argument("--asof", help="Reference date in Asia/Shanghai (YYYY-MM-DD); default today")
+    finance.add_argument("--budget", type=int, default=5,
+                         help="Companies to refresh (3 financial calls each); default 5")
     vip = subs.add_parser("bootstrap-financials",help="Bulk quarter reports (requires Tushare VIP access)")
     vip.add_argument("--period",required=True,help="Quarter-end YYYYMMDD, e.g. 20260930")
     vip.add_argument("--min-coverage",type=float,default=0.80,
@@ -214,9 +275,11 @@ def main():
     elif args.command == "check-api":
         check_api(args)
     elif args.command == "scan":
-        if args.financial_budget < 0:
-            parser.error("--financial-budget must be non-negative")
         run_scan(args)
+    elif args.command == "refresh-financials":
+        if not 0 <= args.budget <= 50:
+            parser.error("--budget must be between 0 and 50")
+        run_financial_refresh(args)
     elif args.command == "bootstrap-financials":
         if not 0 < args.min_coverage <= 1:
             parser.error("--min-coverage must be in (0,1]")
