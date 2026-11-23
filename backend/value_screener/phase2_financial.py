@@ -143,7 +143,7 @@ def archive_batch(s3, bucket, client, codes, start, count, kind):
         "object_key": data_key, "compressed_bytes": len(compressed),
         "sha256": checksum, "codes_sha256": codes_digest,
         "source": "Tushare official per-symbol",
-        "source_ann_date_filter": {"start_date": START_DATE,
+        "requested_date_filter": {"start_date": START_DATE,
                                    "end_date": END_DATE},
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "currency": "CNY",
@@ -163,6 +163,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--max-codes", type=int, default=50)
+    parser.add_argument("--all", action="store_true", help="Resume all frozen universe batches")
     parser.add_argument("--kinds", default="balancesheet,income,cashflow,fina_indicator")
     args = parser.parse_args()
     if args.start_index < 0 or args.max_codes < 1 or args.max_codes > 250:
@@ -176,13 +177,22 @@ def main():
     codes = universe_codes(s3, config.bucket)
     if args.start_index >= len(codes):
         parser.error("Batch start beyond stock universe")
+    if args.all and args.start_index != 0:
+        parser.error("--all requires --start-index=0")
     client = TushareClient.from_environment()
-    for kind in kinds:
-        archive_batch(s3, config.bucket, client,
-                      codes, args.start_index, args.max_codes, kind)
-    print(f"PHASE2_FINANCIAL_BATCH_STATUS verified_kinds={len(kinds)} "
-          f"start_index={args.start_index} codes={min(args.max_codes, len(codes)-args.start_index)} "
-          f"total_universe={len(codes)}", flush=True)
+    starts = (range(0, len(codes), args.max_codes) if args.all
+              else [args.start_index])
+    verified_batches = 0
+    for start in starts:
+        for kind in kinds:
+            archive_batch(s3, config.bucket, client,
+                          codes, start, args.max_codes, kind)
+        verified_batches += 1
+        print(f"PHASE2_FINANCIAL_BATCH_STATUS verified_kinds={len(kinds)} "
+              f"start_index={start} codes={min(args.max_codes, len(codes)-start)} "
+              f"total_universe={len(codes)}", flush=True)
+    print(f"PHASE2_FINANCIAL_RUN_STATUS status=all_requested_batches_verified "
+          f"batches={verified_batches} all={args.all}", flush=True)
 
 
 if __name__ == "__main__":
