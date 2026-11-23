@@ -25,14 +25,12 @@ function tagClass(status: string) {
 function matchRank(row: ScreenTableRow, needle: string): number | null {
   const code = row.ts_code.toLowerCase();
   const name = row.name.toLocaleLowerCase();
-  const industry = (row.industry ?? "").toLocaleLowerCase();
   if (code === needle) return 0;
   if (name === needle) return 1;
   if (code.startsWith(needle)) return 2;
   if (name.startsWith(needle)) return 3;
   if (code.includes(needle)) return 4;
   if (name.includes(needle)) return 5;
-  if (industry.includes(needle)) return 6;
   return null;
 }
 
@@ -55,31 +53,35 @@ export default function ScreenerResults({ rows, initial }: {
   const suggestionListId = useId();
   const needle = q.trim().toLocaleLowerCase();
 
+
+  const viewLabel = view === "strict" ? "严格候选" : view === "gaps" ? "数据缺口" : "全部预筛";
+
+  // Scope each search to the exact row set that the active tab can show.
+  // Apply price/PB/NCAV controls *before* searching; search never expands
+  // into another tab or silently bypasses the selected thresholds.
+  const tabRows = useMemo(() => rows.filter(row => {
+    if (row.price !== null && row.price > maxPrice) return false;
+    if (row.pb !== null && row.pb > maxPb) return false;
+    if (view === "strict") return row.is_candidate && row.ncav_coverage !== null
+      && row.ncav_coverage >= minCoverage;
+    if (view === "gaps") return row.status === "DATA_GAP" || row.status === "STALE_FINANCIALS";
+    return true;
+  }).sort((a, b) => order === "stress"
+    ? (b.stress_coverage ?? -Infinity) - (a.stress_coverage ?? -Infinity)
+    : (b.ncav_coverage ?? -Infinity) - (a.ncav_coverage ?? -Infinity)),
+    [rows, view, order, maxPrice, maxPb, minCoverage]);
+
   const matches = useMemo(() => {
     if (!needle) return [];
-    return rows.map(row => ({ row, rank: matchRank(row, needle) }))
-      .filter((match): match is { row: ScreenTableRow; rank: number } => match.rank !== null)
-      .sort((a,b) => a.rank - b.rank || a.row.ts_code.localeCompare(b.row.ts_code))
+    return tabRows.map((row, index) => ({ row, index, rank: matchRank(row, needle) }))
+      .filter((match): match is { row: ScreenTableRow; index: number; rank: number } =>
+        match.rank !== null)
+      .sort((a, b) => a.rank - b.rank || a.index - b.index)
       .map(match => match.row);
-  }, [rows, needle]);
-  const suggestions = matches.slice(0, 8);
+  }, [tabRows, needle]);
 
-  const filtered = useMemo(() => {
-    // Searching is global within the published strategy's pre-screen rows.
-    // Do not hide a matching stock merely because "strict" or a PB/price
-    // threshold is selected; those filters resume when search is cleared.
-    if (needle) return matches;
-    return rows.filter(row => {
-      if (row.price !== null && row.price > maxPrice) return false;
-      if (row.pb !== null && row.pb > maxPb) return false;
-      if (view === "strict") return row.is_candidate && row.ncav_coverage !== null
-        && row.ncav_coverage >= minCoverage;
-      if (view === "gaps") return row.status === "DATA_GAP" || row.status === "STALE_FINANCIALS";
-      return true;
-    }).sort((a, b) => order === "stress"
-      ? (b.stress_coverage ?? -Infinity) - (a.stress_coverage ?? -Infinity)
-      : (b.ncav_coverage ?? -Infinity) - (a.ncav_coverage ?? -Infinity));
-  }, [rows, needle, matches, view, order, maxPrice, minCoverage, maxPb]);
+  const filtered = needle ? matches : tabRows;
+  const suggestions = matches.slice(0, 8);
 
   function setFilter(param: string, value: string, update: () => void) {
     update();
@@ -125,7 +127,7 @@ export default function ScreenerResults({ rows, initial }: {
   return <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
       <h2>{needle ? "股票即时搜索" : "Net-Net筛选结果"} <span className="count-badge">{filtered.length}</span></h2>
-      <p>只有当前已上线的Net-Net使用以下NCAV筛选条件；修改标签和参数仅在本地过滤，无需重新读取数据库。</p>
+      <p>在当前选项卡内实时搜索股票，结果严格遵守此视图及选定阈值，无需重新读取数据库。</p>
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
       <div className="tabs" role="tablist" aria-label="筛选视图">
@@ -138,10 +140,10 @@ export default function ScreenerResults({ rows, initial }: {
         <div className="stock-search">
           <div className="search-field"><Search size={16}/>
             <input aria-label="搜索股票" autoComplete="off" type="search"
-              placeholder="实时搜索名称 / 代码" value={q}
+              placeholder={`在${viewLabel}中搜索名称 / 代码`} value={q}
               role="combobox" aria-autocomplete="list"
               aria-expanded={Boolean(needle && suggestionsOpen && suggestions.length)}
-              aria-controls={needle && suggestions.length ? suggestionListId : undefined}
+              aria-controls={needle && suggestionsOpen ? suggestionListId : undefined}
               aria-activedescendant={highlightedIndex >= 0 && suggestionsOpen && suggestions[highlightedIndex]
                 ? `${suggestionListId}-${highlightedIndex}` : undefined}
               onFocus={() => setSuggestionsOpen(true)}
@@ -149,20 +151,23 @@ export default function ScreenerResults({ rows, initial }: {
               onKeyDown={handleSearchKeyDown}
               onChange={e => updateSearch(e.target.value)}/>
           </div>
-          {needle && suggestionsOpen && suggestions.length > 0 && <div
-            id={suggestionListId} role="listbox" aria-label="匹配的股票"
+          {needle && suggestionsOpen && <div
+            id={suggestionListId} role="listbox" aria-label={`${viewLabel}股票搜索结果`}
             className="stock-suggestions">
-            <div className="stock-suggestions-heading">实时匹配 {matches.length} 只 · 显示最相关的 {suggestions.length} 只</div>
-            {suggestions.map((row,i) => <button type="button"
+            <div className="stock-suggestions-heading">
+              {viewLabel} · 匹配 {matches.length} 只
+              {matches.length > 8 ? " · 显示前8只" : ""}
+            </div>
+            {suggestions.length ? suggestions.map((row,i) => <button type="button"
               id={`${suggestionListId}-${i}`}
               role="option" aria-selected={highlightedIndex === i}
               className={`stock-suggestion${highlightedIndex === i ? " is-highlighted" : ""}`}
               key={row.ts_code}
               onMouseDown={e => e.preventDefault()}
               onClick={() => chooseSuggestion(row.ts_code)}>
-              <strong>{row.name}</strong><span>{row.ts_code}</span>
-              <small>{row.industry || "行业待补充"}</small>
-            </button>)}
+              <span className="stock-suggestion-name">{row.name}</span>
+              <span className="stock-suggestion-code">{row.ts_code}</span>
+            </button>) : <p className="stock-suggestion-empty">当前选项卡没有匹配股票，请缩短搜索词。</p>}
           </div>}
         </div>
         <select aria-label="最高价格" value={maxPrice}
@@ -188,8 +193,8 @@ export default function ScreenerResults({ rows, initial }: {
       </div>
     </div>
     {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
-      已即时匹配 {matches.length} 只股票。搜索范围为当前Net-Net已发布的 {rows.length} 只预筛股票；
-      搜索期间暂不应用“严格候选”、股价和PB条件，清空搜索后恢复原筛选设置。
+      {viewLabel} · 已匹配 {matches.length} 只 / 当前选项卡 {tabRows.length} 只；
+      始终保留选项卡及股价、PB等筛选条件。
     </div>}
     {filtered.length ? <div className="table-scroll"><table className="results-table">
       <thead><tr><th>股票 / 行业</th><th>收盘价</th><th>总市值</th>
@@ -210,7 +215,7 @@ export default function ScreenerResults({ rows, initial }: {
           <ArrowRight size={16}/></Link></td>
       </tr>)}</tbody></table></div>
     : <Empty title={needle ? "暂无匹配的股票" : "暂无符合筛选条件的股票"}
-      detail={needle ? "试试更短的股票代码或公司名称；搜索仅覆盖当前已发布的Net-Net预筛股票。" : "可调整筛选条件或切换到“全部预筛”视图。"}/>}
+      detail={needle ? `${viewLabel}中没有匹配的股票，试试更短的名称或代码。` : "可调整筛选条件或切换到“全部预筛”视图。"}/>}
     {filtered.length > visibleCount && <button type="button" className="filter-button screener-load-more"
       onClick={()=>setVisibleCount(n=>n+100)}>
       再显示100条（已显示{Math.min(visibleCount,filtered.length)} / {filtered.length}）
