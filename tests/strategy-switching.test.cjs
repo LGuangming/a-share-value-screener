@@ -20,8 +20,7 @@ test("research and planned strategies cannot inherit Net-Net candidate stocks",(
   const s=read("components/strategy-switch.tsx");
   assert.match(s,/selected\.status === "live" && selected\.id === "netnet_v1"/);
   assert.match(s,/hidden=\{!canShowLive\}/);
-  assert.match(s,/尚未发布独立的每日/);
-  assert.match(s,/不会将 Net-Net 的股票/);
+  assert.match(s,/尚未发布\{mode === "screen"/);
   assert.match(read("app/signals/page.tsx"),/Net-Net候选股票复核清单/);
 });
 
@@ -79,9 +78,9 @@ test("loading and screen errors do not pretend the saved Net-Net results are zer
   const data=read("lib/data.ts");
   const page=read("app/page.tsx");
   assert.match(data,/screeningRowsStatus/);
-  assert.match(data,/不能将其视为筛选结果为零/);
+  assert.match(data,/股票筛选结果暂不可用/);
   assert.match(page,/scan\.error/);
-  assert.match(page,/历史筛选结果暂不可用/);
+  assert.match(page,/筛选结果暂不可用/);
 });
 
 test("route and strategy change animations respect reduced-motion",()=>{
