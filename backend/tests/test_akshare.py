@@ -76,6 +76,29 @@ class AKShareNormalizationTests(unittest.TestCase):
         result=client.spot()
         self.assertGreaterEqual(len(result),1000)
 
+    def test_bounded_individual_stock_quotes_no_market_wide_call(self):
+        fake = Mock()
+        fake.stock_individual_info_em.return_value.to_dict.return_value = [
+            {"item":"股票代码","value":"000910"},
+            {"item":"股票简称","value":"测试样本"},
+            {"item":"最新","value":4.4},
+            {"item":"总市值","value":2_409_000_000},
+        ]
+        result = AKShareClient(provider=fake).spot(["000910.SZ"])
+        self.assertEqual(set(result),{"000910.SZ"})
+        self.assertEqual(result["000910.SZ"]["pb"],None)
+        self.assertAlmostEqual(result["000910.SZ"]["total_mv"],240900)
+        fake.stock_zh_a_spot_em.assert_not_called()
+
+    def test_invalid_single_quote_never_substitutes_estimated_market_cap(self):
+        fake = Mock()
+        fake.stock_individual_info_em.return_value.to_dict.return_value = [
+            {"item":"股票代码","value":"000910"},
+            {"item":"最新","value":4.4}
+        ]
+        with self.assertRaises(AKShareError):
+            AKShareClient(provider=fake).spot(["000910.SZ"])
+
     def test_partial_market_data_rejected(self):
         fake=Mock()
         fake.stock_zh_a_spot_em.return_value.to_dict.return_value=[
