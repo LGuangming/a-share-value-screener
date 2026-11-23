@@ -50,12 +50,19 @@ def fetch_market(args) -> bool:
             raise RuntimeError(
                 f"Daily quotes incomplete: {len(quotes)} versus {min_rows} minimum"
             )
+        signature_before = store.market_data_signature(day)
         store.upsert_stocks(stocks)
         stats["quoted_stocks"] = store.upsert_quotes(quotes, day)
         if stats["quoted_stocks"] < min_rows:
             raise RuntimeError(
                 f"Valid daily quotes incomplete: {stats['quoted_stocks']} versus {min_rows} minimum"
             )
+        stats["data_changed"] = signature_before != store.market_data_signature(day)
+        # A previously fetched but never published session needs its first NCAV
+        # calculation even if today's re-fetch is byte-for-byte identical.
+        stats["recalc_needed"] = (
+            stats["data_changed"] or not store.has_published_snapshot(day)
+        )
         store.finish_run(run_id, "success", stats)
         LOGGER.info("Market refresh successful: %s", json.dumps(stats, ensure_ascii=False))
         return True
@@ -78,7 +85,7 @@ def recalculate_ncav(args):
     store = Store(db)
     trigger_run_id = getattr(args, "trigger_run_id", None)
     if trigger_run_id is not None and not store.has_successful_data_trigger(trigger_run_id):
-        LOGGER.info("Skipping recalculate-ncav: triggering workflow did not save new market or finance data (run %s)",
+        LOGGER.info("Skipping recalculate-ncav: no eligible changes for the latest quote date in upstream run %s",
                     trigger_run_id)
         return
     quote_day = store.latest_quote_date(asof)
@@ -169,7 +176,7 @@ def run_financial_refresh(args):
     store.start_run(run_id, "financial_refresh", day)
     stats = {"asof": day.isoformat(), "budget": args.budget,
              "api_source": client.source, "github_run_id": os.environ.get("GITHUB_RUN_ID"),
-             "mode": None, "attempted": 0,
+             "recalc_needed": False, "mode": None, "attempted": 0,
              "succeeded": 0, "failed": 0, "financial_api_calls": 0,
              "disclosure_api_calls": 0,
              "notes": "Fill incomplete statements first, then poll actual disclosures. No daily snapshot modified."}
@@ -187,6 +194,9 @@ def run_financial_refresh(args):
                 "refusing to refresh against an obsolete stock universe"
             )
         stats["quote_day"] = quote_day.isoformat()
+        # Compare only financials usable with the latest completed market
+        # session; later disclosures must not rewrite that historical date.
+        signature_before = store.financial_inputs_signature(quote_day)
         backlog = store.financial_backlog(quote_day, day, args.budget)
         stats["backlog_remaining_before"] = backlog["remaining"]
         if backlog["remaining"] > 0:
@@ -257,6 +267,9 @@ def run_financial_refresh(args):
                     "Three incomplete financial-company refreshes; stopping this batch. "
                     "Previously saved statements remain intact."
                 )
+        stats["recalc_needed"] = (
+            signature_before != store.financial_inputs_signature(quote_day)
+        )
         store.finish_run(run_id, "success", stats)
         LOGGER.info("Financial refresh finished: %s", json.dumps(stats, ensure_ascii=False))
     except Exception as exc:

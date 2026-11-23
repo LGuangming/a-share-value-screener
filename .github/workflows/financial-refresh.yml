@@ -4,7 +4,7 @@ on:
   # Scheduled jobs are opt-in via ENABLE_FINANCIAL_SCHEDULE=true.
   # Set repository variable ENABLE_FINANCIAL_SCHEDULE=true when ready.
   schedule:
-    - cron: '0 15 * * *' # 23:00 China Standard Time every day (including weekends)
+    - cron: '17 0 * * *' # 08:17 Asia/Shanghai daily (including weekends)
   workflow_dispatch:
     inputs:
       budget:
@@ -35,6 +35,7 @@ permissions:
 
 concurrency:
   group: a-share-data-pipeline
+  queue: max
   cancel-in-progress: false
 
 jobs:

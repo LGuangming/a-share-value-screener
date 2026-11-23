@@ -87,20 +87,22 @@ PYTHONPATH=backend python -m value_screener.cli check-api
 | 工作流 | 执行时间（北京时间） | Tushare调用 | 用途 |
 |---|---|---|---|
 | [A-Share Market Data Refresh](.github/workflows/daily-scan.yml) | 周一至周五19:30 | 交易日历、股票列表、日行情 | 验证行情完整性并缓存到Neon，不计算NCAV |
-| [A-Share Financial Statement Refresh](.github/workflows/financial-refresh.yml) | 每天23:00（含周末，需开启） | 最多40家，优先缺失报表 | 补齐历史财报，之后根据实际披露日期增量更新 |
-| [A-Share Recalculate NCAV](.github/workflows/recalculate-ncav.yml) | 每次采集成功后自动触发；也可手动运行 | **0次** | 读取Neon缓存行情与财报，计算并原子发布NCAV榜单 |
+| [A-Share Financial Statement Refresh](.github/workflows/financial-refresh.yml) | **每天08:17**（含周末，需开启） | 最多40家，优先缺失报表 | 补齐历史财报，之后根据实际披露日期增量更新 |
+| [A-Share Recalculate NCAV](.github/workflows/recalculate-ncav.yml) | 上游采集完成且相关数据实际改变后发布；也可手动运行 | **0次** | 读取Neon缓存行情与财报，计算并原子发布NCAV榜单 |
 
-在 **Settings → Secrets and variables → Actions → Variables** 设置 `ENABLE_FINANCIAL_SCHEDULE=true` 才会启用定时财务任务。财务更新默认 `budget=40`，若已配置 `FINANCIAL_SCHEDULE_BUDGET`，请设为40或删除该变量。两类采集任务和重算任务共享 `a-share-data-pipeline` 并发组，避免读取不完整的数据。
+在 **Settings → Secrets and variables → Actions → Variables** 设置 `ENABLE_FINANCIAL_SCHEDULE=true` 才会启用定时财务任务。财务更新默认 `budget=40`，若已配置 `FINANCIAL_SCHEDULE_BUDGET`，请设为40或删除该变量。两类采集任务和重算任务共享 `a-share-data-pipeline` 并发组，并设置 `queue: max` 和 `cancel-in-progress: false`，允许多个任务依次排队，避免运行中读取不完整数据或待运行任务被新任务替换。
 
-数据流：**行情采集/财报补齐 → Neon数据库 → Recalculate NCAV → 网站榜单**。
+数据流：**08:17财报补齐（7天） / 19:30行情采集（交易日） → Neon数据库 → 数据变更检测 → Recalculate NCAV → 网站榜单**。
 
-行情工作流仍可手动选择 `check_api_only=true` 检查API。该模式不写数据库；Recalculate NCAV 会通过前置GitHub运行ID核对Neon中是否存在成功的采集任务，没有则安全跳过、不发布。工作日休市时行情任务也会跳过写入。旧的手工CLI `scan` 保留兼容，但自动工作流使用分开的 `fetch-market` 和 `recalculate-ncav`。
+行情采集记录入库前后的行情和股票基础资料指纹；同一交易日的行情无变化、且已发布NCAV时，重算流程会跳过。财务采集记录最近行情交易日可使用的最新三张报表内容指纹；**只有财报内容确实发生变化并且披露日期早于该行情交易日时**，才允许重算。若只是补齐上一个交易日收盘后新披露的财报，保留到下一交易日行情更新后自动使用，绝不回填过去的交易日。已采集内容的重复下载、API连接测试、空更新和失败任务都不会触发NCAV发布。
+
+行情工作流仍可手动选择 `check_api_only=true` 检查API。该模式不写数据库；Recalculate NCAV 会通过前置GitHub运行ID核对Neon中是否存在成功的采集任务，没有对应的成功入库记录及`recalc_needed=true`标记，则安全跳过、不发布。工作日休市时行情任务也会跳过写入。旧的手工CLI `scan` 保留兼容，但自动工作流使用分开的 `fetch-market` 和 `recalculate-ncav`。
 
 **财务补齐与增量更新：**
 
 1. 初始阶段选择财报缺失、三表报告期不一致或报告期过旧的低价、低PB股票。每天最多补齐40家公司；只下载需要的报表种类。失败至少冷却6小时。
 2. 上述缺口完成后，使用2,000积分可调用的 `disclosure_date` 检查最近两个已结束季度，仅采纳 `actual_date` 已实际披露的公司；未出现真实新披露的，不重复请求财务报表。已保存的完整财报不再因满30天而自动全部重下。
-3. 周末不更新股票行情，但可以继续财报补齐和NCAV缓存重算。**历史时点安全规则**：重算使用最后一个已保存的交易日行情，且只纳入该交易日之前已披露的财报（`disclosed_at < trade_date`）。如果周五收盘后、周末新披露报表，这些资料必须等下一交易日行情入库后才能进入正式榜单，不能回填周五快照。
+3. 周末不更新股票行情，早上08:17继续补齐财报，但仅在财报实际改变了最新已完成交易日可用的信息时触发NCAV重算。**历史时点安全规则**：重算使用最后一个已保存的交易日行情，且只纳入该交易日之前已披露的财报（`disclosed_at < trade_date`）。如果周五收盘后、周末新披露报表，这些资料必须等下一交易日行情入库后才能进入正式榜单，不能回填周五快照。
 4. 重算仅需GitHub Secret `DATABASE_URL`，不使用Tushare Token；行情或财报API限流不会影响已发布快照。对于当日多次重算，数据库会在同一事务中替换同一交易日的筛选结果。
 
 **补充限制**：披露日历并非完整历史财报修订事件流，最新两季以外的更正、源站延迟、缺失公告日期仍需单独核查。已有成功的快照不会因下游任务失败被标记为成功或清空。

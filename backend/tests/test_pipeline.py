@@ -26,6 +26,9 @@ class PipelineIsolationTests(unittest.TestCase):
         store.upsert_quotes.return_value = 1000
         store.quote_coverage.return_value = {"listed_stocks": 1000, "quoted_stocks": 1000}
         store.has_successful_data_trigger.return_value = True
+        store.has_published_snapshot.return_value = False
+        store.market_data_signature.side_effect = ["market-before", "market-after"]
+        store.financial_inputs_signature.side_effect = ["finance-before", "finance-after"]
         store.screen_inputs.return_value = []
         store.latest_quote_date.return_value = date(2026, 11, 20)
         store.financial_backlog.return_value = {"remaining": 1, "queue": ["000910.SZ"]}
@@ -67,6 +70,33 @@ class PipelineIsolationTests(unittest.TestCase):
         store.screen_inputs.assert_not_called()
         store.finish_run.assert_called_once()
         self.assertEqual(store.finish_run.call_args.args[1], "success")
+        self.assertTrue(store.finish_run.call_args.args[2]["data_changed"])
+        self.assertTrue(store.finish_run.call_args.args[2]["recalc_needed"])
+
+    def test_identical_market_rerun_does_not_request_recalculation(self):
+        client, store = self.prepare()
+        store.market_data_signature.side_effect = ["same", "same"]
+        store.has_published_snapshot.return_value = True
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            fetch_market(SimpleNamespace(date="2026-11-20"))
+        stats = store.finish_run.call_args.args[2]
+        self.assertFalse(stats["data_changed"])
+        self.assertFalse(stats["recalc_needed"])
+        store.publish.assert_not_called()
+
+    def test_identical_market_rerun_without_snapshot_publishes_first_time(self):
+        client, store = self.prepare()
+        store.market_data_signature.side_effect = ["same", "same"]
+        store.has_published_snapshot.return_value = False
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            fetch_market(SimpleNamespace(date="2026-11-20"))
+        stats = store.finish_run.call_args.args[2]
+        self.assertFalse(stats["data_changed"])
+        self.assertTrue(stats["recalc_needed"])
 
     def test_recalculate_uses_no_tushare_requests(self):
         client, store = self.prepare()
@@ -133,6 +163,11 @@ class PipelineIsolationTests(unittest.TestCase):
                          ["balancesheet", "income", "cashflow"])
         store.mark_financial_fetch.assert_called_once_with("000910.SZ", True)
         self.assertEqual(store.finish_run.call_args.args[1], "success")
+        self.assertTrue(store.finish_run.call_args.args[2]["recalc_needed"])
+        store.financial_inputs_signature.assert_has_calls([
+            unittest.mock.call(date(2026, 11, 20)),
+            unittest.mock.call(date(2026, 11, 20)),
+        ])
         store.publish.assert_not_called()
         client.daily.assert_not_called()
         client.stocks.assert_not_called()
@@ -183,6 +218,7 @@ class PipelineIsolationTests(unittest.TestCase):
         self.assertEqual(client.report_rows.call_args.args[0], "cashflow")
         self.assertEqual(store.finish_run.call_args.args[2]["mode"], "disclosure_incremental")
         self.assertEqual(store.finish_run.call_args.args[2]["financial_api_calls"], 1)
+        self.assertTrue(store.finish_run.call_args.args[2]["recalc_needed"])
         store.publish.assert_not_called()
 
     def test_weekend_uses_last_trading_day_quotes(self):
@@ -196,6 +232,30 @@ class PipelineIsolationTests(unittest.TestCase):
         client.trade_open.assert_not_called()
         client.daily.assert_not_called()
         client.stocks.assert_not_called()
+
+    def test_weekend_new_disclosure_never_rewrites_friday_snapshot(self):
+        client, store = self.prepare()
+        store.latest_quote_date.return_value = date(2026, 11, 27)
+        store.financial_inputs_signature.side_effect = ["friday-before", "friday-before"]
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            run_financial_refresh(SimpleNamespace(asof="2026-11-29", budget=40))
+        stats = store.finish_run.call_args.args[2]
+        self.assertEqual(stats["succeeded"], 1)
+        self.assertFalse(stats["recalc_needed"])
+        store.publish.assert_not_called()
+
+    def test_repeated_or_unchanged_report_download_does_not_recalculate(self):
+        client, store = self.prepare()
+        store.financial_inputs_signature.side_effect = ["same", "same"]
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store})):
+            run_financial_refresh(SimpleNamespace(asof="2026-11-23", budget=40))
+        stats = store.finish_run.call_args.args[2]
+        self.assertEqual(stats["succeeded"], 1)
+        self.assertFalse(stats["recalc_needed"])
 
     def test_incremental_provider_error_cannot_publish_scan(self):
         client, store = self.prepare()

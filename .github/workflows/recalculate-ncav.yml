@@ -15,6 +15,7 @@ permissions:
 # Do not read a partial financial/market update or publish two snapshots together.
 concurrency:
   group: a-share-data-pipeline
+  queue: max
   cancel-in-progress: false
 
 jobs:

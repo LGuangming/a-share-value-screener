@@ -89,7 +89,11 @@ class Store:
         return row["quote_day"] if row else None
 
     def has_successful_data_trigger(self, github_run_id: int) -> bool:
-        """Guard workflow_run chaining (API-only probes must never write data)."""
+        """Only valid successful data changes should trigger NCAV publication.
+
+        A successful read-only API probe, unchanged market re-fetch, or a
+        financial report disclosed after the last market session cannot trigger.
+        """
         with self.connect() as conn:
             row = conn.execute("""
                 SELECT EXISTS (
@@ -97,9 +101,75 @@ class Store:
                     WHERE job_type IN ('market_refresh', 'financial_refresh')
                       AND status='success'
                       AND metrics->>'github_run_id' = %s
+                      AND metrics->>'recalc_needed' = 'true'
                 ) AS changed
             """, (str(github_run_id),)).fetchone()
         return bool(row["changed"])
+
+    def has_published_snapshot(self, quote_day: date) -> bool:
+        """A previously successful same-day NCAV publication exists."""
+        with self.connect() as conn:
+            row = conn.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM job_runs
+                    WHERE job_type='daily_scan' AND status='success'
+                      AND trade_date=%s
+                ) AS exists
+            """, (quote_day,)).fetchone()
+        return bool(row["exists"])
+
+    def market_data_signature(self, quote_day: date) -> str:
+        """Hash the actual quote and stock metadata used by the screen.
+
+        Excludes volatile ingested/updated timestamps; identical source data
+        therefore does not cause a pointless recalculation.
+        """
+        with self.connect() as conn:
+            row = conn.execute("""
+                SELECT md5(coalesce(string_agg(
+                    p.ts_code || ':' || p.raw::text || ':' || s.name || ':' ||
+                    coalesce(s.market, '') || ':' || s.is_st::text,
+                    '|' ORDER BY p.ts_code
+                ), '')) AS fingerprint
+                FROM daily_prices p
+                JOIN stocks s USING(ts_code)
+                WHERE p.trade_date=%s
+            """, (quote_day,)).fetchone()
+        return row["fingerprint"]
+
+    def financial_inputs_signature(self, quote_day: date) -> str:
+        """Hash only statements that can influence this quote day's NCAV.
+
+        A Saturday report disclosed after Friday cannot affect Friday's
+        historical snapshot. Only the most recent eligible consolidated report
+        of each kind is considered, matching screen_inputs exactly.
+        """
+        with self.connect() as conn:
+            row = conn.execute("""
+                SELECT md5(coalesce(string_agg(
+                    p.ts_code || ':' || k.kind || ':' ||
+                    coalesce(f.end_date::text, '') || ':' ||
+                    coalesce(f.disclosed_at::text, '') || ':' ||
+                    coalesce(f.metrics::text, ''),
+                    '|' ORDER BY p.ts_code, k.kind
+                ), '')) AS fingerprint
+                FROM daily_prices p
+                JOIN stocks s USING(ts_code)
+                CROSS JOIN (VALUES ('balancesheet'), ('income'), ('cashflow')) AS k(kind)
+                LEFT JOIN LATERAL (
+                    SELECT end_date, disclosed_at, metrics
+                    FROM financial_reports f
+                    WHERE f.ts_code=p.ts_code AND f.kind=k.kind
+                      AND f.disclosed_at<p.trade_date
+                      AND f.end_date<=p.trade_date
+                    ORDER BY f.end_date DESC, f.disclosed_at DESC
+                    LIMIT 1
+                ) f ON true
+                WHERE p.trade_date=%s
+                  AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
+                  AND s.market NOT IN ('科创板', '创业板', '北交所')
+            """, (quote_day,)).fetchone()
+        return row["fingerprint"]
 
     def quote_coverage(self, quote_day: date) -> dict:
         """Verify cached market completeness without any provider API calls."""

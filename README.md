@@ -14,7 +14,7 @@ A deployable MVP for low-priced A-share Net-Net / distressed-value research. The
 - Labels operating cash flow, profitability, leverage, receivables/inventory concentration, stale reports and data gaps.
 - Uses actual reported **disclosure dates** (`f_ann_date` then `ann_date`) and a conservative one-calendar-day lag to block same-day after-close look-ahead in historical trading-day screens.
 - Research-only MA20 / MA50 observation signals requiring >=50 completed price sessions, with no order routing.
-- Three independent GitHub Actions workflows: weekday market ingestion (19:30 Asia/Shanghai), seven-day financial refresh (23:00, opt-in), and Tushare-free NCAV recalculation triggered after successful data updates.
+- Three independent GitHub Actions workflows: weekday market ingestion (19:30 Asia/Shanghai), seven-day financial refresh (08:17, opt-in), and Tushare-free NCAV recalculation triggered after successful data updates.
 - Read-only Vercel server rendering; no synthetic rankings and no market-provider secrets in browser code.
 - Responsive dashboard, per-company analysis, signal list and methodology documentation. **Backtest page is intentionally labeled unimplemented.**
 
@@ -54,7 +54,7 @@ In GitHub → Repository → Settings → Secrets and variables → Actions:
 - `TUSHARE_TOKEN`: Tushare Pro token
 - `DATABASE_URL`: Postgres connection string for ingestion
 
-Market ingestion schedule is in [`.github/workflows/daily-scan.yml`](.github/workflows/daily-scan.yml); financial refresh and NCAV recalculation have their own workflows. The recalc job reads only Neon data, requires no Tushare token, and never uses reports disclosed on or after the market quote date.  Monday–Friday 11:30 UTC is 19:30 Asia/Shanghai year-round. Chinese holidays are checked via Tushare's SSE trading calendar. GitHub cron is **best-effort**, so scheduled runs may be delayed or skipped. Set up external monitoring or manually rerun on missed days. Only a successful complete scan becomes the website's latest published result.
+Market ingestion schedule is in [`.github/workflows/daily-scan.yml`](.github/workflows/daily-scan.yml); financial refresh and NCAV recalculation have their own workflows. Financial refresh runs at 00:17 UTC (08:17 Asia/Shanghai) daily after opt-in. All three workflows have `queue: max` and `cancel-in-progress: false` for sequential execution. NCAV recalculation is published only if the upstream successful database ingest marks `recalc_needed=true`: market inputs changed or lack a published snapshot, or stored financials usable **before** the latest quote date changed. Identical re-fetches and reports disclosed on/after the latest quote date never republish older sessions. The recalc job reads only Neon data, requires no Tushare token, and never uses reports disclosed on or after the market quote date.  Monday–Friday 11:30 UTC is 19:30 Asia/Shanghai year-round. Chinese holidays are checked via Tushare's SSE trading calendar. GitHub cron is **best-effort**, so scheduled runs may be delayed or skipped. Set up external monitoring or manually rerun on missed days. Only a successful complete scan becomes the website's latest published result.
 
 First-time backfill (in local shell / an adequately provisioned runner):
 

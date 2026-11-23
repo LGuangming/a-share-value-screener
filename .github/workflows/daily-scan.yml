@@ -32,6 +32,7 @@ permissions:
   contents: read
 concurrency:
   group: a-share-data-pipeline
+  queue: max
   cancel-in-progress: false
 jobs:
   scan:
