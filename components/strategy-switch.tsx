@@ -43,6 +43,7 @@ export default function StrategySwitch({
     const url = new URL(window.location.href);
     url.searchParams.set("strategy", id);
     window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    window.dispatchEvent(new CustomEvent("a-share-strategy-change", { detail: id }));
   }
 
   return <>
@@ -96,7 +97,8 @@ export default function StrategySwitch({
         <span>策略ID：{selected.id}</span>
       </div>
     </section>
-    {canShowLive ? children : <section className="panel strategy-unavailable" aria-live="polite">
+    <div hidden={!canShowLive}>{children}</div>
+    {!canShowLive && <section className="panel strategy-unavailable" aria-live="polite">
       <div className="section-kicker">STRATEGY DATA STATUS</div>
       <h2>{selected.name} · {mode === "screen" ? "选股结果" : "交易观察"}</h2>
       <p>该策略当前处于“{strategyStatusLabel[selected.status]}”状态，尚未发布独立的每日
