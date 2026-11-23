@@ -2,7 +2,9 @@
 Docs: https://tushare.pro/document/2 . Credentials must never be logged.
 """
 from __future__ import annotations
+from collections import deque
 import json
+import logging
 import math
 import os
 import time
@@ -12,6 +14,14 @@ from urllib.error import URLError, HTTPError
 
 API_URL = "https://api.tushare.pro"
 RELAY_API_URL = "http://tus.sxdata.top/tu_share/"
+LOGGER = logging.getLogger(__name__)
+
+# Client-local rolling-window cap. Scheduling and manual jobs should not run in
+# parallel against the same token; enforce provider account-wide quotas outside
+# the process if multiple workers share it.
+MAX_REQUESTS_PER_MINUTE = 100
+MIN_REQUEST_INTERVAL_SECONDS = 0.61  # > 60/100; avoids 101 calls at minute boundaries
+RETRY_WAIT_SECONDS = 60
 
 
 class TushareError(RuntimeError):
@@ -34,7 +44,12 @@ class TushareClient:
                 not 0.5 <= relay_min_interval_seconds <= 60):
             raise ValueError("Relay minimum request interval must be between 0.5 and 60 seconds")
         self._relay_interval = relay_min_interval_seconds
+        self._min_request_interval = max(
+            MIN_REQUEST_INTERVAL_SECONDS,
+            self._relay_interval if api_source == "relay" else 0.0
+        )
         self._last_request_start: float | None = None
+        self._request_starts: deque[float] = deque()
         if api_source == "official":
             self.api_url = API_URL  # Unchanged official HTTPS endpoint.
         else:
@@ -67,53 +82,88 @@ class TushareClient:
                    allow_insecure_http=os.environ.get("TUSHARE_ALLOW_HTTP") == "1",
                    relay_min_interval_seconds=interval)
 
-    def _respect_relay_rate_limit(self) -> None:
-        if self.source != "relay":
-            return
-        now = time.monotonic()
-        if self._last_request_start is not None:
-            remaining = self._relay_interval - (now - self._last_request_start)
-            if remaining > 0:
-                time.sleep(remaining)
-        self._last_request_start = time.monotonic()
+    def _wait_for_request_slot(self) -> None:
+        """Pace every outgoing call and enforce <=100 starts in any 60s window.
 
-    def query(self, api_name: str, params: dict | None = None, fields: str = "", retries: int = 3) -> list[dict]:
+        Counts retry attempts as well as initial calls. All calls from one CLI
+        job share this instance, so scanning and financial-report loops need no
+        separate sleeps.
+        """
+        while True:
+            now = time.monotonic()
+            while self._request_starts and now - self._request_starts[0] >= 60.0:
+                self._request_starts.popleft()
+            wait = 0.0
+            if self._last_request_start is not None:
+                wait = max(wait, self._min_request_interval -
+                           (now - self._last_request_start))
+            if len(self._request_starts) >= MAX_REQUESTS_PER_MINUTE:
+                wait = max(wait, 60.0 - (now - self._request_starts[0]))
+            if wait <= 0:
+                self._request_starts.append(now)
+                self._last_request_start = now
+                return
+            time.sleep(wait)
+
+    def _retry_transient(self, api_name: str, attempt: int, retries: int,
+                         reason: str) -> bool:
+        """Delay a retriable error for exactly 60 seconds, max 'retries' calls."""
+        if attempt >= retries - 1:
+            return False
+        LOGGER.warning("%s: temporary %s; retrying after %d seconds (%d/%d)",
+                       api_name, reason, RETRY_WAIT_SECONDS, attempt + 1, retries)
+        time.sleep(RETRY_WAIT_SECONDS)
+        return True
+
+    def query(self, api_name: str, params: dict | None = None, fields: str = "",
+              retries: int = 3) -> list[dict]:
         body = json.dumps({"api_name": api_name, "token": self._token,
                            "params": params or {}, "fields": fields}).encode("utf-8")
         request = Request(self.api_url, data=body,
-                          headers={"Content-Type": "application/json", "User-Agent": "a-share-value-screener/0.1"},
+                          headers={"Content-Type": "application/json",
+                                   "User-Agent": "a-share-value-screener/0.1"},
                           method="POST")
         if retries < 1:
             raise ValueError("retries must be positive")
         for attempt in range(retries):
-            self._respect_relay_rate_limit()
+            self._wait_for_request_slot()
             try:
                 with urlopen(request, timeout=self.timeout) as response:
                     payload = json.load(response)
+                if not isinstance(payload, dict):
+                    raise ValueError("provider response must be a JSON object")
                 code = payload.get("code")
                 if code != 0:
-                    # Only the explicitly opted-in relay retries transient HTTP-style
-                    # provider 429; hard permission denials (e.g. 40203) never retry.
                     message = str(payload.get("msg") or "")
-                    rate_limited = self.source == "relay" and (
-                        str(code) == "429" or "请求速度过快" in message)
-                    if rate_limited:
-                        if attempt < retries - 1:
-                            time.sleep(15 * 2 ** attempt)
+                    rate_limited = (str(code) == "429" or
+                                    "请求速度过快" in message or
+                                    "too many requests" in message.lower())
+                    server_error = str(code) in {"500", "502", "503", "504"}
+                    if rate_limited or server_error:
+                        if self._retry_transient(api_name, attempt, retries,
+                                                 "rate limit" if rate_limited else "server error"):
                             continue
-                        raise TushareError(
-                            f"{api_name}: relay rate-limited (429) after {retries} attempts; "
-                            "increase TUSHARE_RELAY_MIN_INTERVAL_SECONDS or reduce request volume")
+                        reason = "rate-limited (429)" if rate_limited else "provider server error"
+                        raise TushareError(f"{api_name}: {reason} after {retries} attempts")
+                    # Permanent permissions, API names and validation errors are
+                    # never retried and never sent to another provider automatically.
                     raise TushareError(f"{api_name}: provider error {code}: {message}")
                 fields_out = (payload.get("data") or {}).get("fields") or []
                 items = (payload.get("data") or {}).get("items") or []
                 return [dict(zip(fields_out, item)) for item in items]
-            except TushareError:
-                raise
-            except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
-                if attempt == retries - 1:
-                    raise TushareError(f"{api_name}: network/response failure ({type(exc).__name__})") from exc
-                time.sleep(2 ** attempt)
+            except HTTPError as exc:
+                if exc.code in (429, 500, 502, 503, 504):
+                    if self._retry_transient(api_name, attempt, retries,
+                                             f"HTTP {exc.code}"):
+                        continue
+                raise TushareError(f"{api_name}: HTTP {exc.code} from selected API") from exc
+            except (URLError, TimeoutError, json.JSONDecodeError, OSError, ValueError) as exc:
+                if self._retry_transient(api_name, attempt, retries,
+                                         type(exc).__name__):
+                    continue
+                raise TushareError(
+                    f"{api_name}: network/response failure ({type(exc).__name__}) "
+                    f"after {retries} attempts") from exc
         raise AssertionError("unreachable")
 
     def trade_open(self, day: str) -> bool:
