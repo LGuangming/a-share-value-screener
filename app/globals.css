@@ -369,3 +369,18 @@ h1 {font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:9px;line
   .stock-suggestion{min-height:44px;}
   .stock-suggestion-code{font-size:10px;}
 }
+
+/* Navigation feedback without a second full-page dashboard flash.
+   Filter and strategy tabs update locally and never render this fallback. */
+.route-loading-indicator{position:fixed;top:0;left:244px;right:0;height:3px;
+  z-index:80;overflow:hidden;background:rgba(22,134,116,.08);pointer-events:none;}
+.route-loading-indicator-bar{display:block;width:34%;height:100%;border-radius:3px;
+  background:var(--green);transform:translateX(-120%);
+  animation:route-progress-slide 900ms ease-in-out infinite;}
+@keyframes route-progress-slide{
+  0%{transform:translateX(-120%);}
+  100%{transform:translateX(400%);}
+}
+@media(max-width:1000px){.route-loading-indicator{left:202px;}}
+@media(max-width:700px){.route-loading-indicator{left:0;}}
+@media(prefers-reduced-motion:reduce){.route-loading-indicator-bar{animation:none;transform:none;width:100%;}}
