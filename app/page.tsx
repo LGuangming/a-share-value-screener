@@ -32,14 +32,14 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <div className="page-top"><div>
       <div className="eyebrow">RESEARCH DASHBOARD / 多策略每日扫描</div>
       <h1>选股中心</h1>
-      <p className="page-lead">按策略独立展示筛选规则与研究结果。只有已部署且发布真实数据的策略才会出现股票清单。</p>
+      <p className="page-lead">查看每日筛选结果、策略条件与交易观察。</p>
     </div><span className="date-tag"><CalendarDays size={17}/>{snapshot?.trade_date ?? "等待数据发布"}</span></div>
 
     <StrategySwitch mode="screen" requestedId={query.strategy}>
       <div className="hero-strip">
         <div><span className="hero-label">NET-NET / 已上线策略</span>
-          <h2>Net-Net每日选股 · 价格低，不等于价值低估。</h2>
-          <p>使用已披露财报计算资产折价，结合压力价值和经营风险验证安全边际。</p></div>
+          <h2>Net-Net资产折价筛选</h2>
+          <p>根据NCAV覆盖率、资产压力价值及经营指标筛选股票。</p></div>
         <div className="hero-formula"><div>净流动资产价值 <strong>NCAV</strong></div>
           <strong>流动资产 − 全部负债</strong><small>以总市值衡量折价程度</small></div>
       </div>
@@ -55,7 +55,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <small>调整后覆盖率≥100%</small></div>
         <div className="stat-card"><span><AlertTriangle size={16}/>财报待核验</span>
           <strong className="stat-orange">{snapshot ? gaps.length.toLocaleString("zh-CN") : "—"}</strong>
-          <small>缺失值不作为零</small></div>
+          <small>缺失及过期报告</small></div>
       </div>
       {!snapshot && <div className="panel notice-panel">
         <Empty title="尚未取得每日筛选数据" detail={error || "请检查数据库和每日扫描任务。"} type="warning"/>
@@ -63,35 +63,35 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {snapshot && <div className="source-note"><Database size={15}/><span>
         数据截止 {snapshot.trade_date} · 已取得行情 {snapshot.metrics.quoted_stocks ?? "—"} 只 /
         已上市 {snapshot.metrics.listed_stocks ?? "—"} 只 · 本轮财务刷新 {snapshot.metrics.financial_successes ?? 0} 家。
-        查询结果短时缓存90秒，筛选条件在浏览器内切换，无需重新查询。
+        
       </span></div>}
       {scan.error && <div className="panel notice-panel">
         <Empty title="Net-Net股票结果暂时无法读取" detail={scan.error} type="warning"/>
       </div>}
       {snapshot && !scan.error ? <ScreenerResults rows={tableRows} initial={query}/>
         : <section className="panel"><div className="section-kicker">NET-NET SCREEN RESULTS</div>
-          <h2>历史筛选结果暂不可用</h2>
-          <p className="note">读取尚未成功，系统不会把数据库错误解释为零只股票。无需重新采集历史行情或删除原有筛选记录。</p>
+          <h2>筛选结果暂不可用</h2>
+          <p className="note">筛选结果读取失败，请稍后重试。</p>
         </section>}
       <div className="bottom-grid">
         <div className="panel info-panel"><div className="section-kicker">NET-NET METHODOLOGY</div>
-          <h3>从账面折价到真实安全边际</h3>
+          <h3>Net-Net筛选步骤</h3>
           <div className="step"><div>01</div><p><strong>严格资产折价</strong>
             <span>NCAV = 流动资产 − 全部负债，要求市值覆盖率≥125%。</span></p></div>
           <div className="step"><div>02</div><p><strong>资产回收压力测试</strong>
             <span>应收、存货及预付款折价，并考虑少数股东权益。</span></p></div>
-          <div className="step"><div>03</div><p><strong>困境反转与交易观察</strong>
-            <span>利润、现金流风险独立标记；技术信号仅供研究。</span></p></div>
+          <div className="step"><div>03</div><p><strong>经营风险与价格信号</strong>
+            <span>结合利润、现金流及均线信号进行观察。</span></p></div>
           <Link className="inline-link" href="/methodology">了解完整方法 <ArrowRight size={15}/></Link>
         </div>
         <div className="panel info-panel"><div className="section-kicker">DATA QUALITY</div>
-          <h3>计算结果必须可核验</h3>
+          <h3>数据及交易状态</h3>
           <div className="quality-item"><Info size={17}/><div><strong>历史时点披露</strong>
-            <span>不使用交易日后才公布的财报。</span></div></div>
+            <span>按实际披露日选取财报。</span></div></div>
           <div className="quality-item"><CircleHelp size={17}/><div><strong>财报缺失</strong>
-            <span>缺数据明确标识，避免错误排除或假阳性。</span></div></div>
-          <div className="quality-item"><TrendingUp size={17}/><div><strong>信号非交易指令</strong>
-            <span>所有观察需通过交易规则与流动性核验。</span></div></div>
+            <span>缺项、过期财报分别标记。</span></div></div>
+          <div className="quality-item"><TrendingUp size={17}/><div><strong>价格信号</strong>
+            <span>参考均线、停牌及流动性状态。</span></div></div>
           <Link className="inline-link" href="/signals">查看交易观察 <ArrowRight size={15}/></Link>
         </div>
       </div>
