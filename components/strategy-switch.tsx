@@ -50,7 +50,7 @@ export default function StrategySwitch({
         <div>
           <div className="section-kicker">STRATEGY SELECTOR</div>
           <h2>{mode === "screen" ? "选股策略" : mode === "signals" ? "交易观察策略" : "筛选方法策略"}</h2>
-          <p>选择策略查看各自的筛选条件与结果；未上线的策略不会显示其它策略的股票。</p>
+          <p>切换策略查看规则、参数和数据条件。</p>
         </div>
         <span className={`strategy-state strategy-state-${selected.status}`}>{strategyStatusLabel[selected.status]}</span>
       </div>
@@ -102,11 +102,9 @@ export default function StrategySwitch({
           {!canShowLive && <section key={selected.id} className="panel strategy-unavailable strategy-view-enter" aria-live="polite">
       <div className="section-kicker">STRATEGY DATA STATUS</div>
       <h2>{selected.name} · {mode === "screen" ? "选股结果" : "交易观察"}</h2>
-      <p>该策略当前处于“{strategyStatusLabel[selected.status]}”状态，尚未发布独立的每日
-        {mode === "screen" ? "筛选股票数据" : "交易观察信号"}。上方展示的是已登记的规则和数据要求，不是经过筛选的实盘股票。</p>
-      <p className="note">不会将 Net-Net 的股票、NCAV阈值或交易信号用于此策略。{selected.notes}</p>
+      <p>尚未发布{mode === "screen" ? "每日筛选结果" : "交易观察信号"}。</p>
       <Link className="inline-link" href={`/strategies/${encodeURIComponent(selected.id)}`}>
-        前往策略中心查看开发状态 <ArrowUpRight size={14}/>
+        查看策略详情 <ArrowUpRight size={14}/>
       </Link>
     </section>}
         </>}
