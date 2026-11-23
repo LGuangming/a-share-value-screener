@@ -46,15 +46,18 @@ def code_list(raw: str) -> list[str]:
 
 
 def scan_codes(client: AKShareClient, codes: list[str], asof: date) -> dict:
-    spot = client.spot(codes)
+    """Test each data endpoint independently; preserve failures and partial data."""
     results: list[dict] = []
     failures: list[dict] = []
+    diagnostics: list[dict] = []
     financial_ok = 0
+    quote_ok = 0
+
     for code in codes:
-        quote = spot.get(code)
-        if not quote:
-            failures.append({"ts_code": code, "error": "Quote missing in AKShare live snapshot"})
-            continue
+        quote, quote_errors = client.quote_one(code, asof)
+        failures.extend({"ts_code": code, "endpoint": "quote", "error": e} for e in quote_errors)
+        if quote:
+            quote_ok += 1
         statements: dict = {}
         periods: dict = {}
         flags: list[str] = []
@@ -66,12 +69,27 @@ def scan_codes(client: AKShareClient, codes: list[str], asof: date) -> dict:
                 flags.extend(warnings)
             except AKShareError as exc:
                 LOGGER.warning("%s %s failed: %s", code, kind, exc)
-                failures.append({"ts_code": code, "statement": kind, "error": str(exc)[:160]})
+                failures.append({"ts_code": code, "endpoint": kind, "error": str(exc)[:180]})
                 statements[kind] = None
                 periods[kind] = (None, None)
                 flags.append("AKSHARE_FINANCIAL_SOURCE_UNAVAILABLE")
         if statements["balancesheet"] is not None:
             financial_ok += 1
+        diagnostics.append({
+            "ts_code": code, "quote_available": quote is not None,
+            "quote_source": quote.get("quote_source") if quote else None,
+            "quote_date": quote.get("quote_date") if quote else None,
+            "price": quote.get("close") if quote else None,
+            "market_cap_yuan": quote.get("market_cap_yuan") if quote else None,
+            "statement_reports": {kind: {
+                "report_date": str(periods[kind][0]) if periods[kind][0] else None,
+                "disclosed_at": str(periods[kind][1]) if periods[kind][1] else None,
+                "usable": statements[kind] is not None,
+            } for kind in statements},
+        })
+        if not quote:
+            continue
+
         stock = {"ts_code": code, "name": quote["name"], "is_st": "ST" in quote["name"].upper()}
         record = assess(stock, quote, statements["balancesheet"], statements["income"],
                         statements["cashflow"], ScreenConfig())
@@ -80,7 +98,12 @@ def scan_codes(client: AKShareClient, codes: list[str], asof: date) -> dict:
         record["ann_date"] = notice_day
         record["flags"] += sorted(set(flags))
         record["flags"].append("AKSHARE_EXPERIMENTAL")
-        record["flags"].append("LIVE_QUOTE_DATE_UNVERIFIED")
+        if not quote.get("quote_date"):
+            record["flags"].append("LIVE_QUOTE_DATE_UNVERIFIED")
+        elif str(quote["quote_date"]) != asof.isoformat():
+            record["flags"].append("QUOTE_NOT_ASOF_DATE")
+        if quote.get("market_cap_yuan") is None:
+            record["flags"].append("MARKET_CAP_UNAVAILABLE")
         if quote.get("pb") is None:
             record["flags"].append("PB_NOT_VERIFIED")
         income_day = periods["income"][0]
@@ -88,26 +111,26 @@ def scan_codes(client: AKShareClient, codes: list[str], asof: date) -> dict:
         if balance_day and ((income_day and income_day != balance_day) or
                             (cash_day and cash_day != balance_day)):
             record["flags"].append("FINANCIAL_PERIOD_MISMATCH")
-        # Consolidation must be reconciled to official announcement first.
         if "CONSOLIDATION_NOT_CONFIRMED" in record["flags"]:
             record["flags"].append("REQUIRES_OFFICIAL_REPORT_CHECK")
-        # No historical prices are obtained by the live-spot endpoint.
         record["signal"] = "NOT_EVALUATED"
-        record["assessment"] += " AKShare实验数据，报价交易日及合并口径须与上市公司公告核对；未生成买卖信号。"
+        record["assessment"] += " AKShare实验数据，财报公告及合并口径须核对；未生成买卖信号。"
         results.append(record)
 
+    status = "partial" if failures or quote_ok != len(codes) or financial_ok != len(codes) else "ok"
     return {
-        "source": "AKShare / Eastmoney experimental",
+        "status": status,
+        "source": "AKShare experimental / Eastmoney, Tencent, Sina",
         "asof": asof.isoformat(),
         "quote_timestamp_certified": False,
-        "spot_universe": len(spot),
+        "spot_universe": quote_ok,
         "sample_codes": codes,
         "sample_available": len(results),
         "balancesheets_usable": financial_ok,
         "strict_book_candidates_unverified": sum(bool(r["is_candidate"]) for r in results),
-        "failures": failures,
+        "failures": failures, "diagnostics": diagnostics,
         "results": results,
-        "disclaimer": "Test-only, not a full market screen, verified closing quote, historical backtest or trading recommendation.",
+        "disclaimer": "Partial provider success does not establish validated market cap, PB, consolidated financials or tradeable signals.",
     }
 
 
@@ -138,10 +161,16 @@ def main() -> None:
     LOGGER.info("AKShare test: %s quote rows, %s/%s samples with usable balance sheets, %s warnings",
                 report["spot_universe"], report["balancesheets_usable"], len(codes), len(report["failures"]))
     if not args.publish:
+        if report["sample_available"] == 0 and report["balancesheets_usable"] == 0:
+            raise RuntimeError("All AKShare sources unavailable: review JSON artifact diagnostics; no data invented")
+        if report["status"] != "ok":
+            LOGGER.warning("Partial AKShare smoke: inspect JSON artifact before using any results")
         return
 
     if report["balancesheets_usable"] == 0:
         raise RuntimeError("No dated and usable asset/liability report; refusing to publish misleading AKShare snapshot")
+    if any(r["market_cap"] is None for r in report["results"]):
+        raise RuntimeError("Missing actual market capitalization; partial AKShare quotes are test-only and cannot be published")
     db = os.getenv("DATABASE_URL")
     if not db:
         raise RuntimeError("DATABASE_URL write credential required only for --publish")
