@@ -1,1 +1,0 @@
-Re-test the previously user-configured Neon private storage on 2026-11-23: small PUT, GET + SHA-256, DELETE. No archive, no Tushare download.

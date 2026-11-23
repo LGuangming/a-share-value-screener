@@ -1,9 +1,5 @@
 name: A-Share 2025 Parquet History Prototype
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/neon-storage-recheck-20261123.txt'
   workflow_dispatch:
     inputs:
       operation:
@@ -65,7 +61,7 @@ jobs:
           assert 2010 <= year < datetime.date.today().year, "Completed years only"
           PY
       - name: Verify private Neon bucket and scoped read/write credentials
-        if: ${{ github.event_name == 'push' || inputs.operation == 'check' || inputs.operation == 'archive' }}
+        if: ${{ inputs.operation == 'check' || inputs.operation == 'archive' }}
         run: python -m value_screener.neon_archive check --year "$HISTORY_YEAR"
       - name: Verify Tushare official credential
         if: ${{ inputs.operation == 'archive' }}
