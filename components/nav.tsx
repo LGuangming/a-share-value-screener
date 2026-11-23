@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useLayoutEffect, useRef, useState } from "react";
 import { Activity, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
-  { href: "/", label: "Net-Net选股", Icon: Radar },
+  { href: "/", label: "选股中心", Icon: Radar },
   { href: "/strategies", label: "策略中心", Icon: Layers3 },
   { href: "/signals", label: "交易观察", Icon: Activity },
   { href: "/backtest", label: "策略回测", Icon: ChartNoAxesCombined },
@@ -25,37 +24,6 @@ function currentLink(pathname: string): string {
 export default function Nav() {
   const pathname = usePathname();
   const activeHref = currentLink(pathname);
-  const desktopNavRef = useRef<HTMLElement>(null);
-  const [indicator, setIndicator] = useState<{ top: number; height: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const nav = desktopNavRef.current;
-    if (!nav) return;
-
-    const measure = () => {
-      const selected = nav.querySelector<HTMLElement>(".nav-link.is-active");
-      if (!selected) {
-        setIndicator(null);
-        return;
-      }
-      const parentRect = nav.getBoundingClientRect();
-      const selectedRect = selected.getBoundingClientRect();
-      setIndicator({ top: selectedRect.top - parentRect.top + nav.scrollTop, height: selectedRect.height });
-    };
-
-    measure();
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
-    if (observer) {
-      observer.observe(nav);
-      for (const item of nav.querySelectorAll(".nav-link")) observer.observe(item);
-    }
-    window.addEventListener("resize", measure);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", measure);
-    };
-  }, [activeHref]);
-
   return <>
     <aside className="sidebar">
       <Link className="brand" href="/">
@@ -63,12 +31,7 @@ export default function Nav() {
         <span className="brand-text"><strong>价值雷达</strong><small>MULTI-STRATEGY / A-SHARE</small></span>
       </Link>
       <div className="nav-caption">RESEARCH WORKSPACE</div>
-      <nav ref={desktopNavRef} className="nav-main" aria-label="主导航">
-        <span
-          aria-hidden="true"
-          className={`nav-active-indicator${indicator ? " is-ready" : ""}`}
-          style={indicator ? { transform: `translateY(${indicator.top}px)`, height: indicator.height } : undefined}
-        />
+      <nav className="nav-main" aria-label="主导航">
         {links.map(({ href, label, Icon }) => {
           const isActive = activeHref === href;
           return <Link key={href} href={href}
