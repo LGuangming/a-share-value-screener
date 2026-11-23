@@ -224,9 +224,12 @@ class Store:
             values[item["ts_code"]].append(float(item["close"]))
         return values
 
-    def publish(self, day: date, run_id: UUID, candidates: list[dict], metrics: dict):
+    def publish(self, day: date, run_id: UUID, candidates: list[dict], metrics: dict,
+                strategy: str = "netnet_v1"):
+        if strategy not in ("netnet_v1", "akshare_test_v1"):
+            raise ValueError("Unrecognized screener strategy; refusing to write")
         values = [(
-            day,r["ts_code"],run_id,"netnet_v1",r["price"],r["pb"],r["market_cap"],
+            day,r["ts_code"],run_id,strategy,r["price"],r["pb"],r["market_cap"],
             r["ncav"],r["coverage"],r["stress_ncav"],r["stress_coverage"],
             r["liability_ratio"],r["report_date"],r["ann_date"],r["operating_cf"],
             r["net_profit"],r["is_candidate"],r["status"],r["signal"],
@@ -234,7 +237,7 @@ class Store:
         ) for r in candidates]
         with self.connect() as conn:
             # Atomic replacement, even if GitHub Actions runs twice for one day.
-            conn.execute("DELETE FROM screen_results WHERE trade_date=%s AND strategy='netnet_v1'", (day,))
+            conn.execute("DELETE FROM screen_results WHERE trade_date=%s AND strategy=%s", (day, strategy))
             with conn.cursor() as cur:
                 cur.executemany("""
                     INSERT INTO screen_results (trade_date,ts_code,run_id,strategy,
