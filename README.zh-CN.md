@@ -1,22 +1,26 @@
 # A股价值雷达 v0.1｜中文部署说明
 
 
-## 便捷入口：手动发布网站（不随 Git 推送自动部署）
+## 手动生产部署：使用 Vercel Deploy Hook 直达 URL
 
-**固定发布网页：** [价值雷达 — 手动部署](https://github.com/LGuangming/a-share-value-screener/actions/workflows/manual-vercel-deploy.yml)
+你需要的是 Vercel 原生的**直达部署接口**，而不是 GitHub Actions 的多步点击页面。它的地址结构为：
 
-访问该网页，使用有仓库写入权限的 GitHub 账号登录，在右侧点击 **Run workflow**，选择 `main` 并再次点击 **Run workflow**。操作会调用 Vercel 生产环境的私有 Deploy Hook；页面中的运行记录会显示 Hook 是否接受请求。请到 [Vercel Deployments](https://vercel.com/lguangmings-projects/a-share-value-screener/deployments) 确认最终状态为 READY；**Hook接受请求不等于生产构建成功**。
+```text
+https://api.vercel.com/v1/integrations/deploy/prj_XgjfTUJ6iImrNINA6hB5kdPDuM6W/<YOUR_HOOK_SECRET>
+```
 
-**首次使用前只需配置一次：**
+这里已经填写本项目的真实 `projectId`，但末尾的 `YOUR_HOOK_SECRET` **必须由 Vercel 创建该项目的 Hook 后生成**，不能从代码或 projectId 推算，更不能提交到仓库。创建步骤：
 
-1. 到 Vercel 项目 **Settings → Git → Deploy Hooks**，新建 Hook，名称可设为 `manual-main-production`，目标分支设为 `main`。
-2. 复制新生成的私密 Hook URL。把它保存为 GitHub 仓库 **Settings → Secrets and variables → Actions → New repository secret** 中的 `VERCEL_DEPLOY_HOOK_URL`，不要公开，也不要发到聊天、README、截图或网页前端。
-3. GitHub Actions 中再次打开上述固定发布网页，点击 **Run workflow** 即可按需请求生产部署。
+1. 打开 [Vercel Project Settings → Git](https://vercel.com/lguangmings-projects/a-share-value-screener/settings/git)。
+2. 找到 **Deploy Hooks**，输入名称（如 `on-demand-main`），分支选择 `main`，点击 Create Hook。
+3. 在页面复制生成的完整 URL，保存到**你的私人书签**。以后在浏览器地址栏打开这个 URL（HTTP **GET**），即可直接触发一次生产分支部署；同一 URL 也接受 POST 请求。
+4. 打开 [Vercel Deployments](https://vercel.com/lguangmings-projects/a-share-value-screener/deployments) 确认构建是否达到 `READY`；接口响应只代表部署请求已接收，不保证构建成功。
 
-`vercel.json` 仍使用 `git.deploymentEnabled=false`，因此普通 `git push` 不会触发 Vercel 自动部署。不要改用旧的 `github.enabled=false`，后者会禁用 Deploy Hook。该网页只有登录并具有足够仓库权限的用户才能手动启动工作流，避免向公众暴露部署接口。部署受 Vercel 账户额度限制；若额度用尽，需在限额恢复后再启动。
+**重要：它是无需登录即可调用的 bearer URL，任何拿到完整地址的人都能触发新的部署，并可能耗尽额度。** 这表示它在技术上公开可访问，并不意味着应当公开公布完整地址。不要放到网站公共页面、公共代码、README、分享截图、聊天链接或公开书签中；若泄露，请立即在 Vercel 删除旧 Hook 并重新创建。
 
-**无需等待 Hook 配置也可手动部署：** 打开同一 Vercel Deployments 页面，使用 **Create Deployment**，指定 `main`，然后确认创建；这是一条独立的手动发布路径。
+项目 `vercel.json` 已设置 `git.deploymentEnabled=false`，普通 Git 推送不会自动部署；仅在你访问专属 Hook 或手动调用 Vercel 发布时才会创建部署。不要使用旧版 `github.enabled=false` 设置，因为它会阻止 Deploy Hook。
 
+如需通过登录GitHub后点击发布，而不是持有直接 Hook URL，保留了备用的 [GitHub Actions 手动发布页](https://github.com/LGuangming/a-share-value-screener/actions/workflows/manual-vercel-deploy.yml)，该路径需要先配置私密仓库 Secret `VERCEL_DEPLOY_HOOK_URL`。
 
 这是已完成代码的**第一版MVP**，不是已部署上线的成品。主要功能：每日净流动资产折价初筛、低价股列表、基本面初步评价、风险标记、交易观察。回测页面仅为后续开发占位，不能提供实盘已验证的交易建议。
 
