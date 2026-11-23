@@ -54,12 +54,6 @@ class Store:
                       name=excluded.name,industry=excluded.industry,market=excluded.market,
                       list_date=excluded.list_date,is_st=excluded.is_st,updated_at=now()
                 """, values)
-            # A completed snapshot and its success marker share ONE transaction.
-            # If publishing fails, the previous snapshot and success marker remain.
-            conn.execute("""
-                UPDATE job_runs SET status='success',finished_at=now(),metrics=%s,error_text=NULL
-                WHERE run_id=%s AND status='running'
-            """, (Jsonb(metrics), run_id))
         return len(values)
 
     def upsert_quotes(self, rows: list[dict], day: date):
@@ -84,12 +78,6 @@ class Store:
                       close=excluded.close,pb=excluded.pb,turnover_rate=excluded.turnover_rate,
                       market_cap_yuan=excluded.market_cap_yuan,raw=excluded.raw
                 """, values)
-            # A completed snapshot and its success marker share ONE transaction.
-            # If publishing fails, the previous snapshot and success marker remain.
-            conn.execute("""
-                UPDATE job_runs SET status='success',finished_at=now(),metrics=%s,error_text=NULL
-                WHERE run_id=%s AND status='running'
-            """, (Jsonb(metrics), run_id))
         return len(values)
 
     def financial_queue(self, day: date, budget: int) -> list[str]:
