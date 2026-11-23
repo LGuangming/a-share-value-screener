@@ -125,7 +125,7 @@ export default function ScreenerResults({ rows, initial }: {
   return <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
       <h2>{needle ? "股票即时搜索" : "Net-Net筛选结果"} <span className="count-badge">{filtered.length}</span></h2>
-      <p>在当前选项卡内实时搜索股票，结果严格遵守此视图及选定阈值，无需重新读取数据库。</p>
+      <p>按股价、PB及NCAV覆盖率筛选。</p>
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
       <div className="tabs" role="tablist" aria-label="筛选视图">
@@ -191,8 +191,7 @@ export default function ScreenerResults({ rows, initial }: {
       </div>
     </div>
     {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
-      {viewLabel} · 已匹配 {matches.length} 只 / 当前选项卡 {tabRows.length} 只；
-      始终保留选项卡及股价、PB等筛选条件。
+      {viewLabel} · 匹配 {matches.length} 只 / 当前 {tabRows.length} 只
     </div>}
     {filtered.length ? <div className="table-scroll"><table className="results-table">
       <thead><tr><th>股票 / 行业</th><th>收盘价</th><th>总市值</th>
@@ -218,6 +217,5 @@ export default function ScreenerResults({ rows, initial }: {
       onClick={()=>setVisibleCount(n=>n+100)}>
       再显示100条（已显示{Math.min(visibleCount,filtered.length)} / {filtered.length}）
     </button>}
-    <div className="panel-foot">筛选于本地即时完成；股票详情、策略定义及历史结果仍以数据库真实记录为准。</div>
   </section>;
 }
