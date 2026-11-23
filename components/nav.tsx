@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { Activity, BookOpenText, ChartNoAxesCombined, Database, Radar, SlidersHorizontal } from "lucide-react";
+import { Activity, BookOpenText, ChartNoAxesCombined, Database, FlaskConical, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
   { href: "/", label: "每日选股", Icon: Radar },
   { href: "/signals", label: "交易观察", Icon: Activity },
+  { href: "/akshare-test", label: "AKShare测试", Icon: FlaskConical },
   { href: "/backtest", label: "策略回测", Icon: ChartNoAxesCombined },
   { href: "/methodology", label: "筛选方法", Icon: BookOpenText },
 ];
@@ -20,7 +21,7 @@ export default function Nav() {
         {links.map(({href,label,Icon}) => <Link key={href} href={href} className="nav-link"><Icon size={18}/><span>{label}</span></Link>)}
       </nav>
       <div className="sidebar-bottom">
-        <div className="sidebar-info"><Database size={16}/><span>数据源：Tushare Pro</span></div>
+        <div className="sidebar-info"><Database size={16}/><span>正式：Tushare Pro · 实验：AKShare</span></div>
         <p>研究工具 · 不构成投资建议</p>
       </div>
     </aside>
