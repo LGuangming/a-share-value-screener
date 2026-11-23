@@ -1,0 +1,5 @@
+One-time request to archive A-share Tushare daily OHLCV to private Neon Object Storage.
+Run sequence: 2025 -> 2024 -> 2023 -> 2022 -> 2021 -> 2020.
+Skip years whose published manifest and all remote Parquet checksums verify.
+Do not publish raw market data to GitHub.
+Requested on: 2026-11-23.
