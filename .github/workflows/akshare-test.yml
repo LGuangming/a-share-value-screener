@@ -48,7 +48,7 @@ jobs:
         run: pip install -r backend/requirements-akshare.txt
       - name: Run normalized-data unit tests
         run: python -m unittest discover -s backend/tests -v
-      - name: Experimental live provider fetch (never uses Tushare Token)
+      - name: Experimental live provider fetch (Eastmoney -> Tencent -> Sina; test-only)
         run: |
           if [ "$TEST_MODE" = publish ]; then
             test "${{ github.event_name }}" = workflow_dispatch || exit 1
