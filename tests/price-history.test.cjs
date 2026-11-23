@@ -29,7 +29,7 @@ test("history query failures cannot hide an otherwise available stock detail", (
 
 test("chart is backed by merged history and exposes the loaded session count", () => {
   assert.match(stockPage, /<Sparkline prices=\{prices\}/);
-  assert.match(stockPage, /已加载 \{prices\.length\} 个交易日/);
+  assert.match(stockPage, /最近 \{prices\.length\} 个交易日收盘价/);
   assert.match(spark, /prices\.length < 2/);
 });
 
