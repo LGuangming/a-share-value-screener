@@ -114,7 +114,7 @@ test("stock lookup filters on every keystroke, ranks exact and prefix codes firs
   assert.match(search,/if \(name === needle\) return 1/);
   assert.match(search,/if \(code\.startsWith\(needle\)\) return 2/);
   assert.match(search,/if \(name\.startsWith\(needle\)\) return 3/);
-  assert.match(search,/if \(needle\) return matches/);
+  assert.match(search,/const filtered = needle \? matches : tabRows/);
   assert.match(search,/const suggestions = matches\.slice\(0, 8\)/);
   assert.match(search,/role="combobox"/);
   assert.match(search,/role="listbox"/);
@@ -122,6 +122,30 @@ test("stock lookup filters on every keystroke, ranks exact and prefix codes firs
   assert.match(search,/event\.key === "ArrowDown"/);
   assert.match(search,/event\.key === "Enter"/);
   assert.match(search,/onClick=\{\(\) => chooseSuggestion\(row\.ts_code\)\}/);
-  assert.match(search,/搜索范围为当前Net-Net已发布的/);
+  assert.match(search,/当前选项卡/);
   assert.doesNotMatch(search,/fetch\(|router\.refresh\(|router\.push\(/);
+});
+
+test("live suggestions respect the current tab and thresholds and show no industry",()=>{
+  const search = read("components/screener-results.tsx");
+  assert.match(search,/const tabRows = useMemo\(\(\) => rows\.filter/);
+  assert.match(search,/if \(view === "strict"\) return row\.is_candidate/);
+  assert.match(search,/if \(view === "gaps"\) return row\.status === "DATA_GAP"/);
+  assert.match(search,/if \(row\.price !== null && row\.price > maxPrice\) return false/);
+  assert.match(search,/if \(row\.pb !== null && row\.pb > maxPb\) return false/);
+  assert.match(search,/return tabRows\.map\(\(row, index\)/);
+  assert.match(search,/const filtered = needle \? matches : tabRows/);
+  assert.match(search,/aria-label=\{\x60\$\{viewLabel\}股票搜索结果\x60\}/);
+  assert.match(search,/className="stock-suggestion-name"/);
+  assert.match(search,/className="stock-suggestion-code"/);
+  const dropdown=search.slice(search.indexOf('className="stock-suggestions">'),search.indexOf('        </div>\n        <select aria-label="最高价格"'));
+  assert.doesNotMatch(dropdown,/row\.industry/);
+  const css=read("app/globals.css");
+  assert.match(css,/\.stock-suggestions\{position:absolute/);
+  assert.match(css,/\.stock-suggestion\{display:grid/);
+});
+
+test("Git pushes do not automatically deploy; manually select the release commit",()=>{
+  const config=JSON.parse(read("vercel.json"));
+  assert.equal(config.git.deploymentEnabled,false);
 });
