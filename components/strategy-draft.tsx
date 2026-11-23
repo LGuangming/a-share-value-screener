@@ -23,7 +23,7 @@ export default function StrategyDraft({strategy}: {strategy: StrategyDefinition}
   const copy=async()=>{
     try {
       await navigator.clipboard.writeText(config);
-      setMessage("配置草稿已复制；尚未启用自动选股或回测。");
+      setMessage("参数配置已复制。");
     } catch {
       setMessage("复制失败，可选中下方文本自行复制。");
     }
@@ -42,10 +42,10 @@ export default function StrategyDraft({strategy}: {strategy: StrategyDefinition}
         <small>可配置范围：{p.min}–{p.max}</small>
       </label>)}
     </div>
-    <p className="note">配置仅在当前页面预览，不写入数据库、不生成买卖信号。未来接入策略执行器时按策略ID、版本和参数保存。</p>
+    <p className="note">当前为参数预览。</p>
     <textarea className="strategy-draft-json" aria-label="策略配置草稿JSON" readOnly rows={Math.max(6,strategy.parameters.length*2+5)} value={config}/>
     <button type="button" className="filter-button" disabled={!valid} onClick={copy}>
-      <Copy size={15}/> 复制策略参数草稿
+      <Copy size={15}/> 复制参数
     </button>
     {!valid&&<p className="strategy-error">请将所有数值调整至允许范围内。</p>}
     {message&&<p className="strategy-message" role="status">{message}</p>}
