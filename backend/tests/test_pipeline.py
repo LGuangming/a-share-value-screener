@@ -11,8 +11,7 @@ from unittest.mock import Mock, patch
 # replaces the Store factory with an isolated mock.
 from unittest.mock import Mock as _Mock
 with patch.dict("sys.modules", {"value_screener.store": _Mock(Store=_Mock())}):
-    from value_screener.cli import run_scan, run_financial_refresh
-from value_screener.tushare_client import TushareError
+    from value_screener.cli import run_scan, run_financial_refresh, TushareError
 
 
 class PipelineIsolationTests(unittest.TestCase):
