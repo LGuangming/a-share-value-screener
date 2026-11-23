@@ -268,3 +268,15 @@ h1 {font-size:30px;font-weight:750;letter-spacing:-.035em;margin-bottom:9px;line
   .strategy-switch-footer{flex-wrap:wrap;}
   .filter-local-hint{display:none;}}
 @media(prefers-reduced-motion:reduce){.strategy-switch-option{transition:none;}}
+
+/* Visible transition feedback while the first uncached data request runs. */
+.page-loading-bar,.page-loading-line{border-radius:6px;background:#edf4ef;
+  background-image:linear-gradient(90deg,#edf4ef 10%,#e0ece4 50%,#edf4ef 90%);
+  background-size:200% 100%;animation:loading-pulse 1.4s ease-in-out infinite;}
+.page-loading-bar{height:26px;width:52%;margin:2px 0 24px;}
+.page-loading-line{height:13px;width:100%;margin:0 0 12px;}
+.page-loading-short{width:65%;}
+@keyframes loading-pulse{0%{background-position:150% 0;}100%{background-position:-50% 0;}}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+  clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+@media(prefers-reduced-motion:reduce){.page-loading-bar,.page-loading-line{animation:none;}}
