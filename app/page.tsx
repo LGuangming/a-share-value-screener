@@ -62,8 +62,8 @@ export default async function Dashboard({searchParams}: {searchParams: Promise<Q
   const tradeDay = snapshot?.trade_date;
   return <main className="page-container">
     <div className="page-top"><div><div className="eyebrow">RESEARCH DASHBOARD / 每日市场扫描</div>
-      <h1>每日价值筛选 <span className="heading-period">/ Net-Net</span></h1>
-      <p className="page-lead">以净流动资产折价为起点，识别真正值得进一步尽调的低估值公司。</p></div>
+      <h1>Net-Net每日选股 <span className="heading-period">/ 已上线策略</span></h1>
+      <p className="page-lead">当前页面仅展示Net-Net资产折价筛选。其他选股方向在策略中心独立配置、验证和上线。 <Link className="inline-link" href="/strategies">浏览策略中心 <ArrowUpRight size={14}/></Link></p></div>
       <div className="date-tag"><CalendarDays size={17}/><span>{tradeDay ?? "尚无有效交易日快照"}</span></div>
     </div>
     <div className="hero-strip">

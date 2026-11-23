@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useLayoutEffect, useRef, useState } from "react";
-import { Activity, BookOpenText, ChartNoAxesCombined, Database, Radar, SlidersHorizontal } from "lucide-react";
+import { Activity, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
-  { href: "/", label: "每日选股", Icon: Radar },
+  { href: "/", label: "Net-Net选股", Icon: Radar },
+  { href: "/strategies", label: "策略中心", Icon: Layers3 },
   { href: "/signals", label: "交易观察", Icon: Activity },
   { href: "/backtest", label: "策略回测", Icon: ChartNoAxesCombined },
   { href: "/methodology", label: "筛选方法", Icon: BookOpenText },
@@ -59,7 +60,7 @@ export default function Nav() {
     <aside className="sidebar">
       <Link className="brand" href="/">
         <span className="brand-icon"><Radar size={24} strokeWidth={1.9}/></span>
-        <span className="brand-text"><strong>价值雷达</strong><small>VALUE RADAR / A-SHARE</small></span>
+        <span className="brand-text"><strong>价值雷达</strong><small>MULTI-STRATEGY / A-SHARE</small></span>
       </Link>
       <div className="nav-caption">RESEARCH WORKSPACE</div>
       <nav ref={desktopNavRef} className="nav-main" aria-label="主导航">

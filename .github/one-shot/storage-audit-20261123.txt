@@ -1,0 +1,1 @@
+Read-only one-time PostgreSQL capacity audit, without database mutation.

@@ -1,0 +1,140 @@
+[
+  {
+    "id": "netnet_v1",
+    "version": "1.0.0",
+    "name": "Net-Net 资产折价",
+    "family": "基本面价值",
+    "status": "live",
+    "description": "使用已披露的合并资产负债表计算净流动资产价值，结合压力测试与财务风险复核。",
+    "universe": "沪深主板低价/低PB预筛，排除ST风险",
+    "requirements": [
+      "daily_basic",
+      "balancesheet",
+      "income",
+      "cashflow",
+      "price_history"
+    ],
+    "parameters": [
+      {
+        "key": "min_ncav_coverage",
+        "name": "NCAV最低覆盖率",
+        "unit": "倍",
+        "type": "number",
+        "default": 1.25,
+        "min": 1,
+        "max": 3
+      },
+      {
+        "key": "max_price",
+        "name": "股价上限",
+        "unit": "元",
+        "type": "number",
+        "default": 10,
+        "min": 1,
+        "max": 100
+      },
+      {
+        "key": "max_pb",
+        "name": "市净率上限",
+        "unit": "倍",
+        "type": "number",
+        "default": 1.2,
+        "min": 0.1,
+        "max": 5
+      }
+    ],
+    "notes": "目前唯一已部署的正式每日筛选策略；不代表通过回测。"
+  },
+  {
+    "id": "ma_trend_research_v0",
+    "version": "0.1.0",
+    "name": "MA20/50 趋势观察",
+    "family": "技术趋势",
+    "status": "research",
+    "description": "基于历史收盘价和趋势方向生成研究信号；回测引擎可用于工程验证。",
+    "universe": "历史A股日线样本，尚未完成完整复权和可成交性校验",
+    "requirements": [
+      "daily_ohlcv",
+      "adj_factor",
+      "stk_limit",
+      "suspend_d"
+    ],
+    "parameters": [
+      {
+        "key": "ma_fast",
+        "name": "快速均线",
+        "unit": "交易日",
+        "type": "integer",
+        "default": 20,
+        "min": 5,
+        "max": 50
+      },
+      {
+        "key": "ma_slow",
+        "name": "慢速均线",
+        "unit": "交易日",
+        "type": "integer",
+        "default": 50,
+        "min": 20,
+        "max": 200
+      }
+    ],
+    "notes": "仅研究测试，尚未上线正式每日选股或宣称投资收益。"
+  },
+  {
+    "id": "oversold_reversion_v0",
+    "version": "0.1.0",
+    "name": "短期超跌反转",
+    "family": "均值回归",
+    "status": "planned",
+    "description": "未来结合短期超跌、成交量和反弹确认，研究5至20个交易日持仓。",
+    "universe": "沪深主板（拟）",
+    "requirements": [
+      "daily_ohlcv",
+      "adj_factor",
+      "stk_limit",
+      "suspend_d",
+      "historic_st"
+    ],
+    "parameters": [
+      {
+        "key": "lookback",
+        "name": "超跌观察期",
+        "unit": "交易日",
+        "type": "integer",
+        "default": 10,
+        "min": 5,
+        "max": 30
+      }
+    ],
+    "notes": "尚未完成历史股票池及完整回测，不提供正式筛选。"
+  },
+  {
+    "id": "quality_momentum_v0",
+    "version": "0.1.0",
+    "name": "质量动量多因子",
+    "family": "基本面量化",
+    "status": "planned",
+    "description": "未来组合盈利质量、现金流、估值与价格动量，并按披露日严格控制前视偏差。",
+    "universe": "沪深主板（拟）",
+    "requirements": [
+      "daily_ohlcv",
+      "adj_factor",
+      "historic_financials",
+      "historic_st",
+      "corporate_actions"
+    ],
+    "parameters": [
+      {
+        "key": "rebalance_days",
+        "name": "调仓周期",
+        "unit": "交易日",
+        "type": "integer",
+        "default": 20,
+        "min": 5,
+        "max": 60
+      }
+    ],
+    "notes": "未取得完整的历史财报和ST时点资料前，不产生正式历史绩效。"
+  }
+]

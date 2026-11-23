@@ -15,3 +15,8 @@ venv/
 *.sqlite3
 *.db
 .vercel/
+
+# Historical data and temporary backtest outputs are never source-controlled
+artifacts/
+*.parquet
+*.tmp.csv

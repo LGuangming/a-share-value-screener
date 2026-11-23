@@ -172,3 +172,22 @@ PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 The importer checks returned coverage and logs shortfalls; some endpoints/permissions may truncate or reject the data. It does **not** silently claim all A shares were retrieved. Only listed tickers with valid consolidated `report_type=1` statements are ingested. Perform additional earlier quarters if needed. The daily task continues with bounded per-company incremental refresh.
 
 Stock detail charts now merge the compact `price_history` cache with `daily_prices` (daily quotes take precedence on duplicate dates) for up to 120 sessions. The backfill covers a total of 160 calendar days by default, skipping already-complete sessions. The backfill grants SELECT on `price_history` to an existing `screener_reader` role; custom read-only roles need an explicit grant.
+
+## Multi-strategy backtest architecture (first implementation)
+
+The live daily screener remains **Net-Net only**. A versioned strategy catalog
+(`strategies/catalog.json`) now drives the strategy center (`/strategies`),
+parameter draft detail pages, and a multi-strategy backtest laboratory.
+Planned strategies are clearly marked and never masquerade as live signals.
+
+The standalone capacity audit checks current Neon storage **read-only**. The
+historical 2025 market prototype fetches all completed market sessions into
+monthly ZSTD Parquet partitions, verifies counts and SHA-256 and runs an
+**engineering-only** 5/10/20-session portfolio kernel smoke test. No historical
+market rows are inserted into Neon. By default GitHub keeps the exported files
+as a **7-day temporary artifact only**. Long-term private S3-compatible storage
+needs explicit `OBJECT_STORE_*` credentials plus `BACKTEST_ARCHIVE_UPLOAD=true`
+and should first pass real capacity and compression checks.
+
+Detailed contracts, limitations, verification requirements and staged rollout:
+[docs/MULTI_STRATEGY_BACKTEST.md](docs/MULTI_STRATEGY_BACKTEST.md).

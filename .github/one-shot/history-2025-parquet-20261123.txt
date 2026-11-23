@@ -1,0 +1,1 @@
+User-authorized first 2025 full-market Parquet prototype, no database writes; upload to private object storage only if explicitly configured.

@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Pure screening-rule tests (no API credentials)
+      - name: Screening, multi-strategy and backtest kernel tests (no credentials)
         env:
           PYTHONPATH: backend
         run: python -m unittest discover -s backend/tests -v
@@ -29,6 +29,8 @@ jobs:
         run: npm run test:review
       - name: Stock detail chart and history integration regression tests
         run: npm run test:price-history
+      - name: Multi-strategy catalog and UI tests
+        run: npm run test:strategies
       - name: Typecheck
         run: npm run typecheck
       - name: Build
