@@ -1,13 +1,17 @@
 import "server-only";
-import postgres from "postgres";
+import { neon } from "@neondatabase/serverless";
 import { unstable_cache } from "next/cache";
 
-let client: ReturnType<typeof postgres> | null = null;
+// Vercel Function read-only queries use HTTPS to Neon's SQL endpoint.
+// The previous postgres.js TCP path was repeatedly failing with CONNECT_TIMEOUT
+// on port 5432. No persistent serverless TCP pool is needed with neon().
+// Never fall back to DATABASE_URL: only the restricted reader credential is used.
+let client: ReturnType<typeof neon> | null = null;
 
 function connection() {
   const url = process.env.DATABASE_READ_URL;
   if (!url) return null;
-  if (!client) client = postgres(url, { max: 1, idle_timeout: 10, connect_timeout: 15, prepare: false });
+  if (!client) client = neon(url);
   return client;
 }
 
