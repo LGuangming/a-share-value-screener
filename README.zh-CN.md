@@ -198,8 +198,11 @@ PYTHONPATH=backend python -m value_screener.cli recalculate-ncav
 本阶段单独增加：Neon容量**只读**审计工作流；2025年全市场Tushare历史日线
 按月ZSTD Parquet归档原型；通用Python持仓/交易成本/T+1模拟内核及自动测试。
 当前仓库是公开的，因此仅把 `manifest.json` 体积/校验信息保存为7天后过期的GitHub Artifact，**不公开上传完整历史行情**；完整Parquet只在临时运行器中保留，除非已配置私有对象存储；
-未配置私有对象存储前，不宣称已实现永久历史仓库。通过
-`BACKTEST_ARCHIVE_UPLOAD=true` 与显式 `OBJECT_STORE_*` 配置后才允许上传。
+未配置私有对象存储前，不宣称已实现永久历史仓库。Neon私有S3对象存储的分支Endpoint、读写凭据、Bucket名称等配置后才允许上传。正式设置见 [多策略回测开发规范](docs/MULTI_STRATEGY_BACKTEST.md)；先运行连接检查，再归档和恢复测试。
 程序不会把多年历史行情写进Neon，未来正式回测须先补齐历史ST、财报公告日、
 复权与交易限制数据。详细说明见
 [多策略回测开发规范](docs/MULTI_STRATEGY_BACKTEST.md)。
+
+### Neon对象存储接入与验收
+
+2025年度Parquet原型已经实现Neon S3兼容Bucket读写路径，尚未证明用户账户已建立私有Bucket或填入GitHub Secret。对象存储不接入PostgreSQL的1GB表空间。新工作流支持 `check`（小对象写/读/删）、`archive`（采集→压缩→检验→上传）、`restore`（从私有Neon存储恢复→SHA校验→工程回测测试）。**必须分别查看真实运行日志的 uploaded_and_verified 和 restored_and_verified**，才算完成云端归档/恢复。登录Neon Console创建private Bucket，并按 [详细步骤](docs/MULTI_STRATEGY_BACKTEST.md) 配置GitHub Secrets和Variables；禁止直接把密钥粘贴到公开仓库或网页。

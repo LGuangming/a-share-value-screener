@@ -10,15 +10,44 @@
 
 工作流 `A-Share Neon Capacity Audit` 读取 `pg_database_size` 和每个public表的堆/索引/总大小，仅输出容量统计到GitHub Actions日志。**pg_database_size并不等于Neon提供商的账单配额**；实际容量仍应以Neon控制台为准。此工作流可手动重复执行，不修改权限或表结构。
 
-### 2. 2025年历史OHLCV / Parquet样本
+### 2. 2025年历史OHLCV / Parquet + Neon私有对象存储
 
-工作流 `A-Share 2025 Parquet History Prototype` 独立于每日扫描：
-- Tushare官方 `trade_cal` 枚举全年开放交易日；`daily` 每个交易日获取全市场开高低收、成交量和成交额。
-- 每日校验最少3000只、日期、OHLC逻辑及数据完整性；如果某天不足会报错，**不上传冒充完整的数据**。
-- 每月生成一个ZSTD Parquet（`prices/year=2025/month=MM.parquet`），生成含记录数、日期范围、大小与SHA-256的 `manifest.json`，写明价格未复权。
-- 仓库是公开的，长期**不允许**将完整行情上传为公开Artifact；仅将体积、SHA和日期等 `manifest.json` 统计作为临时Artifact保留7天，完整Parquet只在Actions运行器上暂存，除非已经配置私有对象存储；无数据库写入。
-- 只有显式配置仓库变量 `BACKTEST_ARCHIVE_UPLOAD=true`、`OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_ACCESS_KEY`、`OBJECT_STORE_SECRET_KEY` 后，才会向私有S3兼容对象存储上传并核对对象字节大小。应首先确保Bucket实际为私有，且S3密钥权限限定为该Bucket。
-- 尚未接入Neon Object Storage时只使用临时artifact，不创建永久付费存储，也不会冒称已归档。扩展到2020年之前先根据2025实际压缩率和可用额度重新计算总大小。
+已完成2025年工程原型：243个交易日、1,313,898条记录、12个ZSTD Parquet、合计24,164,978字节（2026-11-23 GitHub Actions run 45171163127）。**该次运行尚未配置永久对象存储，原始GitHub Artifact已经删除**。这些压缩文件当前不能直接在云端恢复，成功率与存储金额需要在实际连接后复核。
+
+仓库现已集成Neon Object Storage S3数据面，支持 `check`、`archive`、`restore` 三种手动运行模式：
+
+1. `check`：连接已存在的Neon私有Bucket；真实执行一个小文件写入、下载核对SHA-256、删除，验证Neon分支URL和凭证有效。**不调用Tushare，不写Neon PostgreSQL。**
+2. `archive`：先执行 `check`；再提取指定完整年度全市场历史日线到按月ZSTD Parquet，检查数据和本地文件SHA-256、完成工程冒烟测试，然后逐月上传。每份远端文件均进行Head大小+元数据SHA校验和GET实际下载SHA-256校验；最后才发布年度manifest。已发布年度如果再次获得不同的manifest，拒绝静默覆盖。可跳过已验证的月份以恢复中断。
+3. `restore`：**不调用Tushare**，从Neon下载年度manifest和12份Parquet，逐一对SHA-256、大小与记录清单进行验证，之后使用恢复的文件执行5/10/20交易日工程冒烟测试。该操作才是长期存储真正可读、可复核的验收条件。
+
+工作流名称保留为 `A-Share 2025 Parquet History Prototype`，但已可以选择已完成的其他年度。所有模式均为手动触发，不在每次推送时自动消耗Tushare配额。**公开仓库仅上传不含行情原文的manifest Artifact**，绝不上传完整市场Parquet或密钥。
+
+#### Neon账户的首次配置（需要用户在Neon及GitHub授权）
+
+**先确认现有Neon PostgreSQL项目所用的分支和区域**。Neon Object Storage不是Postgres表空间：如果账户所在区域未支持该功能，应先停止操作，不擅自新建会产生费用的项目。参考 Neon 文档： https://neon.com/docs/storage/get-started 。
+
+1. 登录Neon Console → 对应项目 → **Object Storage / Buckets**，在与现有数据库一致的分支创建Bucket `a-share-backtest-private`，访问类型选 `private`，不可使用 `public_read`。
+2. **Connect → Storage** 复制完整分支S3 Endpoint（`https://br-....storage.c-....REGION.aws.neon.tech`）及地区。**Settings → Credentials** 为该分支单独生成仅含 `storage:read` 和 `storage:write` 的凭证；`token_id` 映射S3 Access Key ID，`s3_secret_access_key` 映射S3 Secret Access Key。不要在ChatGPT、README、Actions日志或前端页面粘贴密钥。
+3. 在GitHub仓库 **Settings → Secrets and variables → Actions → Secrets** 设置：
+   - `NEON_STORAGE_ENDPOINT`：完整HTTPS分支Endpoint
+   - `NEON_STORAGE_ACCESS_KEY_ID`：Neon提供的 `token_id`
+   - `NEON_STORAGE_SECRET_ACCESS_KEY`：Neon提供的 `s3_secret_access_key`
+4. 在 **Actions → Variables** 设置：
+   - `NEON_STORAGE_BUCKET=a-share-backtest-private`
+   - `NEON_STORAGE_REGION`：Neon给出的区域（例如 `us-east-2`）；留空则从Endpoint提取
+   - `NEON_STORAGE_PRIVATE_CONFIRMED=true`：**仅在Neon控制台确认Bucket访问类型确为private后**设置。此变量是人工确认，代码不能通过普通S3 Head操作核验Neon的Bucket控制面权限。
+5. GitHub → Actions → **A-Share 2025 Parquet History Prototype** → Run workflow：先选择 `operation=check`；成功后选择 `operation=archive, year=2025`。只有日志出现 `NEON_STORAGE_STATUS uploaded_and_verified` 才算真正归档；再选择 `operation=restore, year=2025`，必须出现 `NEON_STORAGE_STATUS restored_and_verified` 并完成 `BACKTEST_ENGINEERING_SMOKE`。
+6. 不要同时将真实S3密钥或Neon数据库连接密码加入Vercel客户端环境变量。这些仓库Secrets只供GitHub Actions Python服务端任务使用。
+
+代码的S3客户端强制**path-style寻址**、HTTPS分支Endpoint、签名V4，并固定历史前缀 `a-share-backtest/v1`。2025年度结构为：
+```
+a-share-backtest-private/
+  a-share-backtest/v1/prices/year=2025/month=01.parquet
+  ...
+  a-share-backtest/v1/prices/year=2025/month=12.parquet
+  a-share-backtest/v1/prices/year=2025/manifest.json
+```
+manifest永远最后上传；所有12个月必须验证通过才会发布，避免使用部分历史数据。不同版本的数据集不应该覆写v1，需要明确迁移和版本控制。真正扩大到2020—2026年前，还需要补齐复权、历史ST及历史披露财报。
 
 ### 3. 策略无关交易内核
 

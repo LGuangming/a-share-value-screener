@@ -155,45 +155,11 @@ def export_year(client: TushareClient, year: int, root: Path,
             "parquet_bytes":manifest["parquet_bytes"],"csv_bytes":manifest["csv_bytes"],
             "partitions":len(manifest["partition_files"]),
             "ratio":round(manifest["parquet_bytes"]/max(manifest["csv_bytes"],1),4),
-            "storage":"TEMPORARY_ACTIONS_ARTIFACT unless OBJECT_STORE_* configured",
+            "storage":"LOCAL_ONLY_UNTIL_EXPLICIT_PRIVATE_ARCHIVE_UPLOAD",
         },ensure_ascii=False),flush=True)
         return manifest
     finally:
         con.close()
-
-
-def upload_archive(root: Path, manifest: dict) -> bool:
-    """Optional private S3-compatible storage, never silently enabled."""
-    if os.getenv("OBJECT_STORE_UPLOAD") != "true":
-        print("OBJECT_STORE_STATUS not_configured: temporary artifact only", flush=True)
-        return False
-    required = ("OBJECT_STORE_ENDPOINT", "OBJECT_STORE_BUCKET",
-                "OBJECT_STORE_ACCESS_KEY", "OBJECT_STORE_SECRET_KEY")
-    absent = [k for k in required if not os.getenv(k)]
-    if absent:
-        raise RuntimeError("Object upload requested but missing config keys: " + ",".join(absent))
-    import boto3
-    client = boto3.client(
-        "s3", endpoint_url=os.environ["OBJECT_STORE_ENDPOINT"],
-        aws_access_key_id=os.environ["OBJECT_STORE_ACCESS_KEY"],
-        aws_secret_access_key=os.environ["OBJECT_STORE_SECRET_KEY"],
-        region_name=os.getenv("OBJECT_STORE_REGION","auto"),
-    )
-    bucket = os.environ["OBJECT_STORE_BUCKET"]
-    prefix = "a-share-backtest"
-    for part in manifest["partition_files"]:
-        path = root / part["path"]
-        key = f"{prefix}/{part['path']}"
-        client.upload_file(str(path),bucket,key,
-                           ExtraArgs={"Metadata":{"sha256":part["sha256"]}})
-        head = client.head_object(Bucket=bucket,Key=key)
-        if int(head["ContentLength"]) != part["bytes"]:
-            raise RuntimeError(f"Uploaded object size mismatch for {key}")
-    client.upload_file(str(root/"manifest.json"),bucket,
-                       f"{prefix}/prices/year={manifest['year']}/manifest.json")
-    print("OBJECT_STORE_STATUS uploaded_and_verified partitions="
-          + str(len(manifest["partition_files"])),flush=True)
-    return True
 
 
 def main() -> None:
@@ -203,8 +169,8 @@ def main() -> None:
     parser.add_argument("--min-quotes",type=int,default=3000)
     args=parser.parse_args()
     root=Path(args.out)
-    manifest=export_year(TushareClient.from_environment(),args.year,root,args.min_quotes)
-    upload_archive(root,manifest)
+    export_year(TushareClient.from_environment(),args.year,root,args.min_quotes)
+    print("HISTORY_EXPORT_STATUS verified_local_only",flush=True)
 
 
 if __name__=="__main__":

@@ -190,3 +190,16 @@ and should first pass real capacity and compression checks.
 
 Detailed contracts, limitations, verification requirements and staged rollout:
 [docs/MULTI_STRATEGY_BACKTEST.md](docs/MULTI_STRATEGY_BACKTEST.md).
+
+### Private Neon Object Storage integration (manual activation)
+
+The Parquet history workflow now has three explicitly manual operations:
+`check` (small PUT/GET/SHA-256/DELETE), `archive` (preflight, fetch,
+compress, local tests, private upload, remote HEAD+GET checksum, publish
+manifest last), and `restore` (download + SHA-256 verify each of 12 months
+and re-run the engineering backtest smoke test). The writer forces a
+Neon branch-scoped HTTPS endpoint and S3 path-style access. Storage credentials
+are server-side GitHub Actions secrets only. Archive/restore cannot be declared
+operational until a PRIVATE Neon bucket and scoped credentials are connected
+and both live workflows complete. See
+[docs/MULTI_STRATEGY_BACKTEST.md](docs/MULTI_STRATEGY_BACKTEST.md).
