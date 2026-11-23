@@ -1,0 +1,1 @@
+One-time read-only diagnostic for pre-existing Net-Net published results. Aggregate-only counts and latest publication date. No database mutation or individual stock contents.
