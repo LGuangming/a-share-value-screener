@@ -51,7 +51,7 @@ jobs:
       TUSHARE_ALLOW_HTTP: ${{ (inputs.api_source || vars.FINANCIAL_SCHEDULE_API_SOURCE) == 'relay' && '1' || '0' }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONPATH: backend
-      FINANCIAL_BUDGET: ${{ inputs.budget || '5' }}
+      FINANCIAL_BUDGET: ${{ inputs.budget || vars.FINANCIAL_SCHEDULE_BUDGET || '40' }}
       FINANCIAL_ASOF: ${{ inputs.asof }}
     steps:
       - uses: actions/checkout@v4
