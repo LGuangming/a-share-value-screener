@@ -86,20 +86,13 @@ create table if not exists screen_results (
 create index if not exists screen_results_candidates_idx on screen_results
   (trade_date desc,is_candidate,ncav_coverage desc);
 
--- No anonymous/client-side access to tables. Vercel queries with a server-only DB URL.
--- Supabase has anon/authenticated roles; Neon normally does not.
-do $
-begin
-  if exists (select 1 from pg_roles where rolname = 'anon') then
-    execute 'revoke all on all tables in schema public from anon';
-    execute 'revoke all on all sequences in schema public from anon';
-  end if;
-  if exists (select 1 from pg_roles where rolname = 'authenticated') then
-    execute 'revoke all on all tables in schema public from authenticated';
-    execute 'revoke all on all sequences in schema public from authenticated';
-  end if;
-end;
-$;
+-- Database access: create a dedicated read-only role for Vercel (see below).
+-- Neon does not have Supabase's 'anon' / 'authenticated' roles.
+-- When using Supabase instead of Neon, revoke client access separately in
+-- its SQL Editor if those roles are present; do not run Supabase-only SQL on Neon.
+-- Supabase-only commands (uncomment only on Supabase):
+-- REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
+-- REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
 
 -- Optional read-only role; create only after selecting a secure password and
 -- granting via the PostgreSQL SQL editor. Never put the password into source control.
