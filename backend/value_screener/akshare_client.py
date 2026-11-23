@@ -165,7 +165,38 @@ class AKShareClient:
             raise AKShareError(f"{endpoint}: upstream returned no rows")
         return rows
 
-    def spot(self) -> dict[str, dict]:
+    def spot(self, codes: list[str] | None = None) -> dict[str, dict]:
+        # For bounded tests fetch only the explicitly requested stocks. This
+        # avoids triggering the frequently blocked all-market Eastmoney push2 API.
+        if codes:
+            results: dict[str, dict] = {}
+            for ts_code in codes:
+                raw_code = ts_code.split(".")[0]
+                try:
+                    info = self.ak.stock_individual_info_em(symbol=raw_code)
+                    rows = self._rows(info, "stock_individual_info_em")
+                    values = {str(r.get("item")): r.get("value") for r in rows}
+                    if str(values.get("股票代码", raw_code)).zfill(6) != raw_code:
+                        raise AKShareError(f"{ts_code}: provider returned a different security")
+                    price = _number(values.get("最新"))
+                    cap = _number(values.get("总市值"))
+                    if price is None or price <= 0 or cap is None or cap <= 0:
+                        raise AKShareError(f"{ts_code}: latest price or total market capitalization unavailable")
+                    results[ts_code] = {
+                        "ts_code": ts_code,
+                        "name": str(values.get("股票简称") or raw_code),
+                        "market": "主板",
+                        "close": price, "total_mv": cap / 10000.0,
+                        "pb": None, "turnover_rate": None, "market_cap_yuan": cap,
+                        "quote_source": "stock_individual_info_em",
+                    }
+                except AKShareError:
+                    raise
+                except Exception as exc:
+                    raise AKShareError(f"stock_individual_info_em {ts_code}: source unavailable ({type(exc).__name__}); no fabricated market cap") from exc
+            return results
+
+        # Optional full-market quote check; kept separate from bounded tests.
         try:
             raw = self.ak.stock_zh_a_spot_em()
             rows = self._rows(raw, "stock_zh_a_spot_em")
