@@ -425,3 +425,13 @@ test("site gate covers routes and APIs, fails closed, and login is isolated from
   assert.match(login,/type="password"/);
   assert.match(read("app/api/access/logout/route.ts"),/sessionCookie\("",0\)/);
 });
+
+test("collapsed navigation fully hides wordmark and displays a dedicated compact icon",()=>{
+  const nav=read("components/nav.tsx"),css=read("app/workspace.css");
+  assert.match(nav,/className="brand-compact" aria-hidden="true"><Radar/);
+  assert.match(nav,/aria-label="价值雷达 · 返回选股中心"/);
+  assert.match(css,/\.brand-compact\{display:none\}/);
+  assert.match(css,/html\[data-sidebar=collapsed\] \.brand-compact\{display:flex/);
+  assert.match(css,/html\[data-sidebar=collapsed\] \.brand-text,[^{}]+\{display:none\}/);
+  assert.doesNotMatch(css,/\.brand-text strong\{font-size:0\}|\.brand-text strong:before/);
+});
