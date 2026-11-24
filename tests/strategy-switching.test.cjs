@@ -303,8 +303,8 @@ test("V3 polish keeps search height stable, preserves tabs, and uses readable st
   assert.match(css,/\.market-panel>\.filters>\.tabs \{[^}]*min-width:max-content/);
   assert.match(strategies,/<colgroup>/);
   assert.match(css,/\.strategy-library-table \{table-layout:fixed;min-width:1460px/);
-  assert.match(signals,/signal-expand-open">展开明细/);
-  assert.match(signals,/signal-expand-close">收起明细/);
+  assert.match(read("components/review-reasons.tsx"),/signal-expand-open">展开明细/);
+  assert.match(read("components/review-reasons.tsx"),/signal-expand-close">收起明细/);
   assert.match(signals,/className="signal-reason-card"/);
   assert.match(css,/\.signal-reason-details\[open\] \.signal-expand-close \{display:inline/);
 });
@@ -382,4 +382,15 @@ test("V4 candidate comparison is based on successful published results only",()=
   assert.match(data,/r.strategy='netnet_v1' AND r.trade_date=\$\{day\} AND r.is_candidate=true/);
   assert.match(read("app/candidate-history/page.tsx"),/publishedCandidateChanges\(day,previous\)/);
   assert.match(read("app/page.tsx"),/href="\/candidate-history"/);
+});
+
+test("review toggle shares the two-line chip packing and table headings own sorting",()=>{
+  const reasons=read("components/review-reasons.tsx"),signals=read("app/signals/page.tsx"),screen=read("components/screener-results.tsx"),css=read("app/theme-orange.css");
+  assert.match(signals,/inlineToggle\/><\/summary>/);
+  assert.match(reasons,/if \(toggle\) sizes.push/);
+  assert.match(reasons,/signal-expand-measure/);
+  assert.match(css,/\.review-reasons-inline-toggle \{min-height:20px;max-height:42px/);
+  assert.doesNotMatch(screen,/aria-label="排序字段"/);
+  assert.match(screen,/onClick=\{\(\)=>sortBy/);
+  assert.match(screen,/aria-sort=/);
 });

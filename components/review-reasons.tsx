@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 /**
  * Uses the real rendered chip widths to display as many complete reasons
@@ -8,8 +9,9 @@ import { useLayoutEffect, useRef, useState } from "react";
  * Widths are rechecked when the table column resizes.
  */
 export default function ReviewReasons({
-  reasons,
+  reasons, inlineToggle=false,
 }: {
+  inlineToggle?: boolean;
   reasons: ReadonlyArray<{ code: string; label: string; severity?: "HIGH"|"MEDIUM"|"LOW" }>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -29,6 +31,7 @@ export default function ReviewReasons({
       );
       const extra = ruler.querySelector<HTMLElement>(".review-more");
       if (!extra) return;
+      const toggle = ruler.querySelector<HTMLElement>(".signal-expand-measure");
       const chipWidths = chips.map(chip => Math.ceil(chip.getBoundingClientRect().width));
       const gap = 4;
 
@@ -37,6 +40,8 @@ export default function ReviewReasons({
         let used = 0;
         const sizes = chipWidths.slice(0, count);
         if (count < reasons.length) sizes.push(Math.ceil(extra.getBoundingClientRect().width));
+        // Reserve the inline action in the same two-row packing calculation.
+        if (toggle) sizes.push(Math.ceil(toggle.getBoundingClientRect().width));
         for (const chipWidth of sizes) {
           // A reason longer than one column cannot be fully shown as a chip.
           // It is still available in the tooltip and the stock-detail page.
@@ -60,19 +65,21 @@ export default function ReviewReasons({
     observer.observe(host);
     update();
     return () => observer.disconnect();
-  }, [reasons]);
+  }, [reasons,inlineToggle]);
 
   const hiddenCount = reasons.length - visibleCount;
-  return <div ref={hostRef} className="review-reasons" aria-label="主要复核原因"
+  return <div ref={hostRef} className={"review-reasons"+(inlineToggle?" review-reasons-inline-toggle":"")} aria-label="主要复核原因"
     title={reasons.map(reason => reason.label).join("；") || "当前规则未识别到重点风险"}>
     {reasons.length
       ? reasons.slice(0, visibleCount).map(reason =>
           <span key={reason.code} className={`review-reason${reason.severity?` review-level-${reason.severity.toLowerCase()}`:""}`}>{reason.label}</span>)
       : <span className="review-muted">当前规则未识别到重点风险</span>}
     {hiddenCount > 0 && <span className="review-more">另有{hiddenCount}项</span>}
+    {inlineToggle && reasons.length>0 && <span className="signal-expand"><span className="signal-expand-open">展开明细</span><span className="signal-expand-close">收起明细</span><ChevronDown size={12} aria-hidden="true"/></span>}
     <div className="review-reasons-ruler" ref={rulerRef} aria-hidden="true">
       {reasons.map(reason => <span key={reason.code} className={`review-reason${reason.severity?` review-level-${reason.severity.toLowerCase()}`:""}`}>{reason.label}</span>)}
       <span className="review-more">另有{reasons.length}项</span>
+      {inlineToggle && reasons.length>0 && <span className="signal-expand signal-expand-measure">展开明细<ChevronDown size={12}/></span>}
     </div>
   </div>;
 }

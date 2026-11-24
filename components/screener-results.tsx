@@ -262,10 +262,6 @@ export default function ScreenerResults({ rows, initial }: {
           <option value={0.5}>PB≤0.5</option><option value={0.7}>PB≤0.7</option>
           <option value={1}>PB≤1.0</option><option value={1.2}>PB≤1.2</option>
         </select>
-        <select aria-label="排序字段" value={order}
-          onChange={e=>setFilter("order",e.target.value,()=>{setOrder(e.target.value as NumericKey);setAscending(false);})}>
-          {numericColumns.map(c=><option key={c.key} value={c.key}>{c.label}排序</option>)}
-        </select>
         <div className="column-control" ref={advancedAnchor} onKeyDown={e=>{if(e.key==="Escape")setAdvanced(false);}}>
           <button type="button" className="tool-button" aria-expanded={advanced} onClick={()=>{setAdvanced(v=>!v);setColumnMenu(false);}}><Filter size={14}/> 高级筛选{industry||watchOnly?" · "+(Number(!!industry)+Number(watchOnly)):""}</button>
           {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
