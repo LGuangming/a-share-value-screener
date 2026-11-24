@@ -264,3 +264,30 @@ test("strategy summary is a selectable union, not a new strategy or fabricated r
   assert.deepEqual(m.exports.combineStrategyResults(groups,["b"]).map(r=>r.ts_code),["001","003"]);
   assert.deepEqual(m.exports.combineStrategyResults(groups,[]),[]);
 });
+
+test("V3 workstation shares actual archive chart and read-only candidate data",()=>{
+  const page=read("app/research/page.tsx"),workspace=read("components/research-workspace.tsx");
+  const detail=read("app/api/research/[code]/route.ts");
+  assert.match(page,/combineStrategyResults/);
+  assert.match(page,/screeningRowsStatus/);
+  assert.match(workspace,/<MarketChart/);
+  assert.match(workspace,/detail\.recent\.map/);
+  assert.match(detail,/stockDetail\(code\)/);
+  assert.match(read("lib/data.ts"),/FROM stocks\s+WHERE strpos/);
+  assert.match(read("components/nav.tsx"),/label: "行情研究"/);
+});
+test("V3 controls persist browser-local preferences, and preview uses a modal",()=>{
+  const prefs=read("components/workspace-preferences.tsx"),screen=read("components/screener-results.tsx");
+  assert.match(prefs,/localStorage\.setItem/);
+  assert.match(prefs,/value-radar-watchlist-v1/);
+  assert.match(screen,/value-radar-columns-v3/);
+  assert.match(screen,/setPointerCapture/);
+  assert.match(screen,/moveColumn/);
+  assert.match(screen,/<PreviewButton/);
+  assert.match(read("components/stock-preview.tsx"),/showModal\(/);
+  assert.match(read("components/global-command.tsx"),/e\.ctrlKey\|\|e\.metaKey/);
+  const css=read("app/workspace.css");
+  assert.match(css,/data-theme=dark/);
+  assert.match(css,/data-density=compact/);
+  assert.match(css,/prefers-reduced-motion:reduce/);
+});
