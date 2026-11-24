@@ -252,11 +252,10 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
               aria-activedescendant={highlightedIndex >= 0 && suggestionsOpen && suggestions[highlightedIndex]
                 ? `${suggestionListId}-${highlightedIndex}` : undefined}
               onFocus={() => setSuggestionsOpen(true)}
-              onBlur={() => {setSuggestionsOpen(false);setHighlightedIndex(-1);}}
               onKeyDown={handleSearchKeyDown}
               onChange={e => updateSearch(e.target.value)}/>
           </div>
-          {needle && suggestionsOpen && <ToolbarFlyout anchor={searchAnchor} width={300} placement="below"><div
+          {needle && suggestionsOpen && <ToolbarFlyout anchor={searchAnchor} onDismiss={()=>{setSuggestionsOpen(false);setHighlightedIndex(-1);}} width={300} placement="below"><div
             id={suggestionListId} role="listbox" aria-label={`${viewLabel}股票搜索结果`}
             className="stock-suggestions">
             <div className="stock-suggestions-heading">
@@ -277,11 +276,11 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
         </div>
         <div className="column-control" ref={advancedAnchor} onKeyDown={e=>{if(e.key==="Escape")setAdvanced(false);}}>
           <button type="button" className="tool-button" aria-expanded={advanced} onClick={()=>{setAdvanced(v=>!v);setColumnMenu(false);}}><Filter size={14}/> 高级筛选{industry||watchOnly?" · "+(Number(!!industry)+Number(watchOnly)):""}</button>
-          {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
+          {advanced&&<ToolbarFlyout anchor={advancedAnchor} onDismiss={()=>setAdvanced(false)} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
         </div>
         <div className="column-control" ref={columnAnchor} onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
           <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>{setColumnMenu(v=>!v);setAdvanced(false);}}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
-          {columnMenu && <ToolbarFlyout anchor={columnAnchor} align="right" width={290}><div className="column-menu">
+          {columnMenu && <ToolbarFlyout anchor={columnAnchor} onDismiss={()=>setColumnMenu(false)} align="right" width={290}><div className="column-menu">
             {[...shownColumns,...optionalColumns.filter(c=>!columns.includes(c.key))].map(c=><div className="column-order-row" key={c.key}><label><input type="checkbox" checked={columns.includes(c.key)} onChange={e=>setColumns(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>{c.label}</label><button type="button" aria-label={c.label+"向前移动"} disabled={columns.indexOf(c.key)<=0} onClick={()=>moveColumn(c.key,-1)}><ArrowUp size={13}/></button><button type="button" aria-label={c.label+"向后移动"} disabled={!columns.includes(c.key)||columns.indexOf(c.key)===columns.length-1} onClick={()=>moveColumn(c.key,1)}><ArrowDown size={13}/></button></div>)}
             <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setWidths({});setColumnMenu(false);}}>恢复默认</button>
           </div></ToolbarFlyout>}

@@ -1,9 +1,15 @@
 "use client";
-import {useLayoutEffect,useState,type ReactNode,type RefObject} from "react";
+import {useLayoutEffect,useState,useRef,type ReactNode,type RefObject} from "react";
 import {createPortal} from "react-dom";
+import {useDismissOnOutside} from "@/components/use-dismiss-on-outside";
 
 /** Keep dropdowns outside the single-row horizontally scrollable toolbar. */
-export default function ToolbarFlyout({anchor,children,align="left",width,placement="auto"}:{anchor:RefObject<HTMLDivElement|null>;children:ReactNode;align?:"left"|"right";width:number;placement?:"auto"|"below"}){
+export default function ToolbarFlyout({anchor,children,align="left",width,placement="auto",onDismiss}:{anchor:RefObject<HTMLDivElement|null>;children:ReactNode;align?:"left"|"right";width:number;placement?:"auto"|"below";onDismiss:()=>void}){
+  const panel=useRef<HTMLDivElement>(null);
+  useDismissOnOutside(anchor,reason=>{
+    if(reason==="escape")anchor.current?.querySelector<HTMLElement>("button,input,select,summary,[tabindex]")?.focus();
+    onDismiss();
+  },panel);
   const [pos,setPos]=useState<{left:number;top:number;width:number;maxHeight:number}|null>(null);
   useLayoutEffect(()=>{
     function update(){
@@ -23,5 +29,5 @@ export default function ToolbarFlyout({anchor,children,align="left",width,placem
     update();window.addEventListener("resize",update);window.addEventListener("scroll",update,true);
     return ()=>{window.removeEventListener("resize",update);window.removeEventListener("scroll",update,true);};
   },[anchor,align,width,placement]);
-  return pos?createPortal(<div className="toolbar-flyout" style={pos}>{children}</div>,document.body):null;
+  return pos?createPortal(<div ref={panel} className="toolbar-flyout" style={pos}>{children}</div>,document.body):null;
 }

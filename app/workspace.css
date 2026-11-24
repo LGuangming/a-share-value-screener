@@ -116,3 +116,17 @@ html[data-theme=dark] .backtest-results-panel .backtest-empty{background:repeati
 .compare-picker-table td small{margin-left:8px;font-size:11px;color:var(--muted)}
 .compare-picker-table .compare-picked-row td{background:color-mix(in srgb,var(--accent) 9%,var(--surface))}
 @media(max-width:600px){.compare-picker-toolbar{gap:8px}.compare-picker-field{flex:1;min-width:110px}.compare-picker-query{flex-basis:100%;max-width:none}.compare-picker-table td small{display:block;margin-left:0}.compare-picker-table th,.compare-picker-table td{padding:7px}.compare-picker-field select{width:100%;max-width:none}}
+
+/* Comparison grid: override the generic last-row border removal for every cell. */
+.v4-compare-table tbody tr:last-child :is(th,td){border-bottom:1px solid var(--border)}
+.compare-strategy-hits{display:flex;align-items:center;flex-wrap:wrap;gap:4px 6px;white-space:normal}
+.compare-strategy-chip{--chip-color:#46566a;--chip-bg:#eaf0f6;display:inline-flex;align-items:center;padding:3px 7px;border-radius:4px;font-size:11px;line-height:1.35;font-weight:550;white-space:nowrap;color:var(--chip-color);background:var(--chip-bg)}
+.compare-strategy-chip[data-strategy="netnet_v1"]{--chip-color:#a34d0d;--chip-bg:#fff0e2}
+.compare-strategy-chip[data-strategy="ma_trend_research_v0"]{--chip-color:#245c9b;--chip-bg:#e8f1ff}
+.compare-strategy-chip[data-strategy="oversold_reversion_v0"]{--chip-color:#237451;--chip-bg:#e4f4eb}
+.compare-strategy-chip[data-strategy="quality_momentum_v0"]{--chip-color:#70459d;--chip-bg:#f1eafa}
+html[data-theme=dark] .compare-strategy-chip{--chip-color:#c2cfdf;--chip-bg:#344253}
+html[data-theme=dark] .compare-strategy-chip[data-strategy="netnet_v1"]{--chip-color:#ffbf85;--chip-bg:#52351f}
+html[data-theme=dark] .compare-strategy-chip[data-strategy="ma_trend_research_v0"]{--chip-color:#a9d0ff;--chip-bg:#243e60}
+html[data-theme=dark] .compare-strategy-chip[data-strategy="oversold_reversion_v0"]{--chip-color:#a1e0c0;--chip-bg:#23483a}
+html[data-theme=dark] .compare-strategy-chip[data-strategy="quality_momentum_v0"]{--chip-color:#dac1fb;--chip-bg:#49345e}
