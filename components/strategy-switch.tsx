@@ -69,6 +69,9 @@ export default function StrategySwitch({
           </button>
         )}
       </div>
+      <details className="strategy-context" key={selected.id}>
+        <summary>策略参数与数据条件</summary>
+        <div className="strategy-context-body">
       <div className="strategy-switch-summary">
         <div>
           <span className="strategy-switch-label">当前策略 · v{selected.version}</span>
@@ -94,6 +97,8 @@ export default function StrategySwitch({
         </Link>
         <span>策略ID：{selected.id}</span>
       </div>
+        </div>
+      </details>
     </section>
     {mode === "methodology"
       ? <StrategyMethodology key={selected.id} strategy={selected}/>

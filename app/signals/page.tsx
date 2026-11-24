@@ -49,7 +49,7 @@ export default async function SignalsPage({ searchParams }: { searchParams: Prom
       {observed.length ? <div className="table-scroll"><table className="results-table review-table">
         <thead><tr>
           <th>股票</th><th>收盘价</th><th>NCAV覆盖率</th><th>风险等级</th>
-          <th>复核优先级 / 类别</th><th>主要复核原因</th><th>系统初评结论</th><th>交易观察</th>
+          <th>复核优先级 / 类别</th><th>主要复核原因</th><th>系统初评结论</th><th>交易观察 / 日期</th>
         </tr></thead>
         <tbody>{observed.map(({row,review}) =>
           <tr key={row.ts_code}>
@@ -59,11 +59,15 @@ export default async function SignalsPage({ searchParams }: { searchParams: Prom
             <td><span className={`review-level review-level-${review.severity.toLowerCase()}`}>{severityLabel[review.severity]}</span></td>
             <td><strong className="review-priority">{priorityLabel[review.priority]}</strong>
               <div className="review-meta">{review.focus}</div></td>
-            <td><ReviewReasons reasons={review.reasons.map(reason => ({
+            <td>{review.reasons.length ? <details className="signal-reason-details"><summary>
+              <ReviewReasons reasons={review.reasons.map(reason => ({
               code: reason.code, label: reason.label,
-            }))}/></td>
+            }))}/><span className="signal-expand">展开明细</span></summary>
+              <div className="signal-reason-body">{review.reasons.map(reason=><div key={reason.code}>
+                <strong>{reason.label}</strong><p>{reason.explanation}</p></div>)}</div>
+            </details> : <ReviewReasons reasons={[]}/>}</td>
             <td><span className={`review-conclusion review-conclusion-${review.conclusion === "通过" ? "pass" : review.conclusion === "待补充资料" ? "pending" : "block"}`}>{review.conclusion}</span></td>
-            <td>{signalLabel(row.signal)}</td>
+            <td>{signalLabel(row.signal)}<div className="stock-meta">{row.trade_date}</div></td>
           </tr>
         )}</tbody>
       </table></div> : <Empty title="当前没有可显示的交易观察信号" detail="完成财务扫描和历史价格回填后，符合条件的候选股票将显示在这里。"/>}

@@ -6,6 +6,7 @@ import { fixed, pct, moneyCny, stateLabel, signalLabel, flagLabel } from "@/lib/
 import { evaluateFundamentalReview, severityLabel, priorityLabel } from "@/lib/review";
 import MarketChart from "@/components/market-chart";
 import { Empty } from "@/components/empty";
+import ResearchTabs from "@/components/research-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +34,48 @@ export default async function StockPage({params}: Props) {
         <div className="stat-card"><span>压力价值覆盖率</span><strong>{pct(stock.stress_coverage,1)}</strong><small>假设性回收率测算</small></div>
         <div className="stat-card"><span>当前信号</span><strong className="status-stat">{signalLabel(stock.signal)}</strong><small>趋势观察</small></div>
       </div>
-      <section className="panel market-chart-panel">
+      <ResearchTabs label="个股研究" tabs={[
+        {id:"overview",label:"概览",content:<><section className="panel market-chart-panel">
         <div className="panel-heading"><div><h2>行情分析</h2></div><TrendingUp size={18} className="muted"/></div>
         <MarketChart key={stock.ts_code} code={stock.ts_code} name={stock.name} prices={prices}/>
       </section>
-      {review && <section className="panel review-detail-panel">
+        <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
+          <dl className="detail-list">
+            <div><dt>总市值</dt><dd>{moneyCny(stock.market_cap_yuan)}</dd></div>
+            <div><dt>账面净流动资产 NCAV</dt><dd>{moneyCny(stock.ncav_yuan)}</dd></div>
+            <div><dt>统一压力测试价值</dt><dd>{moneyCny(stock.stress_ncav_yuan)}</dd></div>
+            <div><dt>市净率 PB</dt><dd>{fixed(stock.pb)}</dd></div>
+            <div><dt>资产负债率</dt><dd>{pct(stock.liability_ratio,1)}</dd></div>
+            <div><dt>最近披露报告期累计经营现金流</dt><dd>{moneyCny(stock.operating_cf_yuan)}</dd></div>
+            <div><dt>最近披露报告期累计合并净利润</dt><dd>{moneyCny(stock.net_profit_yuan)}</dd></div>
+          </dl>
+        </section>
+      <section className="panel"><div className="section-kicker">OBSERVATION HISTORY</div><h2>最近观察记录</h2>
+        <div className="table-scroll"><table className="results-table compact"><thead><tr><th>交易日</th><th>价格</th><th>NCAV覆盖</th><th>压力测试</th><th>交易信号</th></tr></thead><tbody>
+          {recent.map(r=><tr key={r.trade_date}><td>{r.trade_date}</td><td>¥{fixed(r.price)}</td><td>{pct(r.ncav_coverage,1)}</td><td>{pct(r.stress_coverage,1)}</td><td>{signalLabel(r.signal)}</td></tr>)}
+        </tbody></table></div>
+      </section></>},
+        {id:"finance",label:"财务指标",content:<section className="panel"><h2>财务指标</h2><p className="note">报告期：{stock.report_date || "—"} · 披露日期：{stock.disclosed_at || "—"}</p>
+        <div className="table-scroll"><table className="results-table financial-table"><thead><tr><th>项目</th><th>已披露指标</th><th>单位 / 口径</th></tr></thead><tbody>
+          <tr><td>资产负债率</td><td>{pct(stock.liability_ratio,1)}</td><td>合并口径</td></tr>
+          <tr><td>净流动资产</td><td>{moneyCny(stock.ncav_yuan)}</td><td>流动资产 − 全部负债</td></tr>
+          <tr><td>经营活动现金流量净额</td><td>{moneyCny(stock.operating_cf_yuan)}</td><td>报告期累计</td></tr>
+          <tr><td>合并净利润</td><td>{moneyCny(stock.net_profit_yuan)}</td><td>报告期累计</td></tr>
+        </tbody></table></div>
+      </section>},
+        {id:"valuation",label:"估值分析",content:<section className="panel"><h2>资产折价与压力测试</h2>
+        <div className="table-scroll"><table className="results-table financial-table"><thead><tr><th>估值项目</th><th>金额 / 比率</th><th>计算口径</th></tr></thead><tbody>
+          <tr><td>总市值</td><td>{moneyCny(stock.market_cap_yuan)}</td><td>收盘日总市值</td></tr>
+          <tr><td>账面净流动资产</td><td>{moneyCny(stock.ncav_yuan)}</td><td>NCAV</td></tr>
+          <tr><td>NCAV覆盖率</td><td>{pct(stock.ncav_coverage,1)}</td><td>NCAV / 市值</td></tr>
+          <tr><td>统一压力测试价值</td><td>{moneyCny(stock.stress_ncav_yuan)}</td><td>调整后净流动资产</td></tr>
+          <tr><td>压力价值覆盖率</td><td>{pct(stock.stress_coverage,1)}</td><td>压力价值 / 市值</td></tr>
+          <tr><td>账面资产折价率</td><td>{stock.ncav_yuan!==null && stock.ncav_yuan>0 && stock.market_cap_yuan!==null ? pct(1-stock.market_cap_yuan/stock.ncav_yuan,1):"—"}</td><td>1 − 市值 / NCAV</td></tr>
+          <tr><td>市净率</td><td>{fixed(stock.pb)}</td><td>PB</td></tr>
+        </tbody></table></div>
+        <Link className="inline-link" href="/methodology?strategy=netnet_v1">查看资产回收率及筛选口径</Link>
+      </section>},
+        {id:"risk",label:"风险复核",content:<>{review && <section className="panel review-detail-panel">
         <div className="panel-heading"><div>
           <div className="section-kicker">FUNDAMENTAL RISK REVIEW</div>
           <h2>基本面复核摘要</h2>
@@ -57,21 +95,7 @@ export default async function StockPage({params}: Props) {
             <p>{reason.explanation}</p>
           </div>)}
         </div> : <p className="review-muted">暂无重点复核事项。</p>}
-      </section>}
-      <div className="detail-grid">
-        <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
-          <dl className="detail-list">
-            <div><dt>总市值</dt><dd>{moneyCny(stock.market_cap_yuan)}</dd></div>
-            <div><dt>账面净流动资产 NCAV</dt><dd>{moneyCny(stock.ncav_yuan)}</dd></div>
-            <div><dt>统一压力测试价值</dt><dd>{moneyCny(stock.stress_ncav_yuan)}</dd></div>
-            <div><dt>市净率 PB</dt><dd>{fixed(stock.pb)}</dd></div>
-            <div><dt>资产负债率</dt><dd>{pct(stock.liability_ratio,1)}</dd></div>
-            <div><dt>最近披露报告期累计经营现金流</dt><dd>{moneyCny(stock.operating_cf_yuan)}</dd></div>
-            <div><dt>最近披露报告期累计合并净利润</dt><dd>{moneyCny(stock.net_profit_yuan)}</dd></div>
-          </dl>
-        </section>
-      </div>
-      <div className="detail-grid">
+      </section>}<div className="detail-grid">
         <section className="panel"><div className="section-kicker">FUNDAMENTAL REVIEW</div><h2>基本面初步评价</h2>
           <p className="assessment">{stock.assessment}</p>
         </section>
@@ -81,12 +105,8 @@ export default async function StockPage({params}: Props) {
           <div className="dates"><div><CalendarClock size={15}/> 财务报告期：{stock.report_date || "未取得"}</div>
             <div><CalendarClock size={15}/> 财报披露日：{stock.disclosed_at || "未取得"}</div></div>
         </section>
-      </div>
-      <section className="panel"><div className="section-kicker">OBSERVATION HISTORY</div><h2>最近观察记录</h2>
-        <div className="table-scroll"><table className="results-table compact"><thead><tr><th>交易日</th><th>价格</th><th>NCAV覆盖</th><th>压力测试</th><th>交易信号</th></tr></thead><tbody>
-          {recent.map(r=><tr key={r.trade_date}><td>{r.trade_date}</td><td>¥{fixed(r.price)}</td><td>{pct(r.ncav_coverage,1)}</td><td>{pct(r.stress_coverage,1)}</td><td>{signalLabel(r.signal)}</td></tr>)}
-        </tbody></table></div>
-      </section>
+      </div></>},
+      ]}/>
     </>}
   </main>;
 }

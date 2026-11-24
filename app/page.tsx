@@ -32,17 +32,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <div className="page-top"><div>
       <div className="eyebrow">RESEARCH DASHBOARD / 多策略每日扫描</div>
       <h1>选股中心</h1>
-      <p className="page-lead">查看每日筛选结果、策略条件与交易观察。</p>
     </div><span className="date-tag"><CalendarDays size={17}/>{snapshot?.trade_date ?? "等待数据发布"}</span></div>
 
     <StrategySwitch mode="screen" requestedId={query.strategy}>
-      <div className="hero-strip">
-        <div><span className="hero-label">NET-NET / 已上线策略</span>
-          <h2>Net-Net资产折价筛选</h2>
-          <p>根据NCAV覆盖率、资产压力价值及经营指标筛选股票。</p></div>
-        <div className="hero-formula"><div>净流动资产价值 <strong>NCAV</strong></div>
-          <strong>流动资产 − 全部负债</strong><small>以总市值衡量折价程度</small></div>
-      </div>
       <div className="stats-grid">
         <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span>
           <strong>{snapshot ? (snapshot.metrics.pre_screened ?? rows.length).toLocaleString("zh-CN") : "—"}</strong>

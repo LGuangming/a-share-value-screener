@@ -153,15 +153,15 @@ test("Git pushes do not automatically deploy; manually select the release commit
   assert.equal(config.git.deploymentEnabled,false);
 });
 
-test("strategy selector has compact spacing without hiding its different parameters",()=>{
+test("V2 strategy selector uses compact tabs with expandable strategy parameters",()=>{
   const component=read("components/strategy-switch.tsx");
-  const css=read("app/globals.css");
+  const css=read("app/theme-orange.css");
   assert.match(component,/selected\.parameters\.map/);
   assert.match(component,/selected\.requirements\.map/);
-  assert.match(css,/\.strategy-switch-panel\{padding:16px 20px;margin-bottom:14px;/);
-  assert.match(css,/\.strategy-switch-options\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
-  assert.match(css,/\.strategy-switch-details\{display:flex;flex-wrap:nowrap;/);
-  assert.match(css,/overflow-x:auto;overscroll-behavior-x:contain/);
+  assert.match(component,/<details className="strategy-context"/);
+  assert.match(component,/<summary>策略参数与数据条件<\/summary>/);
+  assert.match(css,/\.strategy-switch-options \{display:flex;flex-wrap:nowrap;overflow-x:auto/);
+  assert.match(css,/\.strategy-context\[open\]>\.strategy-context-body \{animation:/);
 });
 
 test("review table displays as many complete reasons as fit on two lines",()=>{
@@ -181,25 +181,27 @@ test("review table displays as many complete reasons as fit on two lines",()=>{
   assert.match(css,/\.review-table th:nth-child\(6\)\{width:31%;\}/);
 });
 
-test("strategy center cards do not force a fixed description height or bottom-pinned link",()=>{
+test("V2 strategy center uses an accessible research table",()=>{
   const page=read("app/strategies/page.tsx");
-  const css=read("app/theme-orange.css");
-  assert.match(page,/className="strategy-catalog-card"/);
-  assert.match(css,/\.strategy-catalog-card p \{min-height:0;/);
-  assert.match(css,/\.strategy-catalog-card>\.inline-link \{margin-top:1px;\}/);
-  assert.match(css,/\.strategy-catalog-grid \{align-items:start;grid-auto-rows:max-content;/);
+  assert.match(page,/className="results-table strategy-library-table"/);
+  assert.match(page,/<thead>/);
+  assert.match(page,/strategies\.map/);
+  assert.match(page,/strategyStatusLabel\[s\.status\]/);
+  assert.match(page,/s\.requirements\.map/);
 });
 
-test("PwC-inspired orange is the UI accent, with semantic risk colors preserved",()=>{
+test("V2 orange accent is separate from semantic risk colors",()=>{
   const theme=read("app/theme-orange.css");
   const layout=read("app/layout.tsx");
   assert.match(layout,/import "\.\/theme-orange\.css"/);
-  assert.match(theme,/--green: #D04A02;/);
-  assert.match(theme,/--orange: #EB8C00;/);
+  assert.match(theme,/--accent:#D04A02;/);
+  assert.match(theme,/--green:#237551;/);
+  assert.match(theme,/--orange:#EB8C00;/);
   assert.match(theme,/\.nav-link\.is-active/);
-  assert.match(theme,/\.hero-strip \{/);
   assert.match(theme,/\.review-conclusion-pass/);
   assert.match(theme,/\.review-conclusion-block/);
+  assert.match(theme,/prefers-reduced-motion:reduce/);
+  assert.match(theme,/\.market-panel \.results-table thead th \{position:sticky/);
 });
 
 test("screener view switches never update Next.js searchParams or remount the loading fallback",()=>{
@@ -212,4 +214,23 @@ test("screener view switches never update Next.js searchParams or remount the lo
   assert.match(loader,/route-loading-indicator/);
   assert.doesNotMatch(loader,/A-SHARE RESEARCH WORKSPACE/);
   assert.match(css,/\.route-loading-indicator\{position:fixed/);
+});
+
+test("V2 page controls preserve local filtering and use actual research data",()=>{
+  const screen=read("components/screener-results.tsx");
+  const stock=read("app/stocks/[code]/page.tsx");
+  const backtest=read("app/backtest/page.tsx");
+  const config=read("components/backtest-config.tsx");
+  assert.match(screen,/function sortBy/);
+  assert.match(screen,/aria-sort=/);
+  assert.match(screen,/function exportRows/);
+  assert.match(screen,/filtered\.map/);
+  assert.match(screen,/if\(av===null\)/);
+  assert.match(stock,/ResearchTabs/);
+  assert.match(stock,/stock\.ncav_yuan/);
+  assert.match(backtest,/BacktestConfig/);
+  assert.match(backtest,/暂无已发布的历史回测绩效/);
+  assert.match(config,/draft_not_executable/);
+  assert.match(config,/disabled>运行回测/);
+  assert.doesNotMatch(config,/fetch\(/);
 });
