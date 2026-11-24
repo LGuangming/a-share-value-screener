@@ -1,4 +1,9 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { accessConfig, validSession, COOKIE_NAME } from "@/lib/site-access";
+import { LogOut } from "lucide-react";
+export const dynamic="force-dynamic";
 import Nav from "@/components/nav";
 import GlobalCommand from "@/components/global-command";
 import StockPreview from "@/components/stock-preview";
@@ -13,9 +18,10 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function RootLayout({ children }: Readonly<{children: React.ReactNode}>) {
+export default async function RootLayout({ children }: Readonly<{children: React.ReactNode}>) {
+  if(!validSession((await cookies()).get(COOKIE_NAME)?.value,accessConfig()))redirect("/login");
   return <html lang="zh-CN"><body>
-    <PreferencesRoot><Nav/><div className="site-main"><header className="workspace-global-bar"><GlobalCommand/><AppearanceControls/></header>{children}
+    <PreferencesRoot><Nav/><div className="site-main"><header className="workspace-global-bar"><GlobalCommand/><div className="site-access-actions"><AppearanceControls/><form method="post" action="/api/access/logout"><button type="submit" className="appearance-button" title="退出访问验证" aria-label="退出访问验证"><LogOut size={17}/></button></form></div></header>{children}
       <footer className="footer">A-share Multi-Strategy Research · 财务筛选与研究信号，不构成交易建议 · 网站归属：Guangming</footer>
     </div><StockPreview/></PreferencesRoot>
   </body></html>;
