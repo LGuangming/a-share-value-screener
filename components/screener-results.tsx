@@ -125,7 +125,7 @@ export default function ScreenerResults({ rows, initial }: {
   return <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
       <h2>{needle ? "股票即时搜索" : "Net-Net筛选结果"} <span className="count-badge">{filtered.length}</span></h2>
-      <p>按股价、PB及NCAV覆盖率筛选。</p>
+      <p>按股价、PB及NCAV覆盖率筛选。<span className="filter-local-hint" style={{marginInlineStart:10,whiteSpace:"nowrap",verticalAlign:"middle"}}><Filter size={13}/> 即时筛选</span></p>
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
       <div className="tabs" role="tablist" aria-label="筛选视图">
@@ -187,7 +187,6 @@ export default function ScreenerResults({ rows, initial }: {
           onChange={e=>setFilter("order",e.target.value,()=>setOrder(e.target.value === "stress" ? "stress" : "ncav"))}>
           <option value="ncav">NCAV覆盖率排序</option><option value="stress">压力价值排序</option>
         </select>
-        <span className="filter-local-hint"><Filter size={14}/> 即时筛选</span>
       </div>
     </div>
     {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
