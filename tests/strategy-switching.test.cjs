@@ -140,7 +140,7 @@ test("live suggestions respect the current tab and thresholds and show no indust
   assert.match(search,/aria-label=\{\x60\$\{viewLabel\}股票搜索结果\x60\}/);
   assert.match(search,/className="stock-suggestion-name"/);
   assert.match(search,/className="stock-suggestion-code"/);
-  const dropdown=search.slice(search.indexOf('className="stock-suggestions">'),search.indexOf('        </div>\n        <label className="screen-bound"'));
+  const dropdown=search.slice(search.indexOf('className="stock-suggestions">'),search.indexOf('        <div className="column-control" ref={advancedAnchor}'));
   assert.doesNotMatch(dropdown,/row\.industry/);
   const css=read("app/globals.css");
   assert.match(css,/\.stock-suggestions\{position:absolute/);
@@ -497,4 +497,15 @@ test("arbitrary bounds and all-stock scope preserve missing PB and synchronize s
   assert.equal(initialBound("20.5",10),"20.5");assert.equal(initialBound("all",10),"");
   assert.doesNotMatch(read("lib/data.ts"),/LIMIT 3000/);
   assert.match(read("backend/value_screener/cli.py"),/ScreenConfig\(max_price=None, max_pb=None\)/);
+});
+
+
+test("live parameter controls are always visible above cards and disclose full precompute count",()=>{
+  const s=read("components/screener-results.tsx"),css=read("app/theme-orange.css");
+  const start=s.indexOf('className="netnet-parameter-panel"'),cards=s.indexOf('className="stats-grid"'),toolbar=s.indexOf('className="filter-form"');
+  assert.ok(start>=0&&start<cards&&cards<toolbar);
+  const panel=s.slice(start,cards);
+  for(const control of ["最高价格","市净率上限","不限股价/PB","恢复默认","包含PB缺失"])assert.ok(panel.includes(control));
+  assert.ok(s.slice(cards,toolbar).includes('rows.length.toLocaleString("zh-CN")'));
+  assert.match(css,/\.netnet-parameter-controls\{[^}]*flex-wrap:wrap/);
 });

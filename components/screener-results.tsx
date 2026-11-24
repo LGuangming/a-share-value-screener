@@ -206,8 +206,23 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
   }
 
   return <>
+    <section className="netnet-parameter-panel" aria-label="即时筛选参数">
+      <div className="netnet-parameter-heading"><strong>即时筛选参数</strong><small>{fullScope?"全量预计算":"已加载样本"} {rows.length.toLocaleString("zh-CN")} 只</small></div>
+      <div className="netnet-parameter-controls">
+        <label className="screen-bound"><span>股价≤</span><input aria-label="最高价格" type="number" min="0" step="any" placeholder="不限" value={priceInput} onChange={e=>{const v=e.target.value;if(v===""||parseBound(v)!==null)setFilter("max_price",v,()=>setPriceInput(v));}}/><span>元</span></label>
+        <select aria-label="NCAV最低覆盖率" value={minCoverage}
+          onChange={e=>setFilter("min_coverage",e.target.value,()=>setMinCoverage(Number(e.target.value)))}>
+          <option value={1.25}>NCAV≥125%</option><option value={1.5}>NCAV≥150%</option>
+          <option value={1.75}>NCAV≥175%</option>
+        </select>
+        <label className="screen-bound"><span>PB≤</span><input aria-label="市净率上限" type="number" step="any" placeholder="不限" value={pbInput} onChange={e=>{const v=e.target.value;if(v===""||parseBound(v,true)!==null)setFilter("max_pb",v,()=>setPbInput(v));}}/></label>
+        <button type="button" className="tool-button" onClick={()=>{setPriceInput("");setPbInput("");setVisibleCount(100);}}>不限股价/PB</button>
+        <button type="button" className="tool-button" onClick={()=>{setPriceInput("10");setPbInput("1.2");setIncludeMissingPb(true);setMinCoverage(1.25);setVisibleCount(100);}}>恢复默认</button>
+        <label className="netnet-pb-missing"><input type="checkbox" checked={includeMissingPb} onChange={e=>{setIncludeMissingPb(e.target.checked);setVisibleCount(100);}}/>包含PB缺失</label>
+      </div>
+    </section>
     <div className="stats-grid" aria-live="polite">
-      <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span><strong>{counts.total.toLocaleString("zh-CN")}</strong><small>当前价格、PB及行业条件</small></div>
+      <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span><strong>{counts.total.toLocaleString("zh-CN")}</strong><small>当前筛选 {counts.total.toLocaleString("zh-CN")} / {rows.length.toLocaleString("zh-CN")} 只</small><small className="netnet-total-note">{fullScope?"全量预计算":"已加载样本"}：{rows.length.toLocaleString("zh-CN")} 只</small></div>
       <div className="stat-card"><span><ShieldCheck size={16}/>满足NCAV门槛</span><strong className="stat-green">{counts.candidates.toLocaleString("zh-CN")}</strong><small>覆盖率≥{minCoverage*100}%且未被排除</small></div>
       <div className="stat-card"><span><BarChart3 size={16}/>压力测试通过</span><strong>{counts.stress.toLocaleString("zh-CN")}</strong><small>调整后覆盖率≥100%</small></div>
       <div className="stat-card"><span><AlertTriangle size={16}/>财报待核验</span><strong className="stat-orange">{counts.gaps.toLocaleString("zh-CN")}</strong><small>缺失及过期报告</small><small style={{display:"block"}}>金融股忽略 {counts.ignored.toLocaleString("zh-CN")} 只（不适用NCAV，非财报短缺）</small></div>
@@ -259,18 +274,9 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
             </button>) : <p className="stock-suggestion-empty">当前选项卡没有匹配股票，请缩短搜索词。</p>}
           </div></ToolbarFlyout>}
         </div>
-        <label className="screen-bound"><span>股价≤</span><input aria-label="最高价格" type="number" min="0" step="any" placeholder="不限" value={priceInput} onChange={e=>{const v=e.target.value;if(v===""||parseBound(v)!==null)setFilter("max_price",v,()=>setPriceInput(v));}}/><span>元</span></label>
-        <select aria-label="NCAV最低覆盖率" value={minCoverage}
-          onChange={e=>setFilter("min_coverage",e.target.value,()=>setMinCoverage(Number(e.target.value)))}>
-          <option value={1.25}>NCAV≥125%</option><option value={1.5}>NCAV≥150%</option>
-          <option value={1.75}>NCAV≥175%</option>
-        </select>
-        <label className="screen-bound"><span>PB≤</span><input aria-label="市净率上限" type="number" step="any" placeholder="不限" value={pbInput} onChange={e=>{const v=e.target.value;if(v===""||parseBound(v,true)!==null)setFilter("max_pb",v,()=>setPbInput(v));}}/></label>
-        <button type="button" className="tool-button" onClick={()=>{setPriceInput("");setPbInput("");setVisibleCount(100);}}>不限股价/PB</button>
-        <button type="button" className="tool-button" onClick={()=>{setPriceInput("10");setPbInput("1.2");setIncludeMissingPb(true);setMinCoverage(1.25);setVisibleCount(100);}}>恢复默认</button>
         <div className="column-control" ref={advancedAnchor} onKeyDown={e=>{if(e.key==="Escape")setAdvanced(false);}}>
           <button type="button" className="tool-button" aria-expanded={advanced} onClick={()=>{setAdvanced(v=>!v);setColumnMenu(false);}}><Filter size={14}/> 高级筛选{industry||watchOnly?" · "+(Number(!!industry)+Number(watchOnly)):""}</button>
-          {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={includeMissingPb} onChange={e=>{setIncludeMissingPb(e.target.checked);setVisibleCount(100);}}/>包含PB缺失股票</label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
+          {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
         </div>
         <div className="column-control" ref={columnAnchor} onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
           <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>{setColumnMenu(v=>!v);setAdvanced(false);}}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>

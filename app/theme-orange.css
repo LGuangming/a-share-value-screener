@@ -430,3 +430,15 @@ html[data-theme=dark] .signal-reason-details .review-reason.review-level-medium,
 .market-panel .filter-form>.screen-bound{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;height:34px;padding:0 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);font-size:12px;white-space:nowrap;}
 .screen-bound input{width:68px;min-width:0;height:30px;border:0;background:transparent;color:var(--ink);font:inherit;font-variant-numeric:tabular-nums;}
 .screen-bound:focus-within{outline:2px solid var(--accent);outline-offset:-1px;}
+
+/* Keep live valuation parameters outside the horizontally scrolling table toolbar. */
+.netnet-parameter-panel{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding:10px 14px;margin-bottom:10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);}
+.netnet-parameter-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 12px;flex:0 0 auto;font-size:13px;}
+.netnet-parameter-heading small{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.netnet-parameter-controls{display:flex;flex:1 1 auto;flex-wrap:wrap;align-items:center;gap:6px 9px;min-width:0;}
+.netnet-parameter-controls .screen-bound{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;height:34px;padding:0 7px;border:1px solid var(--border);border-radius:4px;background:var(--surface);font-size:12px;white-space:nowrap;}
+.netnet-parameter-controls select{height:34px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--ink);font-size:12px;}
+.netnet-pb-missing{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:12px;}
+.netnet-pb-missing input{accent-color:var(--accent);}
+.netnet-total-note{display:block;font-variant-numeric:tabular-nums;}
+@media(max-width:700px){.netnet-parameter-panel{padding:10px 12px;gap:8px}.netnet-parameter-controls{flex-basis:100%}.netnet-parameter-controls .screen-bound input{width:56px;}}
