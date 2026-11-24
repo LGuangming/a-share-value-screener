@@ -227,3 +227,31 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
   .nav-link,.nav-link::before,.strategy-switch-option,.strategy-context>summary::after,.tab,.filter-button,.stock-name svg,.results-table td,.stock-suggestion {transition:none!important;}
   .nav-link:hover,.strategy-switch-option:hover,.filter-button:active,.stock-name:hover svg {transform:none!important;}
 }
+
+/* Research output surfaces. No mock series or fabricated backtest values. */
+.back-link {margin-bottom:13px;}
+.detail-grid {gap:14px;}
+.detail-grid .panel {margin-bottom:14px;}
+.detail-list>div {padding:9px 0;}
+.review-summary-grid {gap:0;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin:14px 0 18px;}
+.review-summary-grid>div {background:#fff;border:0;border-right:1px solid var(--border);border-radius:0;gap:6px;padding:12px;}
+.review-summary-grid>div:last-child {border-right:0;}
+.review-findings {gap:0;border-top:1px solid var(--border);}
+.review-finding {border:0;border-bottom:1px solid var(--border);border-radius:0;background:white;padding:12px 10px;}
+.risk-flag {border-radius:3px;color:#855800;background:#fff4dd;}
+.price-line {animation:price-reveal 420ms ease-out both;}
+@keyframes price-reveal {from{opacity:.15;}to{opacity:1;}}
+.backtest-workspace {grid-template-columns:minmax(260px, .75fr) minmax(0,1.6fr);}
+.backtest-metrics {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--border);border-radius:4px;margin:12px 0;}
+.backtest-metrics>div {padding:12px;border-right:1px solid var(--border);}
+.backtest-metrics>div:last-child {border-right:0;}
+.backtest-metrics span {display:block;color:var(--muted);font-size:11px;}
+.backtest-metrics strong {font-size:22px;font-variant-numeric:tabular-nums;}
+.backtest-empty {display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:130px;border-bottom:1px solid var(--border);margin-bottom:16px;gap:8px;color:var(--muted);font-size:12px;}
+.backtest-empty svg {color:#929aa2;}
+.backtest-workspace .backtest-strategy-form {align-items:stretch;flex-direction:column;}
+.market-panel .table-scroll {max-height:65vh;overflow:auto;}
+.market-panel .results-table thead th {position:sticky;top:0;z-index:2;}
+@media(max-width:1000px){.backtest-workspace {grid-template-columns:1fr;}}
+@media(max-width:700px){.market-panel .table-scroll {max-height:none;}.backtest-metrics {grid-template-columns:repeat(2,minmax(0,1fr));}.backtest-metrics>div:nth-child(2){border-right:0;}.backtest-metrics>div:nth-child(-n+2){border-bottom:1px solid var(--border);}}
+@media(prefers-reduced-motion:reduce){.price-line {animation:none!important;}}
