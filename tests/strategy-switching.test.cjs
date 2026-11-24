@@ -215,3 +215,22 @@ test("screener view switches never update Next.js searchParams or remount the lo
   assert.doesNotMatch(loader,/A-SHARE RESEARCH WORKSPACE/);
   assert.match(css,/\.route-loading-indicator\{position:fixed/);
 });
+
+test("V2 page controls preserve local filtering and use actual research data",()=>{
+  const screen=read("components/screener-results.tsx");
+  const stock=read("app/stocks/[code]/page.tsx");
+  const backtest=read("app/backtest/page.tsx");
+  const config=read("components/backtest-config.tsx");
+  assert.match(screen,/function sortBy/);
+  assert.match(screen,/aria-sort=/);
+  assert.match(screen,/function exportRows/);
+  assert.match(screen,/filtered\.map/);
+  assert.match(screen,/if\(av===null\)/);
+  assert.match(stock,/ResearchTabs/);
+  assert.match(stock,/stock\.ncav_yuan/);
+  assert.match(backtest,/BacktestConfig/);
+  assert.match(backtest,/暂无已发布的历史回测绩效/);
+  assert.match(config,/draft_not_executable/);
+  assert.match(config,/disabled>运行回测/);
+  assert.doesNotMatch(config,/fetch\(/);
+});
