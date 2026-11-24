@@ -20,7 +20,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   // condition catalog, not re-labeled Net-Net candidates.
   const scan = snapshot ? await screeningRowsStatus(snapshot.trade_date, "netnet_v1") : { rows: [], error: null };
   const rows = scan.rows;
-  const groups: SummaryGroup[] = await Promise.all(strategies.map(async strategy => {
+  const groups: SummaryGroup[] = await Promise.all(strategies.map(async (strategy): Promise<SummaryGroup> => {
     if(strategy.status !== "live") return {id:strategy.id,name:strategy.name,state:"unpublished",rows:[]};
     if(!snapshot) return {id:strategy.id,name:strategy.name,state:error?"error":"unpublished",rows:[]};
     const result = strategy.id === "netnet_v1" ? scan : await screeningRowsStatus(snapshot.trade_date,strategy.id);
