@@ -20,7 +20,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/one-shot/historical-st-baostock-start-20261124.txt'
+      - '.github/one-shot/historical-st-baostock-094-full-20261124.txt'
 
 permissions:
   contents: read
@@ -52,7 +52,8 @@ jobs:
       - name: Install private archive and BaoStock dependencies
         run: |
           pip install -r backend/requirements.txt
-          pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2' 'baostock>=0.8.9,<0.9'
+          pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2' 'baostock==0.9.4'
+          python -c "from importlib.metadata import version; assert version('baostock') == '0.9.4'; print('BAOSTOCK_VERSION', version('baostock'))"
       - name: Verify ST reconciliation rules
         run: |
           python - <<'PY'
