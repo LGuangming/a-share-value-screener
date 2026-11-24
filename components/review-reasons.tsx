@@ -71,7 +71,7 @@ export default function ReviewReasons({
       : <span className="review-muted">当前规则未识别到重点风险</span>}
     {hiddenCount > 0 && <span className="review-more">另有{hiddenCount}项</span>}
     <div className="review-reasons-ruler" ref={rulerRef} aria-hidden="true">
-      {reasons.map(reason => <span key={reason.code} className="review-reason">{reason.label}</span>)}
+      {reasons.map(reason => <span key={reason.code} className={`review-reason${reason.severity?` review-level-${reason.severity.toLowerCase()}`:""}`}>{reason.label}</span>)}
       <span className="review-more">另有{reasons.length}项</span>
     </div>
   </div>;
