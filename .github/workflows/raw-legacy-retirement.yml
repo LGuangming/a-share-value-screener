@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -nE 'a-share-backtest/v1|phase2/(financial_snapshot|universe|historical_st|adj_factor|daily_basic|stk_limit|suspend_d|disclosures)' -- app components lib backend/value_screener .github/workflows ':!backend/value_screener/raw_consolidation.py' ':!backend/value_screener/raw_legacy_retirement.py'; then
+          if git grep -nE 'a-share-backtest/v1|phase2/(financial_snapshot|universe|historical_st|adj_factor|daily_basic|stk_limit|suspend_d|disclosures)' -- app components lib backend/value_screener .github/workflows ':!backend/value_screener/raw_consolidation.py' ':!backend/value_screener/raw_legacy_retirement.py' ':!.github/workflows/raw-legacy-retirement.yml'; then
             echo 'Active legacy path found; aborting retirement'
             exit 1
           else

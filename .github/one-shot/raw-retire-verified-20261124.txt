@@ -1,1 +1,1 @@
-Retire only verified legacy duplicates after current production API and dependency gates.
+Retry retirement with dependency audit excluding its own search expression.
