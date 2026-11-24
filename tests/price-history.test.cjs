@@ -5,7 +5,8 @@ const path = require("node:path");
 
 const data = fs.readFileSync(path.join(__dirname, "../lib/data.ts"), "utf8");
 const stockPage = fs.readFileSync(path.join(__dirname, "../app/stocks/[code]/page.tsx"), "utf8");
-const spark = fs.readFileSync(path.join(__dirname, "../components/sparkline.tsx"), "utf8");
+const chart = fs.readFileSync(path.join(__dirname, "../components/market-chart.tsx"), "utf8");
+const archive = fs.readFileSync(path.join(__dirname, "../lib/archive-quotes.ts"), "utf8");
 const schema = fs.readFileSync(path.join(__dirname, "../database/neon-schema.sql"), "utf8");
 const workflow = fs.readFileSync(path.join(__dirname, "../.github/workflows/recent-price-history.yml"), "utf8");
 
@@ -27,10 +28,16 @@ test("history query failures cannot hide an otherwise available stock detail", (
   assert.match(detail, /return \{ stock: recent\[0\] \?\? null, prices, recent \}/);
 });
 
-test("chart is backed by merged history and exposes the loaded session count", () => {
-  assert.match(stockPage, /<Sparkline prices=\{prices\}/);
-  assert.match(stockPage, /最近 \{prices\.length\} 个交易日收盘价/);
-  assert.match(spark, /prices\.length < 2/);
+test("chart uses merged closes and directly reads verified monthly archives", () => {
+  assert.match(stockPage, /<MarketChart[^\n]*prices=\{prices\}/);
+  assert.match(chart, /CandlestickSeries/);
+  assert.match(chart, /LineSeries/);
+  assert.match(chart, /bars\.every\(completeBar\)/);
+  assert.match(chart, /createSeriesMarkers/);
+  assert.match(archive, /parquetReadObjects/);
+  assert.match(archive, /createHash\("sha256"\)/);
+  assert.match(archive, /NEON_STORAGE_READ_ACCESS_KEY_ID/);
+  assert.doesNotMatch(archive, /PutObjectCommand|DeleteObjectCommand/);
 });
 
 test("Neon schema contains the compact price history table", () => {
@@ -42,4 +49,22 @@ test("one-off history workflow defaults to 160 total calendar days", () => {
   assert.match(workflow, /default: '160'/);
   assert.match(workflow, /HISTORY_DAYS:.*'160'/);
   assert.match(workflow, /bootstrap-prices --days/);
+});
+
+const ts = require("typescript");
+const barModule = {exports:{}};
+const source = fs.readFileSync(path.join(__dirname,"../lib/market-bars.ts"),"utf8");
+new Function("module","exports",ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(barModule,barModule.exports);
+const {completeBar,aggregateBars,movingAverage}=barModule.exports;
+test("weekly aggregation uses first open, last close and genuine range and volume",()=>{
+  const a={day:"2025-01-06",open:10,high:11,low:9,close:10.5,volume:100,amount:500};
+  const b={day:"2025-01-07",open:10.5,high:12,low:10,close:11,volume:200,amount:700};
+  assert.deepEqual(aggregateBars([a,b],"W"),[{day:"2025-01-07",open:10,high:12,low:9,close:11,volume:300,amount:1200}]);
+  assert.equal(completeBar({day:b.day,close:b.close}),false);
+  assert.deepEqual(aggregateBars([a,{day:b.day,close:11}],"W"),[{day:b.day,close:11}]);
+});
+test("moving average omits insufficient history and uses actual closes",()=>{
+  const bars=[{day:"2025-01-06",close:1},{day:"2025-01-07",close:2},{day:"2025-01-08",close:3}];
+  assert.deepEqual(movingAverage(bars,2),[{time:"2025-01-07",value:1.5},{time:"2025-01-08",value:2.5}]);
+  assert.deepEqual(movingAverage(bars,5),[]);
 });

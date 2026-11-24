@@ -4,7 +4,7 @@ import { ArrowLeft, CalendarClock, FileCheck2, TrendingUp, AlertTriangle } from 
 import { stockDetail } from "@/lib/data";
 import { fixed, pct, moneyCny, stateLabel, signalLabel, flagLabel } from "@/lib/format";
 import { evaluateFundamentalReview, severityLabel, priorityLabel } from "@/lib/review";
-import { Sparkline } from "@/components/sparkline";
+import MarketChart from "@/components/market-chart";
 import { Empty } from "@/components/empty";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +33,10 @@ export default async function StockPage({params}: Props) {
         <div className="stat-card"><span>压力价值覆盖率</span><strong>{pct(stock.stress_coverage,1)}</strong><small>假设性回收率测算</small></div>
         <div className="stat-card"><span>当前信号</span><strong className="status-stat">{signalLabel(stock.signal)}</strong><small>趋势观察</small></div>
       </div>
+      <section className="panel market-chart-panel">
+        <div className="panel-heading"><div><h2>行情分析</h2></div><TrendingUp size={18} className="muted"/></div>
+        <MarketChart key={stock.ts_code} code={stock.ts_code} name={stock.name} prices={prices}/>
+      </section>
       {review && <section className="panel review-detail-panel">
         <div className="panel-heading"><div>
           <div className="section-kicker">FUNDAMENTAL RISK REVIEW</div>
@@ -55,9 +59,6 @@ export default async function StockPage({params}: Props) {
         </div> : <p className="review-muted">暂无重点复核事项。</p>}
       </section>}
       <div className="detail-grid">
-        <section className="panel"><div className="panel-heading"><div><div className="section-kicker">PRICE HISTORY</div><h2>收盘价变化</h2></div><TrendingUp size={18} className="muted"/></div>
-          <Sparkline prices={prices}/><p className="note">最近 {prices.length} 个交易日收盘价（未复权）。</p>
-        </section>
         <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
           <dl className="detail-list">
             <div><dt>总市值</dt><dd>{moneyCny(stock.market_cap_yuan)}</dd></div>
