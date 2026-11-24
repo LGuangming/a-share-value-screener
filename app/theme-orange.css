@@ -410,3 +410,11 @@ html[data-density=compact] .review-table .signal-reason-card>p {font-size:12px;l
 .review-table .stock-meta {font-size:11px;white-space:nowrap;}
 html[data-theme=dark] .signal-reason-details .review-reason.review-level-high,html[data-theme=dark] .review-table .signal-reason-card .review-level-high {background:#46282e;color:#ffb1b4;}
 html[data-theme=dark] .signal-reason-details .review-reason.review-level-medium,html[data-theme=dark] .review-table .signal-reason-card .review-level-medium {background:#44351f;color:#f3ce85;}
+
+.backtest-config .strategy-param-heading {border-top:1px solid var(--border);padding-top:12px;margin-top:3px;}
+.backtest-param-error {color:var(--muted);font-size:12px;margin:0;}
+.backtest-data-requirements {margin-top:16px;border-top:1px solid var(--border);padding-top:12px;}
+.backtest-data-requirements h3 {display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);margin:0 0 8px;}
+.backtest-data-requirements>div {display:flex;flex-wrap:wrap;gap:5px;}
+.backtest-data-requirements span {font-size:12px;color:var(--muted);padding:4px 7px;border:1px solid var(--border);border-radius:3px;}
+.backtest-strategy-form select {width:100%;min-width:0;}
