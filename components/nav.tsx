@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { findStrategy } from "@/lib/strategies";
-import { Activity, ChartCandlestick, Columns3, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
+import { Activity, ChartCandlestick, Columns3, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal, UserRound } from "lucide-react";
 
 const links = [
   { href: "/", label: "选股中心", Icon: Radar },
@@ -71,7 +71,7 @@ export default function Nav() {
         })}
       </nav>
       <div className="sidebar-bottom">
-        <div className="sidebar-info"><Database size={16}/><span>数据源：Tushare Pro</span></div>
+        <div className="sidebar-info"><UserRound size={16}/><span>作者：Guangming</span></div>
         <p>研究工具 · 不构成投资建议</p>
       </div>
     </aside>
