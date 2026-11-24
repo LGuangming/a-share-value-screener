@@ -3,7 +3,7 @@ const assert=require("node:assert/strict");
 const {spawn}=require("node:child_process");
 const {randomBytes}=require("node:crypto");
 const port=3199,base="http://127.0.0.1:"+port;
-const password="test-"+randomBytes(24).toString("hex"),secret=randomBytes(32).toString("hex");
+const password=randomBytes(3).toString("hex"),secret=randomBytes(32).toString("hex");
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function server(configured,run){
   const env={...process.env,NODE_ENV:"production"};
