@@ -255,3 +255,41 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
 @media(max-width:1000px){.backtest-workspace {grid-template-columns:1fr;}}
 @media(max-width:700px){.market-panel .table-scroll {max-height:none;}.backtest-metrics {grid-template-columns:repeat(2,minmax(0,1fr));}.backtest-metrics>div:nth-child(2){border-right:0;}.backtest-metrics>div:nth-child(-n+2){border-bottom:1px solid var(--border);}}
 @media(prefers-reduced-motion:reduce){.price-line {animation:none!important;}}
+
+/* Page-specific controls and research workspaces */
+.tool-button {display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;height:34px;padding:6px 9px;border:1px solid var(--border);border-radius:4px;background:#fff;color:var(--ink);font-size:12px;transition:border-color 150ms,background-color 150ms,color 150ms,transform 100ms;}
+.tool-button:hover:not(:disabled) {background:var(--accent-soft);border-color:#e6b79a;color:var(--accent);}
+.tool-button:active:not(:disabled) {transform:translateY(1px);}
+.tool-button:disabled {opacity:.45;cursor:not-allowed;}
+.column-control {position:relative;z-index:10;}
+.column-menu {position:absolute;right:0;top:calc(100% + 5px);width:190px;padding:10px;display:grid;gap:8px;background:#fff;border:1px solid var(--border);border-radius:5px;box-shadow:0 8px 24px rgba(24,30,35,.12);animation:strategy-fade-in 150ms ease-out both;}
+.column-menu label {display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink);cursor:pointer;}
+.column-menu input {accent-color:var(--accent);}
+.market-panel .results-table {min-width:0;}
+.market-panel .results-table :is(th,td):nth-child(n+2):nth-child(-n+6) {text-align:left;}
+.market-panel .results-table .numeric-col,.financial-table td:nth-child(2),.financial-table th:nth-child(2) {text-align:right;font-variant-numeric:tabular-nums;}
+.market-panel .results-table .security-col {position:sticky;left:0;z-index:1;background:#fff;min-width:150px;box-shadow:1px 0 #e8ebee;}
+.market-panel .results-table thead .security-col {background:#f3f5f6;z-index:3;}
+.market-panel .results-table tr:hover .security-col {background:#fff8f2;}
+.sort-heading {border:0;background:transparent;display:inline-flex;align-items:center;gap:5px;padding:0;color:inherit;font-weight:inherit;white-space:nowrap;}
+.sort-heading svg {color:#9099a1;}
+.sort-heading .sort-active {color:var(--accent);}
+.research-tab-list {display:flex;align-items:center;gap:22px;overflow:auto;border-bottom:1px solid var(--border);margin:0 0 14px;}
+.research-tab-list button {background:transparent;border:0;border-bottom:2px solid transparent;padding:10px 2px;font-size:13px;color:var(--muted);white-space:nowrap;transition:color 150ms,border-color 180ms;}
+.research-tab-list button:hover,.research-tab-list button.selected {color:var(--accent);}
+.research-tab-list button.selected {border-color:var(--accent);font-weight:650;}
+.financial-table {min-width:480px;margin-top:12px;}
+.financial-table + .inline-link,.table-scroll + .inline-link {margin-top:12px;}
+.signal-reason-details {min-width:0;}
+.signal-reason-details summary {cursor:pointer;list-style:none;}
+.signal-reason-details summary::-webkit-details-marker {display:none;}
+.signal-reason-details .review-reason {background:transparent;padding-inline:2px;border-right:1px solid var(--border);}
+.signal-expand {display:block;font-size:11px;color:var(--accent);margin-top:2px;}
+.signal-reason-body {padding:8px 0;animation:strategy-fade-in 180ms ease-out both;}
+.signal-reason-body>div {padding:8px 0;border-top:1px solid var(--border);}
+.signal-reason-body p {margin:3px 0 0;line-height:1.6;color:var(--muted);font-size:12px;white-space:normal;}
+.strategy-library-table {min-width:920px;}
+.strategy-library-table td:nth-child(3) {width:25%;}
+.strategy-library-table td:nth-child(4) {width:22%;}
+@media(max-width:700px){.research-tab-list{gap:16px;}.market-panel .results-table .security-col{min-width:125px;}.column-menu{right:auto;left:0;}.tool-button{min-height:34px;}}
+@media(prefers-reduced-motion:reduce){.tool-button,.research-tab-list button{transition:none!important;}.column-menu,.signal-reason-body{animation:none!important;}.tool-button:active{transform:none!important;}}
