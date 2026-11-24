@@ -525,3 +525,13 @@ test("stress pass card selects the same qualified rows counted in statistics",()
  assert.match(s,/stress-pass-value/);
  assert.match(read("components/filter-presets.tsx"),/"strict","stress","gaps"/);
 });
+
+test("compound Net-Net numeric fields use a single accessible outer focus ring",()=>{
+  const css=read("app/theme-orange.css");
+  assert.match(css,/\.screen-bound input:focus,\.screen-bound input:focus-visible\{outline:none;box-shadow:none;\}/);
+  assert.match(css,/\.screen-bound:focus-within\{outline:2px solid var\(--accent\);outline-offset:-1px;\}/);
+  assert.match(css,/\.screen-bound input\{[^}]*border:0;[^}]*background:transparent/);
+  const panel=read("components/screener-results.tsx");
+  assert.match(panel,/className="screen-bound"><span>股价≤<\/span><input[^>]*type="number"/);
+  assert.match(panel,/className="screen-bound"><span>PB≤<\/span><input[^>]*type="number"/);
+});
