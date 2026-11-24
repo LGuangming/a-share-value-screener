@@ -112,7 +112,8 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   const candles=bars.length>0&&bars.every(completeBar);
   const candleMode=candles&&kind==="candle";
   const hasVolume=bars.some(b=>typeof b.volume==="number");
-  const shown=hover??bars.at(-1);
+  const shown=busy||displayError?undefined:hover??bars.at(-1);
+  const indicatorPoint=shown?lower.find(p=>p.time===shown.day):undefined;
   useEffect(()=>{
     setHover(null);setChartError(false);
     if(!host.current||!bars.length||busy||displayError)return;
@@ -216,6 +217,7 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
     <div className="chart-quote-strip" aria-label="光标对应行情">
       <strong>{shown?.day??"—"}</strong><span>开 {money(shown?.open)}</span><span>高 {money(shown?.high)}</span><span>低 {money(shown?.low)}</span><span>收 {money(shown?.close)}</span><span>量 {volume(shown?.volume)} 手</span>
     </div>
+    {indicator!=="none"&&lower.length>0&&!busy&&!displayError&&<div className="chart-indicator-values" aria-label="光标对应技术指标"><strong>{indicator.toUpperCase()}</strong><span style={{color:"#D04A02"}}>{indicator==="macd"?"DIF":indicator==="kdj"?"K":"RSI"} {money(indicatorPoint?.a)}</span>{indicator!=="rsi"&&<span style={{color:"#5475AC"}}>{indicator==="macd"?"DEA":"D"} {money(indicatorPoint?.b)}</span>}{indicator!=="rsi"&&<span style={{color:indicator==="macd"?(indicatorPoint?.c??0)>=0?UP:DOWN:"#8C66A4"}}>{indicator==="macd"?"MACD":"J"} {money(indicatorPoint?.c)}</span>}</div>}
     <div className="chart-canvas-wrap">
       <div className="chart-canvas" ref={host} style={{visibility:busy||displayError||!bars.length||chartError?"hidden":"visible"}}/>
       {(busy||displayError||!bars.length||chartError)&&<div className="chart-placeholder" role="status">{busy?<><span className="chart-spinner"/>{factorLoading?"正在读取复权因子":"正在读取已归档行情"} {loading?progress:""}</>:displayError|| (chartError?"行情图暂不可用":"当前区间暂无行情")}</div>}
