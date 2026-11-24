@@ -356,3 +356,16 @@ export async function companyOverview(code:string):Promise<{identity:{ts_code:st
   return {identity:{ts_code:String(s.ts_code),name:String(s.name),industry:s.industry?String(s.industry):null},overview:{market:quotes[0]?companyMarket(dateString(quotes[0].trade_date)??"",quotes[0]):null,
     balance:report("balancesheet"),income:report("income"),cashflow:report("cashflow"),marketType:s.market?String(s.market):null,listDate:dateString(s.list_date),isST:s.is_st===true}};
 }
+
+// Compact directory for the comparison picker; no financial detail is loaded until selected.
+async function readComparisonDirectory():Promise<{ts_code:string;name:string;industry:string|null}[]>{
+  const db=connection();
+  if(!db)throw new Error("Stock directory unavailable");
+  const rows=await db`SELECT ts_code,name,industry FROM stocks ORDER BY ts_code`;
+  return rows.map(r=>({ts_code:String(r.ts_code),name:String(r.name),industry:r.industry?String(r.industry):null}));
+}
+const cachedComparisonDirectory=unstable_cache(readComparisonDirectory,["comparison-stock-directory-v1"],{revalidate:300});
+export async function comparisonDirectory(){
+  try{return {stocks:await cachedComparisonDirectory(),error:null};}
+  catch{return {stocks:[],error:"全量股票清单暂不可用"};}
+}
