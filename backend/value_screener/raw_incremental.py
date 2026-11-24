@@ -242,6 +242,14 @@ def main():
         ranges.reverse()
         # Publish current existing daily evidence immediately for the website.
         publish_month(s3,cfg.bucket,client,end)
+    # When a new month begins, finalize the preceding month's calendar coverage
+    # (including trailing weekends/holidays) for the maintenance completeness gate.
+    if not args.backfill_2026 and start==end and start.month>1:
+        preceding=start.replace(day=1)-timedelta(days=1)
+        pointer_key=f"{RAW_PREFIX}/daily_prices/year={preceding.year}/month={preceding.month:02d}/reader.manifest.json"
+        prior=get_optional_json(s3,cfg.bucket,pointer_key)
+        if prior and prior.get("through","")<preceding.isoformat():
+            publish_month(s3,cfg.bucket,client,preceding)
     total=0
     for first,last in ranges:
         dates=sessions(client,first,last)
