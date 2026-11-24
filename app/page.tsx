@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { AlertTriangle, BarChart3, CalendarDays, Database, Layers, ShieldCheck } from "lucide-react";
 import { Empty } from "@/components/empty";
 import StrategySwitch from "@/components/strategy-switch";
@@ -40,7 +41,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     <div className="page-top"><div>
       <div className="eyebrow">RESEARCH DASHBOARD / 多策略每日扫描</div>
       <h1>选股中心</h1>
-    </div><span className="date-tag"><CalendarDays size={17}/>{snapshot?.trade_date ?? "等待数据发布"}</span></div>
+    </div><div className="history-page-actions"><Link className="tool-button" href="/candidate-history">历史候选变化</Link><span className="date-tag"><CalendarDays size={17}/>{snapshot?.trade_date ?? "等待数据发布"}</span></div></div>
 
     <StrategySwitch mode="screen" requestedId={query.strategy} summary={<StrategySummary groups={groups} day={snapshot?.trade_date??null}/>}>
       <div className="stats-grid">

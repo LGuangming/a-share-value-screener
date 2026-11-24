@@ -5,7 +5,7 @@ import {Search,ArrowUpRight,X} from "lucide-react";
 import {useStockSearch} from "@/components/research-data";
 import {strategies} from "@/lib/strategies";
 
-const pages=[{name:"选股中心",href:"/"},{name:"行情研究",href:"/research"},{name:"策略汇总",href:"/?strategy=summary"},{name:"股票对比",href:"/compare"},{name:"数据中心",href:"/data-center"},{name:"策略中心",href:"/strategies"},{name:"交易观察",href:"/signals"},{name:"策略回测",href:"/backtest"},{name:"筛选方法",href:"/methodology"}];
+const pages=[{name:"选股中心",href:"/"},{name:"行情研究",href:"/research"},{name:"策略汇总",href:"/?strategy=summary"},{name:"股票对比",href:"/compare"},{name:"历史候选变化",href:"/candidate-history"},{name:"数据中心",href:"/data-center"},{name:"策略中心",href:"/strategies"},{name:"交易观察",href:"/signals"},{name:"策略回测",href:"/backtest"},{name:"筛选方法",href:"/methodology"}];
 export default function GlobalCommand(){
   const dialog=useRef<HTMLDialogElement>(null);
   const input=useRef<HTMLInputElement>(null);

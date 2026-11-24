@@ -302,3 +302,33 @@ export async function dataCenterSnapshot(){
   `:[];
   return {snapshot,error,day,rows:numeric(counts[0]?.rows),pb:numeric(counts[0]?.pb),marketCap:numeric(counts[0]?.market_cap),jobs:jobs.map(r=>({type:String(r.job_type),day:dateString(r.trade_date),status:String(r.status),started:r.started_at instanceof Date?r.started_at.toISOString():String(r.started_at),finished:r.finished_at?(r.finished_at instanceof Date?r.finished_at.toISOString():String(r.finished_at)):null}))};
 }
+
+export async function publishedCandidateDates():Promise<string[]>{
+  const db=connection();if(!db)throw Error("Database unavailable");
+  const rows=await db`
+    SELECT DISTINCT j.trade_date FROM job_runs j
+    WHERE j.job_type='daily_scan' AND j.status='success'
+    AND EXISTS (SELECT 1 FROM screen_results r WHERE r.run_id=j.run_id AND r.strategy='netnet_v1' AND r.trade_date=j.trade_date)
+    ORDER BY j.trade_date DESC LIMIT 60
+  `;
+  return rows.map(r=>dateString(r.trade_date)).filter((d):d is string=>!!d);
+}
+export async function publishedCandidateChanges(day:string,previous:string){
+  const db=connection();if(!db||!/^\d{4}-\d{2}-\d{2}$/.test(day)||!/^\d{4}-\d{2}-\d{2}$/.test(previous)||previous>=day)throw Error("Invalid publication dates");
+  const rows=await db`
+    WITH current_candidates AS (
+      SELECT r.ts_code,r.ncav_coverage,r.price FROM screen_results r JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
+      WHERE r.strategy='netnet_v1' AND r.trade_date=${day} AND r.is_candidate=true
+    ), previous_candidates AS (
+      SELECT r.ts_code,r.ncav_coverage,r.price FROM screen_results r JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
+      WHERE r.strategy='netnet_v1' AND r.trade_date=${previous} AND r.is_candidate=true
+    )
+    SELECT COALESCE(c.ts_code,p.ts_code) AS ts_code,s.name,s.industry,
+      CASE WHEN p.ts_code IS NULL THEN 'added' WHEN c.ts_code IS NULL THEN 'removed' ELSE 'retained' END AS change,
+      p.ncav_coverage AS previous_coverage,c.ncav_coverage AS current_coverage,p.price AS previous_price,c.price AS current_price
+    FROM current_candidates c FULL OUTER JOIN previous_candidates p USING(ts_code)
+    JOIN stocks s ON s.ts_code=COALESCE(c.ts_code,p.ts_code)
+    ORDER BY CASE WHEN p.ts_code IS NULL THEN 0 WHEN c.ts_code IS NULL THEN 1 ELSE 2 END,COALESCE(c.ts_code,p.ts_code)
+  `;
+  return rows.map(r=>({code:String(r.ts_code),name:String(r.name),industry:r.industry?String(r.industry):null,change:String(r.change) as "added"|"removed"|"retained",previousCoverage:numeric(r.previous_coverage),currentCoverage:numeric(r.current_coverage),previousPrice:numeric(r.previous_price),currentPrice:numeric(r.current_price)}));
+}
