@@ -259,3 +259,27 @@ export async function searchStockIdentities(query:string):Promise<{ts_code:strin
   `;
   return rows.map(r=>({ts_code:String(r.ts_code),name:String(r.name),industry:r.industry?String(r.industry):null}));
 }
+
+export async function recentMiniTrends(codes:string[]):Promise<Record<string,{day:string;close:number}[]>>{
+  const db=connection();
+  if(!db)throw new Error("Price source unavailable");
+  const valid=[...new Set(codes)].filter(c=>/^\d{6}\.(SH|SZ|BJ)$/.test(c)).slice(0,25);
+  if(!valid.length)return {};
+  const rows=await db`
+    SELECT u.ts_code,p.trade_date,p.close
+    FROM unnest(string_to_array(${valid.join(",")}, ',')) AS u(ts_code)
+    CROSS JOIN LATERAL (
+      SELECT DISTINCT ON (trade_date) trade_date,close
+      FROM (
+        (SELECT trade_date,close,2 AS source_priority FROM daily_prices WHERE ts_code=u.ts_code ORDER BY trade_date DESC LIMIT 20)
+        UNION ALL
+        (SELECT trade_date,close,1 AS source_priority FROM price_history WHERE ts_code=u.ts_code ORDER BY trade_date DESC LIMIT 20)
+      ) combined
+      ORDER BY trade_date DESC,source_priority DESC LIMIT 20
+    ) p
+    ORDER BY u.ts_code,p.trade_date ASC
+  `;
+  const out:Record<string,{day:string;close:number}[]>={};
+  for(const r of rows){const day=dateString(r.trade_date),close=numeric(r.close);if(day&&close!==null&&close>0)(out[String(r.ts_code)]??=[]).push({day,close});}
+  return out;
+}
