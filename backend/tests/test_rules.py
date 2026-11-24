@@ -31,6 +31,17 @@ class TestAccountingRules(unittest.TestCase):
         self.assertEqual(got["status"], "RISK_EXCLUDED")
         self.assertFalse(got["is_candidate"])
 
+    def test_financial_industries_ignored_not_data_gap(self):
+        for industry in ("银行","证券","保险","多元金融"," 银行 "):
+            for balance in (None, self.balance):
+                got=assess({**self.stock,"industry":industry},self.quote,balance)
+                self.assertEqual(got["status"],"FINANCIAL_IGNORED")
+                self.assertFalse(got["is_candidate"])
+                self.assertIsNone(got["ncav"])
+                self.assertEqual(got["signal"],"NOT_ELIGIBLE")
+        self.assertEqual(assess({**self.stock,"industry":"机械"},self.quote,None)["status"],"DATA_GAP")
+        self.assertEqual(assess({**self.stock,"industry":None},self.quote,None)["status"],"DATA_GAP")
+
     def test_missing_balance_is_gap_not_failure(self):
         got = assess(self.stock, self.quote, None)
         self.assertEqual(got["status"], "DATA_GAP")

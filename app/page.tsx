@@ -29,6 +29,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const qualified = rows.filter(r => r.is_candidate);
   const stressQualified = qualified.filter(r => r.stress_coverage !== null && r.stress_coverage >= 1);
   const gaps = rows.filter(r => r.status === "DATA_GAP" || r.status === "STALE_FINANCIALS");
+  const ignored = rows.filter(r => r.status === "FINANCIAL_IGNORED");
   // Minimize client-side hydration payload: the table only needs these fields.
   const tableRows: ScreenTableRow[] = rows.map(r => ({
     ts_code: r.ts_code, name: r.name, industry: r.industry, price: r.price, pb: r.pb,
@@ -56,7 +57,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <small>调整后覆盖率≥100%</small></div>
         <div className="stat-card"><span><AlertTriangle size={16}/>财报待核验</span>
           <strong className="stat-orange">{snapshot ? gaps.length.toLocaleString("zh-CN") : "—"}</strong>
-          <small>缺失及过期报告</small></div>
+          <small>缺失及过期报告</small>{snapshot&&!scan.error&&<small>金融股忽略 {ignored.length.toLocaleString("zh-CN")} 只（不适用NCAV，非财报短缺）</small>}</div>
       </div>
       {!snapshot && <div className="panel notice-panel">
         <Empty title="尚未取得每日筛选数据" detail={error || "请检查数据库和每日扫描任务。"} type="warning"/>

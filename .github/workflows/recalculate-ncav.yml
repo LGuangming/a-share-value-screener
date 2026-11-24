@@ -8,6 +8,9 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/one-shot/netnet-financial-ignore-20261124.txt']
 
 permissions:
   contents: read
@@ -20,7 +23,7 @@ concurrency:
 
 jobs:
   recalculate:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -36,6 +39,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - name: Install Python dependencies
         run: pip install -r backend/requirements.txt
+      - name: Verify rules before publication
+        run: python -m unittest discover -s backend/tests -p test_rules.py -v
       - name: Verify database access
         run: test -n "$DATABASE_URL" || { echo 'DATABASE_URL secret is missing'; exit 1; }
       - name: Recalculate and publish using cached Neon data (no Tushare requests)

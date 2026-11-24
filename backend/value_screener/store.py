@@ -7,6 +7,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from .rules import NETNET_IGNORED_INDUSTRIES
 
 
 class Store:
@@ -277,11 +278,12 @@ class Store:
                   AND r.disclosed_at<=%s AND r.end_date<=%s AND r.report_type='1'
                 WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
                   AND NOT s.is_st AND s.market NOT IN ('科创板','创业板','北交所')
+                  AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                 GROUP BY p.ts_code
                 HAVING COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='balancesheet'),DATE '1900-01-01')<%s
                     OR COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='income'),DATE '1900-01-01')<%s
                     OR COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='cashflow'),DATE '1900-01-01')<%s
-            """,(asof,asof,quote_day,cutoff,cutoff,cutoff)).fetchall()
+            """,(asof,asof,quote_day,list(NETNET_IGNORED_INDUSTRIES),cutoff,cutoff,cutoff)).fetchall()
         return {r["ts_code"]:{k:r[k] for k in ("balancesheet","income","cashflow")} for r in rows}
 
     def insert_archive_financials(self, items, asof: date) -> tuple[int,int]:
@@ -330,6 +332,7 @@ class Store:
                   AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
                   AND NOT s.is_st
                   AND s.market NOT IN ('科创板','创业板','北交所')
+                  AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                 GROUP BY p.ts_code, p.pb, p.market_cap_yuan, log.attempted_at
                 HAVING MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') IS NULL
                     OR MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') < %s
@@ -339,7 +342,7 @@ class Store:
                        MAX(r.end_date) FILTER (WHERE r.kind='balancesheet')
                 ORDER BY log.attempted_at ASC NULLS FIRST,
                          p.pb ASC NULLS LAST, p.market_cap_yuan ASC
-            """, (asof, asof, quote_day, cutoff)).fetchall()
+            """, (asof, asof, quote_day, list(NETNET_IGNORED_INDUSTRIES), cutoff)).fetchall()
         return {"remaining": len(rows),
                 "queue": [row["ts_code"] for row in rows if row["ready"]][:budget]}
 
@@ -370,6 +373,7 @@ class Store:
                 WHERE p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
                   AND NOT s.is_st
                   AND s.market NOT IN ('科创板','创业板','北交所')
+                  AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                   AND (log.attempted_at IS NULL OR
                        log.attempted_at < now()-interval '6 hours')
                 GROUP BY e.ts_code, e.period, e.actual_date, p.pb, p.market_cap_yuan
@@ -378,7 +382,7 @@ class Store:
                 ORDER BY e.actual_date ASC, p.pb ASC NULLS LAST,
                          p.market_cap_yuan ASC
                 LIMIT %s
-            """, (codes, periods, actuals, quote_day, asof, budget)).fetchall()
+            """, (codes, periods, actuals, quote_day, asof, list(NETNET_IGNORED_INDUSTRIES), budget)).fetchall()
         return [dict(row) for row in rows]
 
     def financial_missing_kinds(self, code: str, asof: date,
@@ -488,7 +492,7 @@ class Store:
             # close-price session, because only calendar dates (not intraday times)
             # are supplied by the statement API. Prevent same-day after-close leaks.
             rows = conn.execute("""
-                SELECT s.ts_code,s.name,s.is_st,s.market,p.raw AS quote,
+                SELECT s.ts_code,s.name,s.is_st,s.market,s.industry,p.raw AS quote,
                        b.metrics AS balance,b.end_date AS report_date,b.disclosed_at AS ann_date,
                        i.metrics AS income,i.end_date AS income_end_date,
                        c.metrics AS cashflow,c.end_date AS cashflow_end_date

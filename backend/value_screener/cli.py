@@ -149,11 +149,15 @@ def recalculate_ncav(args):
         stats["pre_screened"] = len(rows)
         results = []
         for row in rows:
-            stock = {"ts_code": row["ts_code"], "name": row["name"], "is_st": row["is_st"]}
+            stock = {"ts_code": row["ts_code"], "name": row["name"], "is_st": row["is_st"],
+                     "industry": row.get("industry")}
             r = assess(stock, row["quote"], row["balance"], row["income"],
                        row["cashflow"], ScreenConfig())
             r["report_date"] = row["report_date"]
             r["ann_date"] = row["ann_date"]
+            if r["status"] == "FINANCIAL_IGNORED":
+                results.append(r)
+                continue
             if row["report_date"] is not None:
                 if ((row.get("income_end_date") is not None and
                      row["income_end_date"] != row["report_date"]) or
@@ -176,6 +180,8 @@ def recalculate_ncav(args):
                 )
         stats["candidate_count"] = len(selected)
         stats["financial_data_gap"] = sum(r["status"] == "DATA_GAP" for r in results)
+        stats["financial_ignored"] = sum(r["status"] == "FINANCIAL_IGNORED" for r in results)
+        stats["netnet_applicable_pre_screened"] = len(results)-stats["financial_ignored"]
         stats["insufficient_price_history"] = sum(
             r["signal"] == "INSUFFICIENT_HISTORY" for r in results
         )

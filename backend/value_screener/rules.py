@@ -12,6 +12,13 @@ from dataclasses import dataclass, asdict
 from typing import Any
 
 
+NETNET_IGNORED_INDUSTRIES = ("银行", "证券", "保险", "多元金融")
+
+
+def netnet_financial_industry(industry: Any) -> bool:
+    return isinstance(industry, str) and industry.strip() in NETNET_IGNORED_INDUSTRIES
+
+
 @dataclass(frozen=True)
 class ScreenConfig:
     max_price: float = 10.0
@@ -72,6 +79,10 @@ def assess(stock: dict, quote: dict, balance: dict | None,
     if pb is not None and pb > cfg.max_pb:
         result["status"] = "PB_EXCLUDED"
         result["assessment"] = "PB超过当前初筛上限。"
+        return result
+    if netnet_financial_industry(stock.get("industry")):
+        result.update(status="FINANCIAL_IGNORED", signal="NOT_ELIGIBLE",
+                      assessment="金融行业报表结构不适用Net-Net，本策略忽略，不属于财报数据短缺。")
         return result
     if balance is None:
         return result

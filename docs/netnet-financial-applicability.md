@@ -1,0 +1,3 @@
+# Net-Net financial-sector applicability
+
+Banking, securities, insurance and diversified financials (Tushare current industry values 银行、证券、保险、多元金融) are ignored by Net-Net, not removed from stocks or research archives. Pre-screened rows remain visible with FINANCIAL_IGNORED / NOT_ELIGIBLE and do not count as financial gaps or candidates. NCAV-specific archive imports, backlog and disclosure queues share the same industry exclusion. No raw data or existing statements are deleted. The website counts ignored rows separately from missing/stale reports. This is a current classification policy, not a certified historical industry series for backtesting.

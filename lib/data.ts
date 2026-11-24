@@ -29,6 +29,8 @@ export type Snapshot = {
     pre_screened?: number;
     candidate_count?: number;
     financial_data_gap?: number;
+    financial_ignored?: number;
+    netnet_applicable_pre_screened?: number;
     financial_successes?: number;
   };
 };

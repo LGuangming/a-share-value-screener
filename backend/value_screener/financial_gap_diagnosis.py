@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 
 from .store import Store
+from .rules import NETNET_IGNORED_INDUSTRIES
 from .financial_archive_import import (KINDS, CORE, BATCH, load_batch, verified_json,
     parsed, finite, select_latest, StorageConfig, s3_client, RAW_PREFIX)
 from .market_session import CN_TZ
@@ -28,12 +29,13 @@ def run():
               AND r.disclosed_at<=%s AND r.end_date<=%s
             WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
               AND NOT s.is_st AND s.market NOT IN ('科创板','创业板','北交所')
+              AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
             GROUP BY p.ts_code
             HAVING MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') IS NULL
               OR MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') < %s::date-280
               OR MAX(r.end_date) FILTER (WHERE r.kind='income') IS DISTINCT FROM MAX(r.end_date) FILTER (WHERE r.kind='balancesheet')
               OR MAX(r.end_date) FILTER (WHERE r.kind='cashflow') IS DISTINCT FROM MAX(r.end_date) FILTER (WHERE r.kind='balancesheet')
-        """,(day,day,quote,day)).fetchall()
+        """,(day,day,quote,list(NETNET_IGNORED_INDUSTRIES),day)).fetchall()
         gaps=conn.execute("""
             SELECT ts_code,flags,report_date,disclosed_at FROM screen_results
             WHERE trade_date=%s AND strategy='netnet_v1' AND status='DATA_GAP'

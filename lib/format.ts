@@ -14,7 +14,7 @@ export function stateLabel(status: string): string {
   const map: Record<string, string> = {
     NET_NET: "符合Net-Net", NEAR_NET_NET: "接近Net-Net", BELOW_NET_NET: "未达门槛",
     DATA_GAP: "财报待补齐", PRICE_EXCLUDED: "价格排除", RISK_EXCLUDED: "风险排除",
-    PB_EXCLUDED: "PB排除", STALE_FINANCIALS: "财报过旧",
+    PB_EXCLUDED: "PB排除", STALE_FINANCIALS: "财报过旧", FINANCIAL_IGNORED: "金融股忽略",
   };
   return map[status] ?? status;
 }
