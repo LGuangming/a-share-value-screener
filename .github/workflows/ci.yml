@@ -1,6 +1,8 @@
 name: Tests and Build
 on:
   push:
+    paths-ignore:
+      - '.github/one-shot/**'
   pull_request:
 permissions:
   contents: read
