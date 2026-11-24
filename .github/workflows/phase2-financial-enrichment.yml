@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   disclosure-and-pilot:
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -46,19 +47,14 @@ jobs:
 
   financial-shards:
     needs: disclosure-and-pilot
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.disclosure-and-pilot.result == 'success') }}
     strategy:
       fail-fast: false
       max-parallel: 1
       matrix:
-        include:
-          - start: 0
-            stop: 1500
-          - start: 1500
-            stop: 3000
-          - start: 3000
-            stop: 4500
-          - start: 4500
-            stop: 6000
+        # Short recovery shards limit lost work on intermittent storage auth failures.
+        # The normal manual full-universe workflow retains its existing bounds.
+        include: ${{ fromJSON(github.event_name == 'push' && '[{"start":4950,"stop":5050},{"start":5050,"stop":5150},{"start":5150,"stop":5250},{"start":5250,"stop":5350},{"start":5350,"stop":5450},{"start":5450,"stop":5550},{"start":5550,"stop":5650},{"start":5650,"stop":5750},{"start":5750,"stop":5850},{"start":5850,"stop":5924}]' || '[{"start":0,"stop":1500},{"start":1500,"stop":3000},{"start":3000,"stop":4500},{"start":4500,"stop":6000}]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:

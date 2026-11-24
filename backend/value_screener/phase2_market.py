@@ -128,7 +128,7 @@ def validate_row(dataset: str, record: dict, day: str):
         raise RuntimeError(f"Invalid trade_date in {dataset} {day}")
     for col in REQUIRED_POSITIVE.get(dataset, ()):
         # A sparse genuine source NULL is not a zero or an estimate.
-        # Keep missing valuation inputs nullable; enforce coverage per day.
+        # Keep missing valuation inputs nullable; report coverage per day.
         if dataset == "daily_basic" and record.get(col) in (None, ""):
             continue
         try:
@@ -163,6 +163,27 @@ def validate_row(dataset: str, record: dict, day: str):
                  else record.get(k) for k in DATASETS[dataset])
 
 
+def valuation_quality(day: str, row_count: int, missing_mv: list[str], missing_share: list[str]) -> dict:
+    """Describe input availability separately from the integrity of the raw archive."""
+    affected = set(missing_mv) | set(missing_share)
+    unavailable = len(affected)
+    if row_count <= 0 or unavailable > row_count:
+        raise RuntimeError(f"Invalid valuation coverage counts on {day}")
+    return {
+        "trade_date": day, "rows": row_count,
+        "missing_total_mv_rows": len(missing_mv),
+        "missing_total_share_rows": len(missing_share),
+        "unusable_valuation_rows": unavailable,
+        "usable_valuation_rows": row_count - unavailable,
+        "missing_fraction": unavailable / row_count,
+        "quality_status": ("NO_USABLE_VALUATION" if unavailable == row_count else
+                           "ELEVATED_MISSINGNESS" if unavailable * 100 > row_count else
+                           "PARTIAL" if unavailable else "COMPLETE"),
+        "missing_total_mv_codes": sorted(missing_mv),
+        "missing_total_share_codes": sorted(missing_share),
+    }
+
+
 def collect_month(client, dataset: str, year: int, month: str, days: list[str],
                   root: Path):
     import duckdb
@@ -177,6 +198,7 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
     missing_total_mv_rows = 0
     missing_total_share_rows = 0
     unusable_valuation_rows = 0
+    valuation_gap_days = []
     with csv_file.open("w", encoding="utf-8", newline="") as fp:
         writer = csv.writer(fp)
         writer.writerow(fields)
@@ -188,15 +210,17 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
             if len(records) >= API_CAP[dataset]:
                 raise RuntimeError(f"{dataset} {day}: possible provider row truncation")
             seen = set()
-            day_missing_mv = day_missing_share = day_unusable = 0
+            day_missing_mv = []
+            day_missing_share = []
             for record in records:
                 values = validate_row(dataset, record, day)
                 if dataset == "daily_basic":
                     missing_mv = record.get("total_mv") in (None, "")
                     missing_share = record.get("total_share") in (None, "")
-                    day_missing_mv += int(missing_mv)
-                    day_missing_share += int(missing_share)
-                    day_unusable += int(missing_mv or missing_share)
+                    if missing_mv:
+                        day_missing_mv.append(values[0])
+                    if missing_share:
+                        day_missing_share.append(values[0])
                 if dataset == "stk_limit":
                     if any(record.get(col) in (None, "", 0, 0.0)
                            for col in ("up_limit", "down_limit")):
@@ -209,15 +233,20 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
                 seen.add(key)
                 writer.writerow(values)
             if dataset == "daily_basic":
-                # Fail closed on systemic provider missingness (over 1% daily).
-                if day_unusable > max(1, len(records) // 100):
-                    raise RuntimeError(f"Excess missing valuation inputs {day}: {day_unusable}/{len(records)}")
-                missing_total_mv_rows += day_missing_mv
-                missing_total_share_rows += day_missing_share
-                unusable_valuation_rows += day_unusable
-                if day_unusable:
-                    print(f"PHASE2_VALUATION_GAP date={day} missing_total_mv={day_missing_mv} "
-                          f"missing_total_share={day_missing_share} unusable_rows={day_unusable}", flush=True)
+                # NULL inputs remain NULL. The raw partition is verifiable even
+                # if some or all of the rows are unusable for valuation signals.
+                # Keep the 1% threshold as a diagnostic, never a completeness claim.
+                quality = valuation_quality(day, len(records), day_missing_mv, day_missing_share)
+                missing_total_mv_rows += quality["missing_total_mv_rows"]
+                missing_total_share_rows += quality["missing_total_share_rows"]
+                unusable_valuation_rows += quality["unusable_valuation_rows"]
+                if quality["unusable_valuation_rows"]:
+                    valuation_gap_days.append(quality)
+                    print(f"PHASE2_VALUATION_GAP date={day} "
+                          f"missing_total_mv={quality['missing_total_mv_rows']} "
+                          f"missing_total_share={quality['missing_total_share_rows']} "
+                          f"unusable_rows={quality['unusable_valuation_rows']} "
+                          f"status={quality['quality_status']}", flush=True)
             total += len(records)
             days_nonempty += int(bool(records))
             print(f"PHASE2_DAY dataset={dataset} date={day} rows={len(records)}",
@@ -242,6 +271,15 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
         )
         count = con.execute("SELECT COUNT(*) FROM read_parquet(?)",
                             [str(pq_file)]).fetchone()[0]
+        if dataset == "daily_basic":
+            actual = con.execute(
+                "SELECT COUNT(*) FILTER (WHERE total_mv IS NULL), "
+                "COUNT(*) FILTER (WHERE total_share IS NULL), "
+                "COUNT(*) FILTER (WHERE total_mv IS NULL OR total_share IS NULL) "
+                "FROM read_parquet(?)", [str(pq_file)]
+            ).fetchone()
+            if actual != (missing_total_mv_rows, missing_total_share_rows, unusable_valuation_rows):
+                raise RuntimeError(f"Parquet valuation NULL counts mismatch: {year}/{month}")
     finally:
         con.close()
     if count != total:
@@ -257,7 +295,13 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
         "missing_total_mv_rows": missing_total_mv_rows if dataset == "daily_basic" else None,
         "missing_total_share_rows": missing_total_share_rows if dataset == "daily_basic" else None,
         "unusable_valuation_rows": unusable_valuation_rows if dataset == "daily_basic" else None,
-        "valuation_null_policy": "preserve_null_exclude_from_valuation_max_1pct_daily" if dataset == "daily_basic" else None,
+        "valuation_null_policy": "preserve_null_report_coverage_exclude_unusable_inputs" if dataset == "daily_basic" else None,
+        "valuation_gap_days": valuation_gap_days if dataset == "daily_basic" else None,
+        "usable_valuation_rows": count - unusable_valuation_rows if dataset == "daily_basic" else None,
+        "valuation_quality_status": (
+            "NO_USABLE_VALUATION" if count == unusable_valuation_rows else
+            "PARTIAL" if unusable_valuation_rows else "COMPLETE"
+        ) if dataset == "daily_basic" else None,
         "min_session": days[0], "max_session": days[-1],
         "sha256": sha, "parquet_bytes": pq_file.stat().st_size,
         "object_key": f"{prefix(dataset, year)}/month={month}.parquet",

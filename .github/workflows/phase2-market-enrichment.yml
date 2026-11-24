@@ -34,6 +34,12 @@ concurrency:
 
 jobs:
   backfill-market:
+    # Independent jobs on recovery: one bad valuation date cannot block suspensions.
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        dataset: ${{ fromJSON(github.event_name == 'push' && '["daily_basic","suspend_d"]' || '["manual"]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
     env:
@@ -59,7 +65,7 @@ jobs:
         env:
           START_YEAR: ${{ inputs.start_year || '2020' }}
           END_YEAR: ${{ inputs.end_year || '2020' }}
-          MARKET_DATASETS: ${{ inputs.datasets || 'daily_basic,suspend_d' }}
+          MARKET_DATASETS: ${{ github.event_name == 'push' && matrix.dataset || inputs.datasets }}
         run: |
           python -m value_screener.phase2_market \
             --start-year "$START_YEAR" \

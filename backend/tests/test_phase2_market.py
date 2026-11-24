@@ -1,7 +1,7 @@
 """Offline regression tests for phase-two research snapshots."""
 import unittest
 from value_screener.phase2_market import (
-    DATASETS, validate_row, prefix, verify_month, verify_year,
+    DATASETS, validate_row, prefix, verify_month, verify_year, valuation_quality,
 )
 
 
@@ -45,6 +45,22 @@ class Phase2MarketTests(unittest.TestCase):
             row["total_mv"] = bad
             with self.assertRaises(RuntimeError):
                 validate_row("daily_basic", row, "20200918")
+
+    def test_elevated_valuation_missingness_is_reported_not_rejected(self):
+        codes = [f"{i:06d}.SZ" for i in range(90)]
+        quality = valuation_quality("20200918", 4160, codes, codes[:25])
+        self.assertEqual(quality["quality_status"], "ELEVATED_MISSINGNESS")
+        self.assertEqual(quality["unusable_valuation_rows"], 90)
+        self.assertEqual(quality["usable_valuation_rows"], 4070)
+        self.assertEqual(quality["missing_total_share_rows"], 25)
+        self.assertEqual(quality["missing_total_mv_codes"], codes)
+        self.assertAlmostEqual(quality["missing_fraction"], 90 / 4160)
+
+    def test_no_usable_valuation_is_explicitly_marked(self):
+        quality = valuation_quality("20200918", 1, ["000001.SZ"], [])
+        self.assertEqual(quality["quality_status"], "NO_USABLE_VALUATION")
+        self.assertEqual(quality["usable_valuation_rows"], 0)
+        self.assertEqual(valuation_quality("20200918", 4160, [], [])["quality_status"], "COMPLETE")
 
     def test_suspension_types_and_nullable_timing(self):
         x = {"ts_code": "600000.SH", "trade_date": "20250813",

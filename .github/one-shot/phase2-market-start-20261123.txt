@@ -3,3 +3,5 @@ Retry after recording a bounded set of legacy unrecognized stock symbols; never 
 Second retry after QA review: preserve missing/zero source price limits and mark those rows unusable for strict trading. Reuse verified 2025 adj_factor partitions. Queue behind running disclosure/finance work to avoid overlapping Tushare calls.
 
 2026-11-24: resume 2020 daily_basic and suspend_d; preserve sparse source nulls.
+
+2026-11-24: archive remaining 2020 daily_basic with nullable valuation quality audit, and independently resume suspend_d.
