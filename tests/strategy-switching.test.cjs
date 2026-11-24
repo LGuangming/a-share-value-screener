@@ -234,3 +234,33 @@ test("V2 page controls preserve local filtering and use actual research data",()
   assert.match(config,/disabled>运行回测/);
   assert.doesNotMatch(config,/fetch\(/);
 });
+
+test("single-row toolbar keeps export and settings together with unclipped dropdowns",()=>{
+  const css=read("app/theme-orange.css");
+  const screen=read("components/screener-results.tsx");
+  assert.match(css,/\.market-panel>\.filters \{[^}]*flex-wrap:nowrap[^}]*overflow-x:auto/);
+  assert.match(css,/\.market-panel>\.filters>\.filter-form \{[^}]*flex-wrap:nowrap/);
+  assert.match(screen,/<ToolbarFlyout anchor=\{searchAnchor\}/);
+  assert.match(screen,/<ToolbarFlyout anchor=\{columnAnchor\}/);
+  assert.match(read("components/toolbar-flyout.tsx"),/createPortal/);
+});
+test("strategy summary is a selectable union, not a new strategy or fabricated result",()=>{
+  const sw=read("components/strategy-switch.tsx");
+  const page=read("app/page.tsx");
+  const summary=read("components/strategy-summary.tsx");
+  assert.match(sw,/chooseStrategy\("summary"\)/);
+  assert.match(sw,/showSummary \? /);
+  assert.match(page,/strategy.status !== "live"/);
+  assert.match(page,/screeningRowsStatus\(snapshot.trade_date,strategy.id\)/);
+  assert.match(summary,/type="checkbox"/);
+  assert.match(summary,/命中策略/);
+  const ts=require("typescript");
+  const m={exports:{}};
+  new Function("module","exports",ts.transpileModule(read("lib/strategy-summary.ts"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m,m.exports);
+  const row=(code,candidate=true)=>({ts_code:code,name:code,industry:null,price:1,market_cap_yuan:10,is_candidate:candidate});
+  const groups=[{id:"a",name:"A",state:"ready",rows:[row("001"),row("002"),row("004",false)]},{id:"b",name:"B",state:"ready",rows:[row("001"),row("003")]},{id:"c",name:"C",state:"unpublished",rows:[row("005")]}];
+  const union=m.exports.combineStrategyResults(groups,["a","b","c"]);
+  assert.deepEqual(union.map(r=>[r.ts_code,r.hits.length]),[["001",2],["002",1],["003",1]]);
+  assert.deepEqual(m.exports.combineStrategyResults(groups,["b"]).map(r=>r.ts_code),["001","003"]);
+  assert.deepEqual(m.exports.combineStrategyResults(groups,[]),[]);
+});

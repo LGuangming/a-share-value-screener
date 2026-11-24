@@ -8,14 +8,15 @@ import StrategyMethodology from "@/components/strategy-methodology";
 
 /** Changing strategy only switches the local research view: no database query or route wait. */
 export default function StrategySwitch({
-  mode, requestedId, children,
+  mode, requestedId, children, summary,
 }: {
   mode: "screen" | "signals" | "methodology";
   requestedId?: string;
   children?: ReactNode;
+  summary?: ReactNode;
 }) {
   const [selectedId, setSelectedId] = useState(
-    findStrategy(requestedId ?? "")?.id ?? "netnet_v1"
+    mode==="screen" && requestedId==="summary" ? "summary" : findStrategy(requestedId ?? "")?.id ?? "netnet_v1"
   );
 
   useEffect(() => {
@@ -23,18 +24,19 @@ export default function StrategySwitch({
     // starts with the live Net-Net screener, not a stale research selection.
     const sync = () => {
       const id = new URLSearchParams(window.location.search).get("strategy");
-      setSelectedId(findStrategy(id ?? "")?.id ?? "netnet_v1");
+      setSelectedId(mode==="screen" && id==="summary" ? "summary" : findStrategy(id ?? "")?.id ?? "netnet_v1");
     };
     sync();
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
-  }, [requestedId]);
+  }, [requestedId,mode]);
 
   const selected = findStrategy(selectedId) ?? strategies[0];
+  const showSummary = mode === "screen" && selectedId === "summary";
   const canShowLive = selected.status === "live" && selected.id === "netnet_v1";
 
   function chooseStrategy(id: string) {
-    if (!findStrategy(id)) return;
+    if (!findStrategy(id) && !(mode==="screen" && id==="summary")) return;
     setSelectedId(id);
     // The URL persists selection across pages; do not persist an inactive
     // strategy as the default when the visitor opens the home page.
@@ -52,16 +54,17 @@ export default function StrategySwitch({
           <h2>{mode === "screen" ? "选股策略" : mode === "signals" ? "交易观察策略" : "筛选方法策略"}</h2>
           <p>切换策略查看规则、参数和数据条件。</p>
         </div>
-        <span className={`strategy-state strategy-state-${selected.status}`}>{strategyStatusLabel[selected.status]}</span>
+        {!showSummary && <span className={`strategy-state strategy-state-${selected.status}`}>{strategyStatusLabel[selected.status]}</span>}
       </div>
       <div className="strategy-switch-options" role="tablist" aria-label="研究策略">
+        {mode==="screen" && <button type="button" role="tab" aria-selected={showSummary} className={`strategy-switch-option${showSummary?" is-selected":""}`} onClick={()=>chooseStrategy("summary")}><strong>策略汇总</strong></button>}
         {strategies.map(strategy =>
           <button
             key={strategy.id}
             type="button"
             role="tab"
-            aria-selected={strategy.id === selected.id}
-            className={`strategy-switch-option${strategy.id === selected.id ? " is-selected" : ""}`}
+            aria-selected={!showSummary && strategy.id === selected.id}
+            className={`strategy-switch-option${!showSummary && strategy.id === selected.id ? " is-selected" : ""}`}
             onClick={() => chooseStrategy(strategy.id)}
           >
             <strong>{strategy.name}</strong>
@@ -69,7 +72,7 @@ export default function StrategySwitch({
           </button>
         )}
       </div>
-      <details className="strategy-context" key={selected.id}>
+      {!showSummary && <details className="strategy-context" key={selected.id}>
         <summary>策略参数与数据条件</summary>
         <div className="strategy-context-body">
       <div className="strategy-switch-summary">
@@ -98,9 +101,9 @@ export default function StrategySwitch({
         <span>策略ID：{selected.id}</span>
       </div>
         </div>
-      </details>
+      </details>}
     </section>
-    {mode === "methodology"
+    {showSummary ? <div className="strategy-view-enter">{summary}</div> : mode === "methodology"
       ? <StrategyMethodology key={selected.id} strategy={selected}/>
       : <>
           <div className={canShowLive ? "strategy-view-enter" : "strategy-inactive"} hidden={!canShowLive}>{children}</div>

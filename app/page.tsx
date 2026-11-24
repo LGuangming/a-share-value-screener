@@ -2,6 +2,9 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, CircleHelp, Database, Info, Layers, ShieldCheck, TrendingUp } from "lucide-react";
 import { Empty } from "@/components/empty";
 import StrategySwitch from "@/components/strategy-switch";
+import StrategySummary from "@/components/strategy-summary";
+import { strategies } from "@/lib/strategies";
+import type { SummaryGroup } from "@/lib/strategy-summary";
 import ScreenerResults, { type ScreenTableRow } from "@/components/screener-results";
 import { latestSnapshot, screeningRowsStatus } from "@/lib/data";
 
@@ -17,6 +20,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   // condition catalog, not re-labeled Net-Net candidates.
   const scan = snapshot ? await screeningRowsStatus(snapshot.trade_date, "netnet_v1") : { rows: [], error: null };
   const rows = scan.rows;
+  const groups: SummaryGroup[] = await Promise.all(strategies.map(async (strategy): Promise<SummaryGroup> => {
+    if(strategy.status !== "live") return {id:strategy.id,name:strategy.name,state:"unpublished",rows:[]};
+    if(!snapshot) return {id:strategy.id,name:strategy.name,state:error?"error":"unpublished",rows:[]};
+    const result = strategy.id === "netnet_v1" ? scan : await screeningRowsStatus(snapshot.trade_date,strategy.id);
+    return {id:strategy.id,name:strategy.name,state:result.error?"error":strategy.id==="netnet_v1"||result.rows.length?"ready":"unpublished",rows:result.rows.filter(r=>r.is_candidate).map(({ts_code,name,industry,price,market_cap_yuan,is_candidate})=>({ts_code,name,industry,price,market_cap_yuan,is_candidate}))};
+  }));
   const qualified = rows.filter(r => r.is_candidate);
   const stressQualified = qualified.filter(r => r.stress_coverage !== null && r.stress_coverage >= 1);
   const gaps = rows.filter(r => r.status === "DATA_GAP" || r.status === "STALE_FINANCIALS");
@@ -34,7 +43,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <h1>选股中心</h1>
     </div><span className="date-tag"><CalendarDays size={17}/>{snapshot?.trade_date ?? "等待数据发布"}</span></div>
 
-    <StrategySwitch mode="screen" requestedId={query.strategy}>
+    <StrategySwitch mode="screen" requestedId={query.strategy} summary={<StrategySummary groups={groups} day={snapshot?.trade_date??null}/>}>
       <div className="stats-grid">
         <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span>
           <strong>{snapshot ? (snapshot.metrics.pre_screened ?? rows.length).toLocaleString("zh-CN") : "—"}</strong>
