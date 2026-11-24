@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { findStrategy } from "@/lib/strategies";
-import { Activity, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
+import { Activity, ChartCandlestick, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
   { href: "/", label: "选股中心", Icon: Radar },
+  { href: "/research", label: "行情研究", Icon: ChartCandlestick },
   { href: "/strategies", label: "策略中心", Icon: Layers3 },
   { href: "/signals", label: "交易观察", Icon: Activity },
   { href: "/backtest", label: "策略回测", Icon: ChartNoAxesCombined },
@@ -61,7 +62,7 @@ export default function Nav() {
           const isActive = activeHref === href;
           return <Link key={href} href={strategyHref(href)}
             className={`nav-link${isActive ? " is-active" : ""}`}
-            aria-current={isActive ? "page" : undefined}>
+            aria-current={isActive ? "page" : undefined} title={label}>
             <Icon size={18}/><span>{label}</span>
           </Link>;
         })}

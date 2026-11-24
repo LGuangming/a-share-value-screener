@@ -2,9 +2,14 @@ import Link from "next/link";
 import { ArrowUpRight, Layers3 } from "lucide-react";
 import { strategies, strategyStatusLabel, requirementLabels } from "@/lib/strategies";
 
+import {latestSnapshot,screeningRowsStatus} from "@/lib/data";
+export const dynamic="force-dynamic";
 export const metadata = {title:"策略中心"};
 
-export default function StrategiesPage() {
+export default async function StrategiesPage() {
+  const {snapshot}=await latestSnapshot();
+  const counts=new Map<string,number>();
+  if(snapshot)await Promise.all(strategies.filter(s=>s.status==="live").map(async s=>{const r=await screeningRowsStatus(snapshot.trade_date,s.id);if(!r.error&&(s.id==="netnet_v1"||r.rows.length))counts.set(s.id,r.rows.filter(x=>x.is_candidate).length);}));
   const enabled = strategies.filter(x => x.status === "live").length;
   const research = strategies.filter(x => x.status === "research").length;
   return <main className="page-container">
@@ -26,7 +31,7 @@ export default function StrategiesPage() {
       </div></div>
       <div className="table-scroll">
         <table className="results-table strategy-library-table">
-          <thead><tr><th>策略 / 版本</th><th>分类</th><th>策略规则</th><th>数据要求</th><th>运行状态</th><th>持仓周期</th><th>回测</th><th>详情</th></tr></thead>
+          <thead><tr><th>策略 / 版本</th><th>分类</th><th>策略规则</th><th>数据要求</th><th>运行状态</th><th>最新候选数</th><th>持仓周期</th><th>回测收益</th><th>最大回撤</th><th>回测</th><th>详情</th></tr></thead>
           <tbody>{strategies.map(s=><tr key={s.id}>
             <td><Link className="stock-name" href={`/strategies/${encodeURIComponent(s.id)}`}>{s.name}</Link>
               <div className="stock-meta">v{s.version} · {s.id}</div></td>
@@ -34,7 +39,7 @@ export default function StrategiesPage() {
             <td className="strategy-description">{s.description}</td>
             <td className="strategy-description">{s.requirements.map(req=>requirementLabels[req] ?? req).join("、")}</td>
             <td><span className={`strategy-state strategy-state-${s.status}`}>{strategyStatusLabel[s.status]}</span></td>
-            <td>{s.id==="oversold_reversion_v0"?"5–20交易日（拟）":"—"}</td>
+            <td>{counts.get(s.id)??"—"}</td><td>{s.id==="oversold_reversion_v0"?"5–20交易日（拟）":"—"}</td><td>—</td><td>—</td>
             <td><Link className="inline-link" href={`/backtest?strategy=${encodeURIComponent(s.id)}`}>查看回测</Link></td>
             <td><Link className="inline-link" href={`/strategies/${encodeURIComponent(s.id)}`} aria-label={`查看${s.name}详情`}>查看 <ArrowUpRight size={14}/></Link></td>
           </tr>)}</tbody>
