@@ -1,11 +1,12 @@
 "use client";
 
-import { useId, useMemo, useState, type KeyboardEvent } from "react";
+import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Filter, Search, Settings2 } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
 import { fixed, moneyCny, pct, signalLabel, stateLabel } from "@/lib/format";
 import { Empty } from "@/components/empty";
+import ToolbarFlyout from "@/components/toolbar-flyout";
 
 export type ScreenTableRow = Pick<ScreenerRow,
   "ts_code" | "name" | "industry" | "price" | "pb" | "market_cap_yuan" |
@@ -78,6 +79,8 @@ export default function ScreenerResults({ rows, initial }: {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const suggestionListId = useId();
+  const searchAnchor=useRef<HTMLDivElement>(null);
+  const columnAnchor=useRef<HTMLDivElement>(null);
   const needle = q.trim().toLocaleLowerCase();
 
 
@@ -179,7 +182,7 @@ export default function ScreenerResults({ rows, initial }: {
             onClick={() => setFilter("view",key,()=>setView(key))}>{label}</button>)}
       </div>
       <div className="filter-form">
-        <div className="stock-search">
+        <div className="stock-search" ref={searchAnchor}>
           <div className="search-field"><Search size={16}/>
             <input aria-label="搜索股票" autoComplete="off" type="search"
               placeholder={`在${viewLabel}中搜索名称 / 代码`} value={q}
@@ -193,7 +196,7 @@ export default function ScreenerResults({ rows, initial }: {
               onKeyDown={handleSearchKeyDown}
               onChange={e => updateSearch(e.target.value)}/>
           </div>
-          {needle && suggestionsOpen && <div
+          {needle && suggestionsOpen && <ToolbarFlyout anchor={searchAnchor} width={300}><div
             id={suggestionListId} role="listbox" aria-label={`${viewLabel}股票搜索结果`}
             className="stock-suggestions">
             <div className="stock-suggestions-heading">
@@ -210,7 +213,7 @@ export default function ScreenerResults({ rows, initial }: {
               <span className="stock-suggestion-name">{row.name}</span>
               <span className="stock-suggestion-code">{row.ts_code}</span>
             </button>) : <p className="stock-suggestion-empty">当前选项卡没有匹配股票，请缩短搜索词。</p>}
-          </div>}
+          </div></ToolbarFlyout>}
         </div>
         <select aria-label="最高价格" value={maxPrice}
           onChange={e=>setFilter("max_price",e.target.value,()=>setMaxPrice(Number(e.target.value)))}>
@@ -231,12 +234,12 @@ export default function ScreenerResults({ rows, initial }: {
           onChange={e=>setFilter("order",e.target.value,()=>{setOrder(e.target.value as NumericKey);setAscending(false);})}>
           {numericColumns.map(c=><option key={c.key} value={c.key}>{c.label}排序</option>)}
         </select>
-        <div className="column-control" onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
+        <div className="column-control" ref={columnAnchor} onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
           <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>setColumnMenu(v=>!v)}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
-          {columnMenu && <div className="column-menu">
+          {columnMenu && <ToolbarFlyout anchor={columnAnchor} align="right" width={190}><div className="column-menu">
             {optionalColumns.map(c=><label key={c.key}><input type="checkbox" checked={columns.includes(c.key)} onChange={e=>setColumns(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>{c.label}</label>)}
             <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setColumnMenu(false);}}>恢复默认</button>
-          </div>}
+          </div></ToolbarFlyout>}
         </div>
         <button type="button" className="tool-button" onClick={exportRows} disabled={!filtered.length}><Download size={14}/> 导出 CSV</button>
       </div>
