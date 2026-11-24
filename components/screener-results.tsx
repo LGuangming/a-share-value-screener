@@ -194,7 +194,7 @@ export default function ScreenerResults({ rows, initial }: {
 
   return <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
-      <h2>{needle ? "股票即时搜索" : "Net-Net筛选结果"} <span className="count-badge">{filtered.length}</span></h2>
+      <h2>Net-Net筛选结果 <span className="count-badge" aria-live="polite">{filtered.length}</span></h2>
       <p>共 {filtered.length.toLocaleString("zh-CN")} 只 · 当前显示 {Math.min(visibleCount,filtered.length).toLocaleString("zh-CN")} 只<span className="filter-local-hint" style={{marginInlineStart:10,whiteSpace:"nowrap",verticalAlign:"middle"}}><Filter size={13}/> 即时筛选</span></p>
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
@@ -271,9 +271,6 @@ export default function ScreenerResults({ rows, initial }: {
         <button type="button" className="tool-button" onClick={exportRows} disabled={!filtered.length}><Download size={14}/> 导出 CSV</button>
       </div>
     </div>
-    {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
-      {viewLabel} · 匹配 {matches.length} 只 / 当前 {tabRows.length} 只
-    </div>}
     {mini&&trend.error&&<div className="stock-search-feedback" role="status">近期走势暂不可用</div>}
     {filtered.length ? <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:280+(mini?105:0)+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
       <colgroup><col style={{width:180}}/>{shownColumns.map(c=><col key={c.key} style={{width:widths[c.key]??105}}/>)}{mini&&<col style={{width:105}}/>}<col style={{width:100}}/></colgroup>

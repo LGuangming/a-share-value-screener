@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowUpRight, Activity } from "lucide-react";
+import { ArrowUpRight, Activity, ChevronDown } from "lucide-react";
 import { latestSnapshot, screeningRows } from "@/lib/data";
 import { fixed, pct, signalLabel } from "@/lib/format";
 import {
@@ -62,8 +62,8 @@ export default async function SignalsPage({ searchParams }: { searchParams: Prom
             <td>{review.reasons.length ? <details className="signal-reason-details"><summary>
               <ReviewReasons reasons={review.reasons.map(reason => ({
               code: reason.code, label: reason.label,
-            }))}/><span className="signal-expand">展开明细</span></summary>
-              <div className="signal-reason-body">{review.reasons.map(reason=><div key={reason.code}>
+            }))}/><span className="signal-expand"><span className="signal-expand-open">展开明细</span><span className="signal-expand-close">收起明细</span><ChevronDown size={13} aria-hidden="true"/></span></summary>
+              <div className="signal-reason-body">{review.reasons.map(reason=><div className="signal-reason-card" key={reason.code}>
                 <strong>{reason.label}</strong><p>{reason.explanation}</p></div>)}</div>
             </details> : <ReviewReasons reasons={[]}/>}</td>
             <td><span className={`review-conclusion review-conclusion-${review.conclusion === "通过" ? "pass" : review.conclusion === "待补充资料" ? "pending" : "block"}`}>{review.conclusion}</span></td>

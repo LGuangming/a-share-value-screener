@@ -31,6 +31,7 @@ export default async function StrategiesPage() {
       </div></div>
       <div className="table-scroll">
         <table className="results-table strategy-library-table">
+          <colgroup><col style={{width:205}}/><col style={{width:100}}/><col className="strategy-rule-col"/><col className="strategy-data-col"/><col style={{width:132}}/><col style={{width:100}}/><col style={{width:118}}/><col style={{width:90}}/><col style={{width:90}}/><col style={{width:92}}/><col style={{width:76}}/></colgroup>
           <thead><tr><th>策略 / 版本</th><th>分类</th><th>策略规则</th><th>数据要求</th><th>运行状态</th><th>最新候选数</th><th>持仓周期</th><th>回测收益</th><th>最大回撤</th><th>回测</th><th>详情</th></tr></thead>
           <tbody>{strategies.map(s=><tr key={s.id}>
             <td><Link className="stock-name" href={`/strategies/${encodeURIComponent(s.id)}`}>{s.name}</Link>

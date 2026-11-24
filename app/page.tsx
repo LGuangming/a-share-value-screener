@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { AlertTriangle, ArrowRight, ArrowUpRight, BarChart3, CalendarDays, CircleHelp, Database, Info, Layers, ShieldCheck, TrendingUp } from "lucide-react";
+import { AlertTriangle, BarChart3, CalendarDays, Database, Layers, ShieldCheck } from "lucide-react";
 import { Empty } from "@/components/empty";
 import StrategySwitch from "@/components/strategy-switch";
 import StrategySummary from "@/components/strategy-summary";
@@ -74,28 +73,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <h2>筛选结果暂不可用</h2>
           <p className="note">筛选结果读取失败，请稍后重试。</p>
         </section>}
-      <div className="bottom-grid">
-        <div className="panel info-panel"><div className="section-kicker">NET-NET METHODOLOGY</div>
-          <h3>Net-Net筛选步骤</h3>
-          <div className="step"><div>01</div><p><strong>严格资产折价</strong>
-            <span>NCAV = 流动资产 − 全部负债，要求市值覆盖率≥125%。</span></p></div>
-          <div className="step"><div>02</div><p><strong>资产回收压力测试</strong>
-            <span>应收、存货及预付款折价，并考虑少数股东权益。</span></p></div>
-          <div className="step"><div>03</div><p><strong>经营风险与价格信号</strong>
-            <span>结合利润、现金流及均线信号进行观察。</span></p></div>
-          <Link className="inline-link" href="/methodology">了解完整方法 <ArrowRight size={15}/></Link>
-        </div>
-        <div className="panel info-panel"><div className="section-kicker">DATA QUALITY</div>
-          <h3>数据及交易状态</h3>
-          <div className="quality-item"><Info size={17}/><div><strong>历史时点披露</strong>
-            <span>按实际披露日选取财报。</span></div></div>
-          <div className="quality-item"><CircleHelp size={17}/><div><strong>财报缺失</strong>
-            <span>缺项、过期财报分别标记。</span></div></div>
-          <div className="quality-item"><TrendingUp size={17}/><div><strong>价格信号</strong>
-            <span>参考均线、停牌及流动性状态。</span></div></div>
-          <Link className="inline-link" href="/signals">查看交易观察 <ArrowRight size={15}/></Link>
-        </div>
-      </div>
     </StrategySwitch>
   </main>;
 }
