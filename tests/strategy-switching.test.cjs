@@ -178,7 +178,7 @@ test("review table displays as many complete reasons as fit on two lines",()=>{
   assert.match(css,/\.review-table tbody tr\{height:72px;\}/);
   assert.match(css,/\.review-reasons \{/);
   assert.match(css,/gap:2px 4px/);
-  assert.match(css,/\.review-table th:nth-child\(6\)\{width:31%;\}/);
+  assert.match(css,/\.review-table th:nth-child\(6\)\{width:auto;\}/);
 });
 
 test("V2 strategy center uses an accessible research table",()=>{
@@ -228,7 +228,8 @@ test("V2 page controls preserve local filtering and use actual research data",()
   assert.match(screen,/if\(av===null\)/);
   assert.match(stock,/ResearchTabs/);
   assert.match(stock,/stock\.ncav_yuan/);
-  assert.match(backtest,/BacktestConfig/);
+  assert.match(backtest,/BacktestStrategyPanel/);
+  assert.match(read("components/backtest-strategy-panel.tsx"),/<BacktestConfig strategy=\{active\}/);
   assert.match(backtest,/暂无已发布的历史回测绩效/);
   assert.match(config,/draft_not_executable/);
   assert.match(config,/disabled>运行回测/);
@@ -306,4 +307,30 @@ test("V3 polish keeps search height stable, preserves tabs, and uses readable st
   assert.match(signals,/signal-expand-close">收起明细/);
   assert.match(signals,/className="signal-reason-card"/);
   assert.match(css,/\.signal-reason-details\[open\] \.signal-expand-close \{display:inline/);
+});
+
+test("search keeps table height and anchors suggestions below the input",()=>{
+  const screen=read("components/screener-results.tsx"),flyout=read("components/toolbar-flyout.tsx"),css=read("app/theme-orange.css");
+  assert.match(screen,/resultsRegion\.current\?\.getBoundingClientRect\(\)\.height/);
+  assert.match(screen,/minHeight:needle\?searchHeight:undefined/);
+  assert.match(screen,/placement="below"/);
+  assert.match(flyout,/placement==="auto"&&below<180/);
+  assert.match(css,/\.screener-result-region \{overflow-anchor:none/);
+});
+test("review labels retain actual severity and compact typography",()=>{
+  const page=read("app/signals/page.tsx"),reasons=read("components/review-reasons.tsx"),css=read("app/theme-orange.css");
+  assert.match(page,/severity: reason\.severity/);
+  assert.match(reasons,/reason\.severity\.toLowerCase\(\)/);
+  assert.match(css,/\.review-table th:nth-child\(1\)\{width:112px;\}/);
+  assert.match(css,/\.review-table \.signal-reason-card>strong \{[^}]*font-size:12px/);
+});
+test("backtest strategy switches locally and uses strategy-specific draft fields",()=>{
+  const panel=read("components/backtest-strategy-panel.tsx"),config=read("components/backtest-config.tsx");
+  assert.match(panel,/value=\{active.id\} onChange=\{e=>choose\(e.target.value\)\}/);
+  assert.match(panel,/active\.requirements\.map/);
+  assert.match(config,/byStrategy\[strategy.id\]/);
+  assert.match(config,/strategy\.parameters\.map/);
+  assert.match(config,/needsHolding=strategy.id==="oversold_reversion_v0"/);
+  assert.match(config,/Number\(params.ma_fast\)<Number\(params.ma_slow\)/);
+  assert.match(config,/draft_not_executable/);
 });
