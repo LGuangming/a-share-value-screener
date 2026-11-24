@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Filter, Search, Settings2 } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
@@ -82,6 +82,7 @@ export default function ScreenerResults({ rows, initial }: {
   const searchAnchor=useRef<HTMLDivElement>(null);
   const columnAnchor=useRef<HTMLDivElement>(null);
   const needle = q.trim().toLocaleLowerCase();
+  useEffect(()=>{const close=()=>{setColumnMenu(false);setSuggestionsOpen(false);};window.addEventListener("a-share-strategy-change",close);return()=>window.removeEventListener("a-share-strategy-change",close);},[]);
 
 
   const viewLabel = view === "strict" ? "严格候选" : view === "gaps" ? "数据缺口" : "全部预筛";
