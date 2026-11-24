@@ -34,6 +34,7 @@ const post=(path,fields,extra={})=>req(path,{method:"POST",headers:{"content-typ
   await server(true,async()=>{
     const login=await req("/login");assert.equal(login.status,200);
     assert.match(await login.text(),/type="password"/);
+    assert.equal(login.headers.get("referrer-policy"),"same-origin");
     const gate=await req("/research?code=000001.SZ");assert.equal(gate.status,307);
     assert.equal(new URL(gate.headers.get("location"),base).pathname,"/login");
     assert.equal(new URL(gate.headers.get("location"),base).searchParams.get("next"),"/research?code=000001.SZ");
@@ -42,7 +43,12 @@ const post=(path,fields,extra={})=>req(path,{method:"POST",headers:{"content-typ
     const wrong=await post("/login",{password:"wrong",next:"/methodology"});
     assert.equal(wrong.status,401);assert.equal(wrong.headers.get("set-cookie"),null);
     assert.equal((await post("/login",{password},{origin:"https://external.invalid"})).status,403);
-    const correct=await post("/login",{password,next:"/methodology"});
+    assert.equal((await post("/login",{password},{origin:"null"})).status,403);
+    assert.equal((await post("/login",{password},{origin:base,"sec-fetch-site":"cross-site"})).status,403);
+    assert.equal((await post("/login",{password},{origin:base,"sec-fetch-site":"same-site"})).status,403);
+    const opaque=await post("/login",{password:"wrong"},{origin:"null","sec-fetch-site":"same-origin"});
+    assert.equal(opaque.status,401);
+    const correct=await post("/login",{password,next:"/methodology"},{origin:"https://stock.guangming.blog","sec-fetch-site":"same-origin"});
     assert.equal(correct.status,303);
     assert.equal(new URL(correct.headers.get("location"),base).pathname,"/methodology");
     const setCookie=correct.headers.get("set-cookie");assert.ok(setCookie);
@@ -51,7 +57,7 @@ const post=(path,fields,extra={})=>req(path,{method:"POST",headers:{"content-typ
     const allowed=await req("/api/research/search",{headers:{cookie}});assert.equal(allowed.status,200);
     assert.match(allowed.headers.get("cache-control")||"",/no-store/);
     assert.equal((await req("/methodology",{headers:{cookie}})).status,200);
-    const logout=await post("/api/access/logout",{}, {cookie});
+    const logout=await post("/api/access/logout",{}, {cookie,origin:"null","sec-fetch-site":"same-origin"});
     assert.equal(logout.status,303);assert.match(logout.headers.get("set-cookie")||"",/Max-Age=0/i);
     assert.equal((await req("/api/research/search")).status,401);
   });

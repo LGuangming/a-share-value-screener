@@ -41,12 +41,24 @@ export function safeReturnPath(value:string|null|undefined){
   }catch{return "/";}
 }
 export function sameOriginPost(request:Request){
-  const origin=request.headers.get("origin");
-  if(!origin)return false;
+  if(request.method!=="POST")return false;
+  const site=request.headers.get("sec-fetch-site"),origin=request.headers.get("origin");
+  // Fetch Metadata is set by the browser, not page JavaScript.
+  // Reject cross-origin submissions even if they originate on a sibling subdomain.
+  if(site!==null&&site!=="same-origin")return false;
+  // Some browsers omit Origin or send null under strict referrer policies.
+  // Only accept that case with an affirmative browser same-origin signal.
+  if(!origin||origin==="null")return site==="same-origin";
   try{
-    const u=new URL(origin),host=request.headers.get("host")??new URL(request.url).host;
-    if(u.host!==host||u.username||u.password||u.pathname!=="/"||u.search||u.hash)return false;
-    return u.protocol==="https:"||(u.protocol==="http:"&&(process.env.NODE_ENV!=="production"||u.hostname==="localhost"||u.hostname==="127.0.0.1"));
+    const u=new URL(origin);
+    if(u.username||u.password||u.pathname!=="/"||u.search||u.hash)return false;
+    if(u.protocol!=="https:"&&!(u.protocol==="http:"&&(process.env.NODE_ENV!=="production"||u.hostname==="localhost"||u.hostname==="127.0.0.1")))return false;
+    // A reverse proxy can change the Host visible to the application.
+    // The browser's same-origin signal describes the actual public destination.
+    if(site==="same-origin")return true;
+    // Older browsers and HTTP clients must provide an exact matching Origin.
+    const host=request.headers.get("host")??new URL(request.url).host;
+    return u.host.toLowerCase()===host.toLowerCase();
   }catch{return false;}
 }
-export const PRIVATE_HEADERS={"Cache-Control":"private, no-store, max-age=0","Pragma":"no-cache","X-Robots-Tag":"noindex, nofollow, noarchive","Referrer-Policy":"no-referrer"};
+export const PRIVATE_HEADERS={"Cache-Control":"private, no-store, max-age=0","Pragma":"no-cache","X-Robots-Tag":"noindex, nofollow, noarchive","Referrer-Policy":"same-origin"};
