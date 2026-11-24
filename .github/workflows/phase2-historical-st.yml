@@ -1,4 +1,4 @@
-name: A-Share Historical ST Backfill
+name: A-Share Historical ST - Offline Merge
 
 on:
   workflow_dispatch:
@@ -13,20 +13,12 @@ on:
         required: true
         default: '2020'
         type: string
-      probe_only:
-        description: Check both providers without collecting full history
-        type: boolean
-        default: false
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/historical-st-start-20261124.txt'
 
 permissions:
   contents: read
 
 concurrency:
-  group: a-share-backtest-history
+  group: a-share-historical-st-merge
   cancel-in-progress: false
 
 jobs:
@@ -35,8 +27,6 @@ jobs:
     timeout-minutes: 350
     env:
       PYTHONPATH: backend
-      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-      TUSHARE_API_SOURCE: official
       NEON_STORAGE_ENDPOINT: ${{ secrets.NEON_STORAGE_ENDPOINT }}
       NEON_STORAGE_BUCKET: ${{ vars.NEON_STORAGE_BUCKET }}
       NEON_STORAGE_ACCESS_KEY_ID: ${{ secrets.NEON_STORAGE_ACCESS_KEY_ID }}
@@ -45,16 +35,15 @@ jobs:
       NEON_STORAGE_PRIVATE_CONFIRMED: ${{ vars.NEON_STORAGE_PRIVATE_CONFIRMED || 'false' }}
       START_YEAR: ${{ inputs.start_year || '2025' }}
       END_YEAR: ${{ inputs.end_year || '2020' }}
-      PROBE_ONLY: ${{ inputs.probe_only || false }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install private archive and BaoStock dependencies
+      - name: Install private archive dependencies
         run: |
           pip install -r backend/requirements.txt
-          pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2' 'baostock>=0.8.9,<0.9'
+          pip install 'duckdb>=1.3,<2' 'boto3>=1.35,<2'
       - name: Verify ST reconciliation rules
         run: |
           python - <<'PY'
@@ -77,10 +66,9 @@ jobs:
           assert name_evidence(conflict,'2020-05-15')[3] is True
           print('ST_RULE_TESTS passed')
           PY
-      - name: Collect and verify dual-source ST archive
+      - name: Merge verified source archives without provider requests
         shell: bash
         run: |
           set -euo pipefail
-          args=(--start-year "$START_YEAR" --end-year "$END_YEAR")
-          if [[ "$PROBE_ONLY" == "true" ]]; then args+=(--probe-only); fi
+          args=(--source merged --start-year "$START_YEAR" --end-year "$END_YEAR")
           python -m value_screener.phase2_historical_st "${args[@]}"
