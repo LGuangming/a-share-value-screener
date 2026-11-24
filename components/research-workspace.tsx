@@ -6,17 +6,17 @@ import MarketChart from "@/components/market-chart";
 import {useResearchDetail,useStockSearch} from "@/components/research-data";
 import {WatchButton,useWatchlist} from "@/components/workspace-preferences";
 import {fixed,moneyCny,pct,signalLabel,stateLabel} from "@/lib/format";
-import {evaluateFundamentalReview,severityLabel,priorityLabel} from "@/lib/review";
 import type {WorkspaceStock,WorkspaceDetail} from "@/lib/workspace-types";
 
 export function ResearchMetrics({detail,hits}:{detail:WorkspaceDetail;hits?:{id:string;name:string}[]}){
   const s=detail.stock;
-  const review=s?evaluateFundamentalReview(s):null;
+  const o=detail.overview,m=o.market,b=o.balance,i=o.income,c=o.cashflow;
   return <div className="workspace-metrics">
     <div className="workspace-security"><div><strong>{detail.identity.name}</strong><small>{detail.identity.ts_code} · {detail.identity.industry||"—"}</small></div><WatchButton stock={detail.identity}/></div>
-    <div className="workspace-price">{fixed(detail.prices.at(-1)?.close??s?.price??null)}<small>元 · {detail.prices.at(-1)?.day??s?.trade_date??"—"}</small></div>
+    <div className="workspace-price">{fixed(detail.prices.at(-1)?.close??m?.close??null)}<small>元 · {detail.prices.at(-1)?.day??m?.day??"—"}</small></div>
     {hits!==undefined&&<><h3>命中策略</h3><div className="summary-hit-list">{hits.length?hits.map(h=><span key={h.id}>{h.name}</span>):<span className="muted">当前候选池未命中</span>}</div></>}
-    {s?<><h3>估值与财务</h3><dl className="workspace-dl">{[["总市值",moneyCny(s.market_cap_yuan)],["市净率",fixed(s.pb)],["NCAV / 市值",pct(s.ncav_coverage,1)],["压力覆盖率",pct(s.stress_coverage,1)],["资产负债率",pct(s.liability_ratio,1)],["经营现金流",moneyCny(s.operating_cf_yuan)],["净利润",moneyCny(s.net_profit_yuan)],["披露日期",s.disclosed_at||"—"]].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl><h3>交易观察</h3><p>{signalLabel(s.signal)} · {stateLabel(s.status)}</p>{review&&<><h3>风险复核</h3><p>{severityLabel[review.severity]} · {priorityLabel[review.priority]}</p>{review.reasons.slice(0,5).map(r=><details key={r.code}><summary>{r.label}</summary><p>{r.explanation}</p></details>)}</>}</>:<p className="muted">暂无已发布的基本面研究记录。</p>}
+    <h3>通用估值与财务</h3><dl className="workspace-dl">{[["总市值",moneyCny(m?.marketCap??null)],["市净率",fixed(m?.pb??null)],["换手率",pct(m?.turnover??null,2)],["估值日期",m?.day??"—"],["资产负债率",pct(b?.leverage??null,1)],["营业收入",moneyCny(i?.revenue??null)],["归母净利润",moneyCny(i?.parentProfit??null)],["经营现金流",moneyCny(c?.operatingCash??null)],["利润表报告期",i?.period??"—"],["现金流报告期",c?.period??"—"]].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+    {s&&<details><summary>Net-Net 策略摘要</summary><dl className="workspace-dl">{[["筛选日期",s.trade_date],["NCAV / 市值",pct(s.ncav_coverage,1)],["压力覆盖率",pct(s.stress_coverage,1)],["筛选状态",stateLabel(s.status)],["交易观察",signalLabel(s.signal)]].map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl></details>}
     <Link className="inline-link" href={"/stocks/"+encodeURIComponent(detail.identity.ts_code)}>完整个股研究 <ArrowUpRight size={13}/></Link>
   </div>;
 }
@@ -43,6 +43,6 @@ export default function ResearchWorkspace({candidates,initialCode,day}:{candidat
       <section className="workspace-main">{loading?<div className="workspace-loading" role="status">正在读取个股行情…</div>:error?<div className="workspace-loading" role="alert">{error}</div>:detail?<><div className="workspace-chart-title"><strong>{detail.identity.name} <small>{detail.identity.ts_code}</small></strong><Link className="inline-link" href={"/stocks/"+encodeURIComponent(detail.identity.ts_code)}>个股详情 <ArrowUpRight size={14}/></Link></div><MarketChart key={detail.identity.ts_code} code={detail.identity.ts_code} name={detail.identity.name} prices={detail.prices}/></>:<div className="workspace-loading">选择候选股、自选股或搜索证券</div>}</section>
       {right&&<aside className="workspace-side workspace-right">{detail?<ResearchMetrics detail={detail} hits={hits}/>:<p className="muted">暂无研究摘要</p>}</aside>}
     </div>
-    <section className="workspace-bottom"><button type="button" aria-expanded={bottom} onClick={()=>setBottom(v=>!v)}>历史交易观察 {bottom?"−":"+"}</button>{bottom&&<div className="table-scroll"><table className="results-table"><thead><tr><th>交易日</th><th>收盘价</th><th>NCAV覆盖率</th><th>信号</th></tr></thead><tbody>{detail?.recent.map(r=><tr key={r.trade_date}><td>{r.trade_date}</td><td>{fixed(r.price)}</td><td>{pct(r.ncav_coverage,1)}</td><td>{signalLabel(r.signal)}</td></tr>)}</tbody></table>{!detail?.recent.length&&<p className="muted">暂无观察记录</p>}</div>}</section>
+    <section className="workspace-bottom"><button type="button" aria-expanded={bottom} onClick={()=>setBottom(v=>!v)}>Net-Net 历史观察 {bottom?"−":"+"}</button>{bottom&&<div className="table-scroll"><table className="results-table"><thead><tr><th>交易日</th><th>收盘价</th><th>NCAV覆盖率</th><th>信号</th></tr></thead><tbody>{detail?.recent.map(r=><tr key={r.trade_date}><td>{r.trade_date}</td><td>{fixed(r.price)}</td><td>{pct(r.ncav_coverage,1)}</td><td>{signalLabel(r.signal)}</td></tr>)}</tbody></table>{!detail?.recent.length&&<p className="muted">暂无观察记录</p>}</div>}</section>
   </div>;
 }
