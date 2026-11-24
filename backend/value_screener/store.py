@@ -212,7 +212,7 @@ class Store:
             row = conn.execute("""
                 SELECT md5(coalesce(string_agg(
                     p.ts_code || ':' || p.raw::text || ':' || s.name || ':' ||
-                    coalesce(s.market, '') || ':' || s.is_st::text,
+                    coalesce(s.market, '') || ':' || coalesce(s.industry, '') || ':' || s.is_st::text,
                     '|' ORDER BY p.ts_code
                 ), '')) AS fingerprint
                 FROM daily_prices p
@@ -250,8 +250,8 @@ class Store:
                     LIMIT 1
                 ) f ON true
                 WHERE p.trade_date=%s
-                  AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
-                  AND s.market NOT IN ('科创板', '创业板', '北交所')
+                  
+                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
             """, (quote_day,)).fetchone()
         return row["fingerprint"]
 
@@ -266,7 +266,7 @@ class Store:
                 "quoted_stocks": int(row["quoted_stocks"])}
 
     def archive_financial_targets(self, quote_day: date, asof: date, cutoff: date) -> dict:
-        """Current non-ST main-board prefilter; include missing or older periods."""
+        """All quoted non-ST main-board companies; include missing or older periods."""
         with self.connect() as conn:
             rows=conn.execute("""
                 SELECT p.ts_code,
@@ -276,8 +276,8 @@ class Store:
                 FROM daily_prices p JOIN stocks s USING(ts_code)
                 LEFT JOIN financial_reports r ON r.ts_code=p.ts_code
                   AND r.disclosed_at<=%s AND r.end_date<=%s AND r.report_type='1'
-                WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
-                  AND NOT s.is_st AND s.market NOT IN ('科创板','创业板','北交所')
+                WHERE p.trade_date=%s 
+                  AND NOT s.is_st AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
                   AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                 GROUP BY p.ts_code
                 HAVING COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='balancesheet'),DATE '1900-01-01')<%s
@@ -287,28 +287,35 @@ class Store:
         return {r["ts_code"]:{k:r[k] for k in ("balancesheet","income","cashflow")} for r in rows}
 
     def insert_archive_financials(self, items, asof: date) -> tuple[int,int]:
-        """Insert only new periods, never overwrite current live reports."""
+        """Insert verified new periods in bounded batches, never overwrite live data."""
+        payload=[]
+        for code,kind,end,disclosed,row,provenance in items:
+            if row.get("ts_code")!=code or str(row.get("report_type"))!="1" or kind not in ("balancesheet","income","cashflow") or not end<=disclosed<=asof:
+                raise RuntimeError("Invalid archived financial import row")
+            metrics={k:v for k,v in row.items() if k not in {"ts_code","ann_date","f_ann_date","end_date","report_type","comp_type","update_flag"}}
+            payload.append({"ts_code":code,"kind":kind,"end_date":end.isoformat(),
+                            "disclosed_at":disclosed.isoformat(),"metrics":metrics,
+                            "raw":{**row,"_archive_import":provenance}})
         inserted=0;companies=set()
+        if not payload:
+            return inserted,0
         with self.connect() as conn:
             conn.execute("SET LOCAL lock_timeout='15s'")
             conn.execute("LOCK TABLE financial_reports IN SHARE ROW EXCLUSIVE MODE")
-            for code,kind,end,disclosed,row,provenance in items:
-                if row.get("ts_code")!=code or str(row.get("report_type"))!="1" or kind not in ("balancesheet","income","cashflow") or not end<=disclosed<=asof:
-                    raise RuntimeError("Invalid archived financial import row")
-                metrics={k:v for k,v in row.items() if k not in {"ts_code","ann_date","f_ann_date","end_date","report_type","comp_type","update_flag"}}
-                raw={**row,"_archive_import":provenance}
+            for offset in range(0,len(payload),250):
                 result=conn.execute("""
                     INSERT INTO financial_reports
                       (ts_code,kind,end_date,disclosed_at,report_type,metrics,raw)
-                    SELECT %s,%s,%s,%s,'1',%s,%s
+                    SELECT x.ts_code,x.kind,x.end_date,x.disclosed_at,'1',x.metrics,x.raw
+                    FROM jsonb_to_recordset(%s::jsonb) AS x(ts_code text,kind text,end_date date,disclosed_at date,metrics jsonb,raw jsonb)
                     WHERE NOT EXISTS (
-                        SELECT 1 FROM financial_reports WHERE ts_code=%s AND kind=%s
-                          AND report_type='1' AND end_date >= %s AND disclosed_at<=%s
+                        SELECT 1 FROM financial_reports f WHERE f.ts_code=x.ts_code AND f.kind=x.kind
+                          AND f.report_type='1' AND f.end_date >= x.end_date AND f.disclosed_at<=%s
                     )
                     ON CONFLICT (ts_code,kind,end_date,disclosed_at,report_type) DO NOTHING
-                """,(code,kind,end,disclosed,Jsonb(metrics),Jsonb(raw),code,kind,end,asof))
-                if result.rowcount:
-                    inserted+=1;companies.add(code)
+                    RETURNING ts_code
+                """,(Jsonb(payload[offset:offset+250]),asof)).fetchall()
+                inserted+=len(result);companies.update(row["ts_code"] for row in result)
         return inserted,len(companies)
 
     def financial_backlog(self, quote_day: date, asof: date, budget: int) -> dict:
@@ -329,9 +336,9 @@ class Store:
                 LEFT JOIN financial_reports r
                   ON r.ts_code=p.ts_code AND r.disclosed_at<=%s AND r.end_date<=%s
                 WHERE p.trade_date=%s
-                  AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
+                  
                   AND NOT s.is_st
-                  AND s.market NOT IN ('科创板','创业板','北交所')
+                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
                   AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                 GROUP BY p.ts_code, p.pb, p.market_cap_yuan, log.attempted_at
                 HAVING MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') IS NULL
@@ -370,9 +377,8 @@ class Store:
                 LEFT JOIN financial_reports r
                   ON r.ts_code=e.ts_code AND r.end_date=e.period
                  AND r.disclosed_at<=%s AND r.report_type='1'
-                WHERE p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
-                  AND NOT s.is_st
-                  AND s.market NOT IN ('科创板','创业板','北交所')
+                WHERE NOT s.is_st
+                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
                   AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                   AND (log.attempted_at IS NULL OR
                        log.attempted_at < now()-interval '6 hours')
@@ -515,8 +521,8 @@ class Store:
                      AND f.disclosed_at<p.trade_date AND f.end_date<=p.trade_date
                    ORDER BY f.end_date DESC,f.disclosed_at DESC LIMIT 1
                 ) c ON true
-                WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
-                  AND s.market NOT IN ('科创板','创业板','北交所')
+                WHERE p.trade_date=%s 
+                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
                 ORDER BY p.market_cap_yuan ASC
             """, (day,)).fetchall()
         return rows

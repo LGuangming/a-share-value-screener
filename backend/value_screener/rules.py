@@ -21,8 +21,8 @@ def netnet_financial_industry(industry: Any) -> bool:
 
 @dataclass(frozen=True)
 class ScreenConfig:
-    max_price: float = 10.0
-    max_pb: float = 1.2  # Loose pre-filter to avoid missing Net-Net stocks.
+    max_price: float | None = 10.0
+    max_pb: float | None = 1.2  # Optional display/research bounds.
     min_ncav_coverage: float = 1.25
     min_stress_coverage: float = 1.0
     max_liability_ratio: float = 0.60
@@ -68,7 +68,7 @@ def assess(stock: dict, quote: dict, balance: dict | None,
     if price is None or price <= 0 or market_cap is None or market_cap <= 0:
         flags.append("INVALID_MARKET_DATA")
         return result
-    if price > cfg.max_price:
+    if cfg.max_price is not None and price > cfg.max_price:
         result["status"] = "PRICE_EXCLUDED"
         result["assessment"] = "价格高于筛选上限，仅保留行情记录。"
         return result
@@ -76,7 +76,7 @@ def assess(stock: dict, quote: dict, balance: dict | None,
         result["status"] = "RISK_EXCLUDED"
         result["assessment"] = "股票名称带ST风险标记，按策略规则排除。"
         return result
-    if pb is not None and pb > cfg.max_pb:
+    if cfg.max_pb is not None and pb is not None and pb > cfg.max_pb:
         result["status"] = "PB_EXCLUDED"
         result["assessment"] = "PB超过当前初筛上限。"
         return result

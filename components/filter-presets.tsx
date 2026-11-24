@@ -2,13 +2,13 @@
 import {useEffect,useRef,useState} from "react";
 import {Bookmark,Trash2} from "lucide-react";
 import ToolbarFlyout from "@/components/toolbar-flyout";
-export type FilterPreset={view:string;maxPrice:number;minCoverage:number;maxPb:number;order:string;ascending:boolean;industry:string;watchOnly:boolean};
+export type FilterPreset={view:string;maxPrice:number|null;minCoverage:number;maxPb:number|null;includeMissingPb?:boolean;order:string;ascending:boolean;industry:string;watchOnly:boolean};
 type Saved={name:string;filter:FilterPreset};
 const KEY="value-radar-netnet-presets-v1";
 const valid=(p:unknown):p is FilterPreset=>{
   if(!p||typeof p!=="object")return false;
   const v=p as FilterPreset;
-  return ["all","strict","gaps"].includes(v.view)&&[5,8,10].includes(v.maxPrice)&&[1.25,1.5,1.75].includes(v.minCoverage)&&[0.5,0.7,1,1.2].includes(v.maxPb)&&["price","market_cap_yuan","ncav_coverage","stress_coverage","pb"].includes(v.order)&&typeof v.ascending==="boolean"&&typeof v.industry==="string"&&typeof v.watchOnly==="boolean";
+  return ["all","strict","gaps"].includes(v.view)&&(v.maxPrice===null||(typeof v.maxPrice==="number"&&Number.isFinite(v.maxPrice)&&v.maxPrice>=0))&&[1.25,1.5,1.75].includes(v.minCoverage)&&(v.maxPb===null||(typeof v.maxPb==="number"&&Number.isFinite(v.maxPb)))&&(v.includeMissingPb===undefined||typeof v.includeMissingPb==="boolean")&&["price","market_cap_yuan","ncav_coverage","stress_coverage","pb"].includes(v.order)&&typeof v.ascending==="boolean"&&typeof v.industry==="string"&&typeof v.watchOnly==="boolean";
 };
 function read():Saved[]{try{const raw=JSON.parse(localStorage.getItem(KEY)||"[]");return Array.isArray(raw)?raw.filter((x):x is Saved=>x&&typeof x.name==="string"&&x.name.length>0&&x.name.length<=30&&valid(x.filter)).slice(0,20):[];}catch{return [];}}
 export default function FilterPresets({current,apply}:{current:FilterPreset;apply:(p:FilterPreset)=>void}){

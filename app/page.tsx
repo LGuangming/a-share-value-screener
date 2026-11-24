@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, BarChart3, CalendarDays, Database, Layers, ShieldCheck } from "lucide-react";
+import { CalendarDays, Database } from "lucide-react";
 import { Empty } from "@/components/empty";
 import StrategySwitch from "@/components/strategy-switch";
 import StrategySummary from "@/components/strategy-summary";
@@ -11,7 +11,7 @@ import { latestSnapshot, screeningRowsStatus } from "@/lib/data";
 export const dynamic = "force-dynamic";
 
 type Query = { strategy?: string; q?: string; view?: string; order?: string;
-  max_price?: string; min_coverage?: string; max_pb?: string };
+  max_price?: string; min_coverage?: string; max_pb?: string; include_missing_pb?: string };
 
 export default async function Dashboard({ searchParams }: { searchParams: Promise<Query> }) {
   const query = await searchParams;
@@ -26,10 +26,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     const result = strategy.id === "netnet_v1" ? scan : await screeningRowsStatus(snapshot.trade_date,strategy.id);
     return {id:strategy.id,name:strategy.name,state:result.error?"error":strategy.id==="netnet_v1"||result.rows.length?"ready":"unpublished",rows:result.rows.filter(r=>r.is_candidate).map(({ts_code,name,industry,price,market_cap_yuan,is_candidate})=>({ts_code,name,industry,price,market_cap_yuan,is_candidate}))};
   }));
-  const qualified = rows.filter(r => r.is_candidate);
-  const stressQualified = qualified.filter(r => r.stress_coverage !== null && r.stress_coverage >= 1);
-  const gaps = rows.filter(r => r.status === "DATA_GAP" || r.status === "STALE_FINANCIALS");
-  const ignored = rows.filter(r => r.status === "FINANCIAL_IGNORED");
   // Minimize client-side hydration payload: the table only needs these fields.
   const tableRows: ScreenTableRow[] = rows.map(r => ({
     ts_code: r.ts_code, name: r.name, industry: r.industry, price: r.price, pb: r.pb,
@@ -45,20 +41,6 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     </div><div className="history-page-actions"><Link className="tool-button" href="/candidate-history">历史候选变化</Link><span className="date-tag"><CalendarDays size={17}/>{snapshot?.trade_date ?? "等待数据发布"}</span></div></div>
 
     <StrategySwitch mode="screen" requestedId={query.strategy} summary={<StrategySummary groups={groups} day={snapshot?.trade_date??null}/>}>
-      <div className="stats-grid">
-        <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span>
-          <strong>{snapshot ? (snapshot.metrics.pre_screened ?? rows.length).toLocaleString("zh-CN") : "—"}</strong>
-          <small>低价及PB预筛后的样本</small></div>
-        <div className="stat-card"><span><ShieldCheck size={16}/>满足NCAV门槛</span>
-          <strong className="stat-green">{snapshot ? qualified.length.toLocaleString("zh-CN") : "—"}</strong>
-          <small>覆盖率≥125%且未被排除</small></div>
-        <div className="stat-card"><span><BarChart3 size={16}/>压力测试通过</span>
-          <strong>{snapshot ? stressQualified.length.toLocaleString("zh-CN") : "—"}</strong>
-          <small>调整后覆盖率≥100%</small></div>
-        <div className="stat-card"><span><AlertTriangle size={16}/>财报待核验</span>
-          <strong className="stat-orange">{snapshot ? gaps.length.toLocaleString("zh-CN") : "—"}</strong>
-          <small>缺失及过期报告</small>{snapshot&&!scan.error&&<small>金融股忽略 {ignored.length.toLocaleString("zh-CN")} 只（不适用NCAV，非财报短缺）</small>}</div>
-      </div>
       {!snapshot && <div className="panel notice-panel">
         <Empty title="尚未取得每日筛选数据" detail={error || "请检查数据库和每日扫描任务。"} type="warning"/>
       </div>}
@@ -70,7 +52,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {scan.error && <div className="panel notice-panel">
         <Empty title="Net-Net股票结果暂时无法读取" detail={scan.error} type="warning"/>
       </div>}
-      {snapshot && !scan.error ? <ScreenerResults rows={tableRows} initial={query}/>
+      {snapshot && !scan.error ? <ScreenerResults rows={tableRows} initial={query} fullScope={snapshot.metrics.screen_scope==="all_sh_sz_mainboard" && snapshot.metrics.rows_published===rows.length}/>
         : <section className="panel"><div className="section-kicker">NET-NET SCREEN RESULTS</div>
           <h2>筛选结果暂不可用</h2>
           <p className="note">筛选结果读取失败，请稍后重试。</p>

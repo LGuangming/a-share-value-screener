@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Filter, Search, Settings2, ArrowUp, ArrowDown } from "lucide-react";
+import { AlertTriangle, BarChart3, Layers, ShieldCheck, ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Filter, Search, Settings2, ArrowUp, ArrowDown } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
 import { fixed, moneyCny, pct, signalLabel, stateLabel } from "@/lib/format";
 import { Empty } from "@/components/empty";
@@ -12,6 +12,7 @@ import {MiniTrend,useMiniTrends} from "@/components/mini-trends";
 import {PreviewButton} from "@/components/stock-preview";
 import {useCompareSelection,CompareCheckbox,CompareToolbar} from "@/components/compare-selection";
 import FilterPresets,{type FilterPreset} from "@/components/filter-presets";
+import {initialBound,parseBound,matchesBounds,screenCounts} from "@/lib/screener-filters";
 
 export type ScreenTableRow = Pick<ScreenerRow,
   "ts_code" | "name" | "industry" | "price" | "pb" | "market_cap_yuan" |
@@ -19,7 +20,7 @@ export type ScreenTableRow = Pick<ScreenerRow,
 >;
 
 type Filters = { q?: string; view?: string; order?: string; max_price?: string;
-  min_coverage?: string; max_pb?: string };
+  min_coverage?: string; max_pb?: string; include_missing_pb?: string };
 
 const numericColumns = [
   {key:"price", label:"收盘价"},
@@ -64,18 +65,19 @@ function matchRank(row: ScreenTableRow, needle: string): number | null {
   return null;
 }
 
-export default function ScreenerResults({ rows, initial }: {
-  rows: ScreenTableRow[]; initial: Filters;
+export default function ScreenerResults({ rows, initial, fullScope }: {
+  rows: ScreenTableRow[]; initial: Filters; fullScope: boolean;
 }) {
   const [view, setView] = useState(["all","strict","gaps"].includes(initial.view ?? "")
     ? initial.view! : "strict");
   const [q, setQ] = useState(initial.q ?? "");
-  const [maxPrice, setMaxPrice] = useState([5,8,10].includes(Number(initial.max_price))
-    ? Number(initial.max_price) : 10);
+  const [priceInput,setPriceInput]=useState(()=>initialBound(initial.max_price,10));
+  const maxPrice=parseBound(priceInput);
   const [minCoverage, setMinCoverage] = useState([1.25,1.5,1.75].includes(Number(initial.min_coverage))
     ? Number(initial.min_coverage) : 1.25);
-  const [maxPb, setMaxPb] = useState([0.5,0.7,1,1.2].includes(Number(initial.max_pb))
-    ? Number(initial.max_pb) : 1.2);
+  const [pbInput,setPbInput]=useState(()=>initialBound(initial.max_pb,1.2,true));
+  const maxPb=parseBound(pbInput,true);
+  const [includeMissingPb,setIncludeMissingPb]=useState(initial.include_missing_pb!=="false");
   const [order, setOrder] = useState<NumericKey>(initial.order === "stress" ? "stress_coverage" : "ncav_coverage");
   const [ascending, setAscending] = useState(false);
   const [columns, setColumns] = useState<ColumnKey[]>(optionalColumns.map(c=>c.key));
@@ -113,11 +115,13 @@ export default function ScreenerResults({ rows, initial }: {
   // Scope each search to the exact row set that the active tab can show.
   // Apply price/PB/NCAV controls *before* searching; search never expands
   // into another tab or silently bypasses the selected thresholds.
-  const tabRows = useMemo(() => rows.filter(row => {
+  const baseRows = useMemo(() => rows.filter(row => {
     if (industry&&row.industry!==industry) return false;
     if (watchOnly&&!watchedCodes.has(row.ts_code)) return false;
-    if (row.price !== null && row.price > maxPrice) return false;
-    if (row.pb !== null && row.pb > maxPb) return false;
+    return matchesBounds(row,{maxPrice,maxPb,includeMissingPb});
+  }),[rows,maxPrice,maxPb,includeMissingPb,industry,watchOnly,watchedCodes]);
+  const counts=useMemo(()=>screenCounts(baseRows,minCoverage),[baseRows,minCoverage]);
+  const tabRows = useMemo(() => baseRows.filter(row => {
     if (view === "strict") return row.is_candidate && row.ncav_coverage !== null
       && row.ncav_coverage >= minCoverage;
     if (view === "gaps") return row.status === "DATA_GAP" || row.status === "STALE_FINANCIALS";
@@ -127,7 +131,7 @@ export default function ScreenerResults({ rows, initial }: {
     if(av===null) return bv===null ? 0 : 1;
     if(bv===null) return -1;
     return ascending ? av-bv : bv-av;
-  }), [rows, view, order, ascending, maxPrice, maxPb, minCoverage,industry,watchOnly,watchedCodes]);
+  }), [baseRows, view, order, ascending, minCoverage]);
 
   const matches = useMemo(() => {
     if (!needle) return [];
@@ -143,7 +147,7 @@ export default function ScreenerResults({ rows, initial }: {
   const trend=useMiniTrends(trendCodes,mini);
   const suggestions = matches.slice(0, 8);
   const shownColumns=columns.flatMap(k=>optionalColumns.filter(c=>c.key===k));
-  function applyPreset(p:FilterPreset){setView(p.view);setMaxPrice(p.maxPrice);setMinCoverage(p.minCoverage);setMaxPb(p.maxPb);setOrder(p.order as NumericKey);setAscending(p.ascending);setIndustry(p.industry);setWatchOnly(p.watchOnly);setQ("");setSearchHeight(undefined);setVisibleCount(100);setSuggestionsOpen(false);clear();}
+  function applyPreset(p:FilterPreset){setView(p.view);setPriceInput(p.maxPrice===null?"":String(p.maxPrice));setMinCoverage(p.minCoverage);setPbInput(p.maxPb===null?"":String(p.maxPb));setIncludeMissingPb(p.includeMissingPb!==false);setOrder(p.order as NumericKey);setAscending(p.ascending);setIndustry(p.industry);setWatchOnly(p.watchOnly);setQ("");setSearchHeight(undefined);setVisibleCount(100);setSuggestionsOpen(false);clear();}
   function sortBy(key:NumericKey) {
     if(order===key) setAscending(v=>!v);
     else {setOrder(key);setAscending(false);}
@@ -201,7 +205,15 @@ export default function ScreenerResults({ rows, initial }: {
     }
   }
 
-  return <section className="panel market-panel">
+  return <>
+    <div className="stats-grid" aria-live="polite">
+      <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span><strong>{counts.total.toLocaleString("zh-CN")}</strong><small>当前价格、PB及行业条件</small></div>
+      <div className="stat-card"><span><ShieldCheck size={16}/>满足NCAV门槛</span><strong className="stat-green">{counts.candidates.toLocaleString("zh-CN")}</strong><small>覆盖率≥{minCoverage*100}%且未被排除</small></div>
+      <div className="stat-card"><span><BarChart3 size={16}/>压力测试通过</span><strong>{counts.stress.toLocaleString("zh-CN")}</strong><small>调整后覆盖率≥100%</small></div>
+      <div className="stat-card"><span><AlertTriangle size={16}/>财报待核验</span><strong className="stat-orange">{counts.gaps.toLocaleString("zh-CN")}</strong><small>缺失及过期报告</small><small style={{display:"block"}}>金融股忽略 {counts.ignored.toLocaleString("zh-CN")} 只（不适用NCAV，非财报短缺）</small></div>
+    </div>
+    {!fullScope&&<p className="source-note" role="status">当前为旧预筛快照或全量数据未就绪，放宽条件可能无法覆盖全部主板股票。</p>}
+    <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
       <h2>Net-Net筛选结果 <span className="count-badge" aria-live="polite">{filtered.length}</span></h2>
       <p>共 {filtered.length.toLocaleString("zh-CN")} 只 · 当前显示 {Math.min(visibleCount,filtered.length).toLocaleString("zh-CN")} 只<span className="filter-local-hint" style={{marginInlineStart:10,whiteSpace:"nowrap",verticalAlign:"middle"}}><Filter size={13}/> 即时筛选</span></p>
@@ -247,24 +259,18 @@ export default function ScreenerResults({ rows, initial }: {
             </button>) : <p className="stock-suggestion-empty">当前选项卡没有匹配股票，请缩短搜索词。</p>}
           </div></ToolbarFlyout>}
         </div>
-        <select aria-label="最高价格" value={maxPrice}
-          onChange={e=>setFilter("max_price",e.target.value,()=>setMaxPrice(Number(e.target.value)))}>
-          <option value={5}>股价≤5元</option><option value={8}>股价≤8元</option>
-          <option value={10}>股价≤10元</option>
-        </select>
+        <label className="screen-bound"><span>股价≤</span><input aria-label="最高价格" type="number" min="0" step="any" placeholder="不限" value={priceInput} onChange={e=>{const v=e.target.value;if(v===""||parseBound(v)!==null)setFilter("max_price",v,()=>setPriceInput(v));}}/><span>元</span></label>
         <select aria-label="NCAV最低覆盖率" value={minCoverage}
           onChange={e=>setFilter("min_coverage",e.target.value,()=>setMinCoverage(Number(e.target.value)))}>
           <option value={1.25}>NCAV≥125%</option><option value={1.5}>NCAV≥150%</option>
           <option value={1.75}>NCAV≥175%</option>
         </select>
-        <select aria-label="市净率上限" value={maxPb}
-          onChange={e=>setFilter("max_pb",e.target.value,()=>setMaxPb(Number(e.target.value)))}>
-          <option value={0.5}>PB≤0.5</option><option value={0.7}>PB≤0.7</option>
-          <option value={1}>PB≤1.0</option><option value={1.2}>PB≤1.2</option>
-        </select>
+        <label className="screen-bound"><span>PB≤</span><input aria-label="市净率上限" type="number" step="any" placeholder="不限" value={pbInput} onChange={e=>{const v=e.target.value;if(v===""||parseBound(v,true)!==null)setFilter("max_pb",v,()=>setPbInput(v));}}/></label>
+        <button type="button" className="tool-button" onClick={()=>{setPriceInput("");setPbInput("");setVisibleCount(100);}}>不限股价/PB</button>
+        <button type="button" className="tool-button" onClick={()=>{setPriceInput("10");setPbInput("1.2");setIncludeMissingPb(true);setMinCoverage(1.25);setVisibleCount(100);}}>恢复默认</button>
         <div className="column-control" ref={advancedAnchor} onKeyDown={e=>{if(e.key==="Escape")setAdvanced(false);}}>
           <button type="button" className="tool-button" aria-expanded={advanced} onClick={()=>{setAdvanced(v=>!v);setColumnMenu(false);}}><Filter size={14}/> 高级筛选{industry||watchOnly?" · "+(Number(!!industry)+Number(watchOnly)):""}</button>
-          {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
+          {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={includeMissingPb} onChange={e=>{setIncludeMissingPb(e.target.checked);setVisibleCount(100);}}/>包含PB缺失股票</label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
         </div>
         <div className="column-control" ref={columnAnchor} onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
           <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>{setColumnMenu(v=>!v);setAdvanced(false);}}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
@@ -273,7 +279,7 @@ export default function ScreenerResults({ rows, initial }: {
             <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setWidths({});setColumnMenu(false);}}>恢复默认</button>
           </div></ToolbarFlyout>}
         </div>
-        <FilterPresets current={{view,maxPrice,minCoverage,maxPb,order,ascending,industry,watchOnly}} apply={applyPreset}/>
+        <FilterPresets current={{view,maxPrice,minCoverage,maxPb,includeMissingPb,order,ascending,industry,watchOnly}} apply={applyPreset}/>
         <CompareToolbar codes={codes} clear={clear}/>
         <button type="button" className="tool-button" onClick={exportRows} disabled={!filtered.length}><Download size={14}/> 导出 CSV</button>
       </div>
@@ -307,5 +313,5 @@ export default function ScreenerResults({ rows, initial }: {
       再显示100条（已显示{Math.min(visibleCount,filtered.length)} / {filtered.length}）
     </button>}
     </div>
-  </section>;
+  </section></>;
 }

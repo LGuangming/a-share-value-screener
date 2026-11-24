@@ -10,6 +10,14 @@ class TestAccountingRules(unittest.TestCase):
                         "accounts_receiv": 8e8, "inventories": 5e8, "prepayment": 1e8,
                         "minority_int": 1e8}
 
+    def test_full_precompute_ignores_price_pb_limits_only(self):
+        quote={**self.quote,"close":25,"pb":2.5}
+        self.assertEqual(assess(self.stock,quote,self.balance)["status"],"PRICE_EXCLUDED")
+        cfg=ScreenConfig(max_price=None,max_pb=None)
+        self.assertTrue(assess(self.stock,quote,self.balance,cfg=cfg)["is_candidate"])
+        self.assertEqual(assess({**self.stock,"industry":"银行"},quote,self.balance,cfg=cfg)["status"],"FINANCIAL_IGNORED")
+        self.assertEqual(assess({**self.stock,"is_st":True},quote,self.balance,cfg=cfg)["status"],"RISK_EXCLUDED")
+
     def test_ncav_units_and_stress(self):
         got = assess(self.stock, self.quote, self.balance, cfg=ScreenConfig())
         self.assertEqual(got["ncav"], 3e9)

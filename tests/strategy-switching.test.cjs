@@ -131,17 +131,16 @@ test("stock lookup filters on every keystroke, ranks exact and prefix codes firs
 
 test("live suggestions respect the current tab and thresholds and show no industry",()=>{
   const search = read("components/screener-results.tsx");
-  assert.match(search,/const tabRows = useMemo\(\(\) => rows\.filter/);
+  assert.match(search,/const tabRows = useMemo\(\(\) => baseRows\.filter/);
   assert.match(search,/if \(view === "strict"\) return row\.is_candidate/);
   assert.match(search,/if \(view === "gaps"\) return row\.status === "DATA_GAP"/);
-  assert.match(search,/if \(row\.price !== null && row\.price > maxPrice\) return false/);
-  assert.match(search,/if \(row\.pb !== null && row\.pb > maxPb\) return false/);
+  assert.match(search,/matchesBounds\(row,\{maxPrice,maxPb,includeMissingPb\}\)/);
   assert.match(search,/return tabRows\.map\(\(row, index\)/);
   assert.match(search,/const filtered = needle \? matches : tabRows/);
   assert.match(search,/aria-label=\{\x60\$\{viewLabel\}股票搜索结果\x60\}/);
   assert.match(search,/className="stock-suggestion-name"/);
   assert.match(search,/className="stock-suggestion-code"/);
-  const dropdown=search.slice(search.indexOf('className="stock-suggestions">'),search.indexOf('        </div>\n        <select aria-label="最高价格"'));
+  const dropdown=search.slice(search.indexOf('className="stock-suggestions">'),search.indexOf('        </div>\n        <label className="screen-bound"'));
   assert.doesNotMatch(dropdown,/row\.industry/);
   const css=read("app/globals.css");
   assert.match(css,/\.stock-suggestions\{position:absolute/);
@@ -479,4 +478,23 @@ test("login origin validation supports browser forms behind Vercel without accep
   assert.equal(a.sameOriginPost(req({origin:"https://evil.example"})),false);
   assert.equal(a.sameOriginPost(req({origin:"garbage","sec-fetch-site":"same-origin"})),false);
   assert.equal(a.sameOriginPost(req({"sec-fetch-site":"same-origin"},"GET")),false);
+});
+
+test("arbitrary bounds and all-stock scope preserve missing PB and synchronize statistics",()=>{
+  const {matchesBounds,screenCounts,parseBound,initialBound}=loadV4Module("lib/screener-filters.ts");
+  const rows=[
+    {price:8,pb:1,is_candidate:true,ncav_coverage:1.5,stress_coverage:1.1,status:"NET_NET"},
+    {price:25,pb:2,is_candidate:true,ncav_coverage:1.8,stress_coverage:.8,status:"NET_NET"},
+    {price:7,pb:null,is_candidate:false,ncav_coverage:null,stress_coverage:null,status:"FINANCIAL_IGNORED"},
+    {price:17,pb:1.5,is_candidate:false,ncav_coverage:null,stress_coverage:null,status:"DATA_GAP"}
+  ];
+  const selected=rows.filter(r=>matchesBounds(r,{maxPrice:10,maxPb:1.2,includeMissingPb:true}));
+  assert.deepEqual(screenCounts(selected,1.25),{total:2,candidates:1,stress:1,gaps:0,ignored:1});
+  const wider=rows.filter(r=>matchesBounds(r,{maxPrice:27.5,maxPb:2.3,includeMissingPb:false}));
+  assert.deepEqual(screenCounts(wider,1.25),{total:3,candidates:2,stress:1,gaps:1,ignored:0});
+  assert.equal(rows.filter(r=>matchesBounds(r,{maxPrice:null,maxPb:null,includeMissingPb:true})).length,4);
+  assert.equal(parseBound(""),null);assert.equal(parseBound("0"),0);assert.equal(parseBound("-1",true),-1);
+  assert.equal(initialBound("20.5",10),"20.5");assert.equal(initialBound("all",10),"");
+  assert.doesNotMatch(read("lib/data.ts"),/LIMIT 3000/);
+  assert.match(read("backend/value_screener/cli.py"),/ScreenConfig\(max_price=None, max_pb=None\)/);
 });

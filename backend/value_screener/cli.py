@@ -147,12 +147,17 @@ def recalculate_ncav(args):
     try:
         rows = store.screen_inputs(quote_day)
         stats["pre_screened"] = len(rows)
+        stats["screen_scope"] = "all_sh_sz_mainboard"
+        stats["default_price_pb_pre_screened"] = sum(
+            row["quote"].get("close") is not None and float(row["quote"]["close"])<=10
+            and (row["quote"].get("pb") is None or float(row["quote"]["pb"])<=1.2) for row in rows
+        )
         results = []
         for row in rows:
             stock = {"ts_code": row["ts_code"], "name": row["name"], "is_st": row["is_st"],
                      "industry": row.get("industry")}
             r = assess(stock, row["quote"], row["balance"], row["income"],
-                       row["cashflow"], ScreenConfig())
+                       row["cashflow"], ScreenConfig(max_price=None, max_pb=None))
             r["report_date"] = row["report_date"]
             r["ann_date"] = row["ann_date"]
             if r["status"] == "FINANCIAL_IGNORED":
@@ -251,7 +256,7 @@ def run_financial_refresh(args):
             LOGGER.info("Financial archive reuse: %s",json.dumps(stats,ensure_ascii=False))
             if archive_only:
                 stats["mode"]="archive_only"
-                stats["recalc_needed"]=signature_before!=store.financial_inputs_signature(quote_day)
+                stats["recalc_needed"]=signature_before!=store.financial_inputs_signature(quote_day) or getattr(args,"force_recalc",False)
                 store.finish_run(run_id,"success" if stats["recalc_needed"] else "skipped",stats)
                 LOGGER.info("Financial refresh finished: %s",json.dumps(stats,ensure_ascii=False))
                 return
@@ -510,6 +515,7 @@ def main():
     finance.add_argument("--asof", help="Reference date in Asia/Shanghai (YYYY-MM-DD); default today")
     finance.add_argument("--budget", type=int, default=40,
                          help="Maximum companies to refresh (missing report kinds only); default 40")
+    finance.add_argument("--force-recalc",action="store_true",help="Force publication after archive-only scope migration")
     finance.add_argument("--archive-first",action="store_true",help="Reuse verified archive before provider fallback; budget 0 = archive only")
     vip = subs.add_parser("bootstrap-financials",help="Bulk quarter reports (requires Tushare VIP access)")
     vip.add_argument("--period",required=True,help="Quarter-end YYYYMMDD, e.g. 20260930")
@@ -540,6 +546,8 @@ def main():
     elif args.command == "refresh-financials":
         if not 0 <= args.budget <= 50:
             parser.error("--budget must be between 0 and 50")
+        if args.force_recalc and (not args.archive_first or args.budget != 0):
+            parser.error("--force-recalc requires archive-first with budget 0")
         run_financial_refresh(args)
     elif args.command == "bootstrap-financials":
         if not 0 < args.min_coverage <= 1:

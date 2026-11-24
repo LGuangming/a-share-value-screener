@@ -6,7 +6,7 @@
     "family": "基本面价值",
     "status": "live",
     "description": "以净流动资产价值、压力价值及财务风险筛选沪深主板股票。",
-    "universe": "沪深主板低价/低PB预筛，排除ST风险",
+    "universe": "沪深主板全量估值；股价及PB为前端可调条件；排除ST风险及金融行业",
     "requirements": [
       "daily_basic",
       "balancesheet",

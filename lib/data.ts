@@ -31,6 +31,8 @@ export type Snapshot = {
     financial_data_gap?: number;
     financial_ignored?: number;
     netnet_applicable_pre_screened?: number;
+    screen_scope?: string;
+    rows_published?: number;
     financial_successes?: number;
   };
 };
@@ -138,7 +140,6 @@ async function readScreeningRows(day: string, strategy: string): Promise<Screene
       JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
       WHERE r.trade_date=${day} AND r.strategy=${strategy}
       ORDER BY r.is_candidate DESC, r.ncav_coverage DESC NULLS LAST
-      LIMIT 3000
     `;
     return rows.map((row) => normalizeRow(row as Record<string, unknown>));
   } catch (error) {
@@ -150,8 +151,8 @@ async function readScreeningRows(day: string, strategy: string): Promise<Screene
 
 // Share one short-lived, read-only result across navigation and filter switches.
 // Daily publication uses a date-specific row key; no cross-strategy result fallback.
-const cachedSnapshot = unstable_cache(readLatestSnapshot, ["latest-daily-snapshot-v2"], { revalidate: 30 });
-const cachedScreening = unstable_cache(readScreeningRows, ["strategy-screen-rows-v2"], { revalidate: 90 });
+const cachedSnapshot = unstable_cache(readLatestSnapshot, ["latest-daily-snapshot-v3"], { revalidate: 30 });
+const cachedScreening = unstable_cache(readScreeningRows, ["strategy-screen-rows-v3"], { revalidate: 90 });
 
 export async function latestSnapshot(): Promise<{ snapshot: Snapshot | null; error: string | null }> {
   try {
@@ -321,9 +322,11 @@ export async function publishedCandidateChanges(day:string,previous:string){
     WITH current_candidates AS (
       SELECT r.ts_code,r.ncav_coverage,r.price FROM screen_results r JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
       WHERE r.strategy='netnet_v1' AND r.trade_date=${day} AND r.is_candidate=true
+        AND r.price<=10 AND (r.pb<=1.2 OR r.pb IS NULL)
     ), previous_candidates AS (
       SELECT r.ts_code,r.ncav_coverage,r.price FROM screen_results r JOIN job_runs j ON j.run_id=r.run_id AND j.status='success'
       WHERE r.strategy='netnet_v1' AND r.trade_date=${previous} AND r.is_candidate=true
+        AND r.price<=10 AND (r.pb<=1.2 OR r.pb IS NULL)
     )
     SELECT COALESCE(c.ts_code,p.ts_code) AS ts_code,s.name,s.industry,
       CASE WHEN p.ts_code IS NULL THEN 'added' WHEN c.ts_code IS NULL THEN 'removed' ELSE 'retained' END AS change,

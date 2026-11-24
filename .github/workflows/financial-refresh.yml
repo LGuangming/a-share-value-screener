@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - '.github/one-shot/finance-archive-first-20261124.txt'
+      - '.github/one-shot/full-netnet-precompute-20261124.txt'
   workflow_dispatch:
     inputs:
       budget:
@@ -91,7 +92,9 @@ jobs:
           fi
       - name: Independently refresh financial statements
         run: |
-          if [ -n "$FINANCIAL_ASOF" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            python -m value_screener.cli refresh-financials --archive-first --budget 0 --force-recalc
+          elif [ -n "$FINANCIAL_ASOF" ]; then
             # Explicit historical replays keep the existing provider-only path.
             python -m value_screener.cli refresh-financials --budget "$FINANCIAL_BUDGET" --asof "$FINANCIAL_ASOF"
           else
