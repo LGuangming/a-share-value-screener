@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import Nav from "@/components/nav";
+import GlobalCommand from "@/components/global-command";
+import StockPreview from "@/components/stock-preview";
+import {PreferencesRoot,AppearanceControls} from "@/components/workspace-preferences";
+import "./workspace.css";
 import "./globals.css";
 import "./theme-orange.css";
 
@@ -11,8 +15,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{children: React.ReactNode}>) {
   return <html lang="zh-CN"><body>
-    <Nav/><div className="site-main">{children}
+    <PreferencesRoot><Nav/><div className="site-main"><header className="workspace-global-bar"><GlobalCommand/><AppearanceControls/></header>{children}
       <footer className="footer">A-share Multi-Strategy Research · 财务筛选与研究信号，不构成交易建议 · 网站归属：Guangming</footer>
-    </div>
+    </div><StockPreview/></PreferencesRoot>
   </body></html>;
 }
