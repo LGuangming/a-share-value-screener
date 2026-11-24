@@ -1,1 +1,0 @@
-Launch 2020–2025 full historical ST archive with validated BaoStock 0.9.4. BaoStock only; no Tushare requests; resume and verify existing archive batches.

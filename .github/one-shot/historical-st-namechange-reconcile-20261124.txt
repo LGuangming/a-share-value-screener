@@ -1,1 +1,0 @@
-2026-11-24: audit BaoStock gaps, collect Tushare namechange for the verified historical OHLCV universe, then offline reconciliation. Preserve source archives.

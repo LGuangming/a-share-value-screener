@@ -1,5 +1,0 @@
-One-shot 2026-11-23: queue phase-2 report disclosure evidence and audited per-stock financial archive. Wait for market-data archive concurrency group to release. Pilot first 50 stock codes, then four sequential non-overlapping shards (0-1500,1500-3000,3000-4500,4500-6000), with private object storage, SHA-256 and resumable 50-code batches. Historical ST remains permission blocked; no PIT backtest publication.
-
-2026-11-24: verify existing checkpoints and resume missing batches at 3450 and 4750.
-
-2026-11-24: recover only frozen universe indexes 4950..5923, 100-code jobs, 50-code checkpoints.
