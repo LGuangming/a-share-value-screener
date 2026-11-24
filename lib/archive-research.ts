@@ -77,6 +77,32 @@ async function readArchiveOverview():Promise<ArchiveDataset[]>{
       const years=checked.flatMap(c=>c.value?[c.value]:[]);
       output.push({...spec,years,state:years.length===6?"ready":years.length?"partial":checked.some(c=>c.state==="error")?"error":"unpublished",detail:"已发布年度清单 "+years.length+"/6"});
     }
+
+    // Locate the frozen 2020–2025 ST namespace without guessing the universe hash.
+    const stPrefix=phase+"/historical_st/v2/range=2020-2025/universe=";
+    try{
+      const list=await s.client.send(new ListObjectsV2Command({Bucket:s.bucket,Prefix:stPrefix,Delimiter:"/",MaxKeys:100}),{abortSignal:AbortSignal.timeout(8000)});
+      const namespaces=(list.CommonPrefixes??[]).map(p=>p.Prefix??"").filter(p=>p.startsWith(stPrefix)&&/^[a-f0-9]{64}\/$/.test(p.slice(stPrefix.length)));
+      if(list.IsTruncated||namespaces.length>1)throw Error("Ambiguous ST namespace");
+      if(!namespaces.length)output.push({id:"historical_st",name:"历史ST",years:[],state:"unpublished",detail:"暂无已发布清单"});
+      else{
+        const base=namespaces[0],hash=base.slice(stPrefix.length,-1);
+        let source="merged",m=await json(s,base+source+"/manifest.json",1024*1024);
+        if(!m){source="baostock";m=await json(s,base+source+"/manifest.json",1024*1024);}
+        if(!m)output.push({id:"historical_st",name:"历史ST",years:[],state:"unpublished",detail:"暂无已发布清单"});
+        else{
+          if(m.source!==source||m.universe_sha256!==hash||!Array.isArray(m.year_manifests)||!int(m.rows)||m.rows<=0)throw Error("Invalid ST manifest");
+          const years:{year:number;rows:number;sessions:null;unknown:number}[]=m.year_manifests.map((y:{year:number;rows:number;resolution_counts:Record<string,number>})=>{
+            const unknown=y.resolution_counts?.unknown??0;
+            if(!int(y.year)||y.year<2020||y.year>2025||!int(y.rows)||!int(unknown)||unknown>y.rows||!y.resolution_counts||!Object.values(y.resolution_counts).every(int)||Object.values(y.resolution_counts).reduce((a,b)=>a+b,0)!==y.rows)throw Error("Invalid ST coverage");
+            return {year:y.year,rows:y.rows,sessions:null,unknown};
+          });
+          if(new Set(years.map(y=>y.year)).size!==years.length||years.reduce((a,y)=>a+y.rows,0)!==m.rows)throw Error("Invalid ST totals");
+          const unknown=years.reduce((a,y)=>a+y.unknown,0);
+          output.push({id:"historical_st",name:"历史ST",years,state:years.length===6&&unknown===0?"ready":"partial",detail:(source==="merged"?"合并源":"BaoStock")+" · 已知 "+((m.rows-unknown)/m.rows*100).toFixed(2)+"% · 未知 "+unknown.toLocaleString("zh-CN")+" 条"});
+        }
+      }
+    }catch{output.push({id:"historical_st",name:"历史ST",years:[],state:"error",detail:"历史ST清单暂不可读"});}
     // Listing counts are publication counts only; not effective security coverage.
     for(const kind of financialKinds){
       try{
