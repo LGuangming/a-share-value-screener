@@ -378,14 +378,16 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
 .strategy-library-table .strategy-state,.strategy-library-table .inline-link {display:inline-flex;align-items:center;white-space:nowrap;}
 .strategy-library-table :is(th,td):nth-child(n+5):nth-child(-n+9) {text-align:center;}
 /* Keep compact collapsed rows and make each expanded reason a separate card. */
-.signal-expand {display:inline-flex;align-items:center;gap:4px;padding:3px 0;color:var(--accent);font-size:11px;font-weight:600;white-space:nowrap;}
+.signal-expand {display:inline-flex;align-items:center;gap:4px;padding:3px 0;color:var(--accent);font-size:12px;line-height:18px;font-weight:500;white-space:nowrap;}
 .signal-expand-close,.signal-reason-details[open] .signal-expand-open {display:none;}
 .signal-reason-details[open] .signal-expand-close {display:inline;}
 .signal-expand svg {transition:transform 150ms ease;}
 .signal-reason-details[open] .signal-expand svg {transform:rotate(180deg);}
 .signal-reason-body {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:7px;padding:7px 0 2px;}
 .signal-reason-body>.signal-reason-card {border:1px solid var(--border);border-radius:5px;background:var(--surface);padding:9px 10px;min-width:0;white-space:normal;}
-.signal-reason-card strong {display:block;font-size:12px;line-height:1.5;color:var(--ink);}
-.signal-reason-card p {margin:5px 0 0;font-size:11px;line-height:1.6;overflow-wrap:anywhere;}
+.review-table .signal-reason-card>strong {display:block;margin:0;font-size:13px;font-weight:600;line-height:1.45;letter-spacing:0;color:var(--ink);white-space:normal;overflow-wrap:anywhere;}
+.review-table .signal-reason-card>p {margin:4px 0 0;font-size:12px;font-weight:400;line-height:1.55;letter-spacing:0;color:var(--muted);white-space:normal;overflow-wrap:anywhere;}
+html[data-density=compact] .review-table .signal-reason-card>strong {font-size:12px;line-height:1.45;}
+html[data-density=compact] .review-table .signal-reason-card>p {font-size:12px;line-height:1.5;}
 .review-table tr:has(.signal-reason-details[open])>td {vertical-align:top;padding-top:10px;padding-bottom:10px;}
 @media(prefers-reduced-motion:reduce){.signal-expand svg{transition:none;}}
