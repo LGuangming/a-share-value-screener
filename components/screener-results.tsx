@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Filter, Search, Settings2 } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Filter, Search, Settings2, ArrowUp, ArrowDown } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
 import { fixed, moneyCny, pct, signalLabel, stateLabel } from "@/lib/format";
 import { Empty } from "@/components/empty";
@@ -77,6 +77,13 @@ export default function ScreenerResults({ rows, initial }: {
   const [ascending, setAscending] = useState(false);
   const [columns, setColumns] = useState<ColumnKey[]>(optionalColumns.map(c=>c.key));
   const [columnMenu, setColumnMenu] = useState(false);
+  const [widths,setWidths]=useState<Partial<Record<ColumnKey,number>>>({});
+  const [layoutReady,setLayoutReady]=useState(false);
+  useEffect(()=>{try{const saved=JSON.parse(localStorage.getItem("value-radar-columns-v3")||"null");if(saved&&Array.isArray(saved.columns)){const valid=Array.from(new Set<ColumnKey>(saved.columns.filter((k:ColumnKey)=>optionalColumns.some(c=>c.key===k))));setColumns(valid);const w:Partial<Record<ColumnKey,number>>={};for(const c of optionalColumns){const n=saved.widths?.[c.key];if(typeof n==="number"&&Number.isFinite(n))w[c.key]=Math.max(75,Math.min(420,n));}setWidths(w);}}catch{}setLayoutReady(true);},[]);
+  useEffect(()=>{if(layoutReady)try{localStorage.setItem("value-radar-columns-v3",JSON.stringify({columns,widths}));}catch{}},[columns,widths,layoutReady]);
+  function moveColumn(key:ColumnKey,step:number){setColumns(old=>{const i=old.indexOf(key),j=i+step;if(i<0||j<0||j>=old.length)return old;const next=[...old];[next[i],next[j]]=[next[j],next[i]];return next;});}
+  function resizeColumn(key:ColumnKey,e:React.PointerEvent<HTMLButtonElement>){e.preventDefault();e.stopPropagation();const start=e.clientX,base=e.currentTarget.closest("th")?.getBoundingClientRect().width??120;const handle=e.currentTarget;handle.setPointerCapture(e.pointerId);const move=(ev:PointerEvent)=>setWidths(prev=>({...prev,[key]:Math.max(75,Math.min(420,Math.round(base+ev.clientX-start)))}));const stop=()=>{handle.removeEventListener("pointermove",move);handle.removeEventListener("pointerup",stop);handle.removeEventListener("pointercancel",stop);};handle.addEventListener("pointermove",move);handle.addEventListener("pointerup",stop);handle.addEventListener("pointercancel",stop);}
+
   const [visibleCount, setVisibleCount] = useState(100);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -117,7 +124,7 @@ export default function ScreenerResults({ rows, initial }: {
 
   const filtered = needle ? matches : tabRows;
   const suggestions = matches.slice(0, 8);
-  const shownColumns=optionalColumns.filter(c=>columns.includes(c.key));
+  const shownColumns=columns.flatMap(k=>optionalColumns.filter(c=>c.key===k));
   function sortBy(key:NumericKey) {
     if(order===key) setAscending(v=>!v);
     else {setOrder(key);setAscending(false);}
@@ -239,9 +246,9 @@ export default function ScreenerResults({ rows, initial }: {
         </select>
         <div className="column-control" ref={columnAnchor} onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
           <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>setColumnMenu(v=>!v)}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
-          {columnMenu && <ToolbarFlyout anchor={columnAnchor} align="right" width={190}><div className="column-menu">
-            {optionalColumns.map(c=><label key={c.key}><input type="checkbox" checked={columns.includes(c.key)} onChange={e=>setColumns(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>{c.label}</label>)}
-            <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setColumnMenu(false);}}>恢复默认</button>
+          {columnMenu && <ToolbarFlyout anchor={columnAnchor} align="right" width={290}><div className="column-menu">
+            {[...shownColumns,...optionalColumns.filter(c=>!columns.includes(c.key))].map(c=><div className="column-order-row" key={c.key}><label><input type="checkbox" checked={columns.includes(c.key)} onChange={e=>setColumns(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>{c.label}</label><button type="button" aria-label={c.label+"向前移动"} disabled={columns.indexOf(c.key)<=0} onClick={()=>moveColumn(c.key,-1)}><ArrowUp size={13}/></button><button type="button" aria-label={c.label+"向后移动"} disabled={!columns.includes(c.key)||columns.indexOf(c.key)===columns.length-1} onClick={()=>moveColumn(c.key,1)}><ArrowDown size={13}/></button></div>)}
+            <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setWidths({});setColumnMenu(false);}}>恢复默认</button>
           </div></ToolbarFlyout>}
         </div>
         <button type="button" className="tool-button" onClick={exportRows} disabled={!filtered.length}><Download size={14}/> 导出 CSV</button>
@@ -250,11 +257,13 @@ export default function ScreenerResults({ rows, initial }: {
     {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
       {viewLabel} · 匹配 {matches.length} 只 / 当前 {tabRows.length} 只
     </div>}
-    {filtered.length ? <div className="table-scroll"><table className="results-table">
+    {filtered.length ? <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:250+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
+      <colgroup><col style={{width:180}}/>{shownColumns.map(c=><col key={c.key} style={{width:widths[c.key]??105}}/>)}<col style={{width:100}}/></colgroup>
       <thead><tr><th className="security-col">股票 / 行业</th>
         {shownColumns.map(c=><th key={c.key} className={c.key==="status"||c.key==="signal"?"":"numeric-col"}
           aria-sort={order===c.key?(ascending?"ascending":"descending"):undefined}>
           {c.key==="status"||c.key==="signal"?c.label:<button type="button" className="sort-heading" onClick={()=>sortBy(c.key as NumericKey)}>{c.label}<ArrowUpDown size={12} className={order===c.key?"sort-active":""}/></button>}
+          <button type="button" className="column-resizer" aria-label={c.label+"调整列宽"} onPointerDown={e=>resizeColumn(c.key,e)} onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();setWidths(prev=>({...prev,[c.key]:Math.max(75,Math.min(420,(prev[c.key]??105)+(e.key==="ArrowLeft"?-10:10)))}));}}}/>
         </th>)}<th aria-label="研究操作">操作</th></tr></thead>
       <tbody>{filtered.slice(0,visibleCount).map(row=><tr key={row.ts_code}>
         <td className="security-col"><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
