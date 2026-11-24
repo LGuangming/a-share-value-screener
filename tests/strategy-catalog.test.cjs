@@ -32,7 +32,7 @@ test("catalog is used by strategy center, detail page and backtest experiment pa
   assert.match(file("lib/strategies.ts"),/catalogJson/);
   assert.match(file("app/strategies/page.tsx"),/strategies\.map/);
   assert.match(file("app/strategies/[id]/page.tsx"),/findStrategy/);
-  assert.match(file("app/backtest/page.tsx"),/strategies\.map/);
+  assert.match(file("components/backtest-strategy-panel.tsx"),/strategies\.map/);
   assert.match(file("components/nav.tsx"),/href: "\/strategies"/);
 });
 

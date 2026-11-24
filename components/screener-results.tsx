@@ -97,6 +97,8 @@ export default function ScreenerResults({ rows, initial }: {
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const suggestionListId = useId();
   const searchAnchor=useRef<HTMLDivElement>(null);
+  const resultsRegion=useRef<HTMLDivElement>(null);
+  const [searchHeight,setSearchHeight]=useState<number|undefined>(undefined);
   const columnAnchor=useRef<HTMLDivElement>(null);
   const advancedAnchor=useRef<HTMLDivElement>(null);
   const needle = q.trim().toLocaleLowerCase();
@@ -163,6 +165,9 @@ export default function ScreenerResults({ rows, initial }: {
   }
 
   function updateSearch(value: string) {
+    // Keep the results area at its pre-search height so shrinking rows cannot move the page/header.
+    if(!needle&&value.trim())setSearchHeight(resultsRegion.current?.getBoundingClientRect().height);
+    if(!value.trim())setSearchHeight(undefined);
     setFilter("q", value, () => setQ(value));
     setSuggestionsOpen(true);
     setHighlightedIndex(-1);
@@ -219,7 +224,7 @@ export default function ScreenerResults({ rows, initial }: {
               onKeyDown={handleSearchKeyDown}
               onChange={e => updateSearch(e.target.value)}/>
           </div>
-          {needle && suggestionsOpen && <ToolbarFlyout anchor={searchAnchor} width={300}><div
+          {needle && suggestionsOpen && <ToolbarFlyout anchor={searchAnchor} width={300} placement="below"><div
             id={suggestionListId} role="listbox" aria-label={`${viewLabel}股票搜索结果`}
             className="stock-suggestions">
             <div className="stock-suggestions-heading">
@@ -272,7 +277,8 @@ export default function ScreenerResults({ rows, initial }: {
       </div>
     </div>
     {mini&&trend.error&&<div className="stock-search-feedback" role="status">近期走势暂不可用</div>}
-    {filtered.length ? <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:280+(mini?105:0)+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
+    <div ref={resultsRegion} className="screener-result-region" style={{minHeight:needle?searchHeight:undefined}}>
+    <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:280+(mini?105:0)+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
       <colgroup><col style={{width:180}}/>{shownColumns.map(c=><col key={c.key} style={{width:widths[c.key]??105}}/>)}{mini&&<col style={{width:105}}/>}<col style={{width:100}}/></colgroup>
       <thead><tr><th className="security-col">股票 / 行业</th>
         {shownColumns.map(c=><th key={c.key} className={c.key==="status"||c.key==="signal"?"":"numeric-col"}
@@ -292,11 +298,12 @@ export default function ScreenerResults({ rows, initial }: {
         <td><div className="row-actions"><WatchButton stock={row}/><PreviewButton stock={row}/><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           <ArrowRight size={16}/></Link></div></td>
       </tr>)}</tbody></table></div>
-    : <Empty title={needle ? "暂无匹配的股票" : "暂无符合筛选条件的股票"}
+    {!filtered.length && <Empty title={needle ? "暂无匹配的股票" : "暂无符合筛选条件的股票"}
       detail={needle ? `${viewLabel}中没有匹配的股票，试试更短的名称或代码。` : "可调整筛选条件或切换到“全部预筛”视图。"}/>}
     {filtered.length > visibleCount && <button type="button" className="filter-button screener-load-more"
       onClick={()=>setVisibleCount(n=>n+100)}>
       再显示100条（已显示{Math.min(visibleCount,filtered.length)} / {filtered.length}）
     </button>}
+    </div>
   </section>;
 }

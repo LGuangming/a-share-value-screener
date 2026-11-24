@@ -61,10 +61,10 @@ export default async function SignalsPage({ searchParams }: { searchParams: Prom
               <div className="review-meta">{review.focus}</div></td>
             <td>{review.reasons.length ? <details className="signal-reason-details"><summary>
               <ReviewReasons reasons={review.reasons.map(reason => ({
-              code: reason.code, label: reason.label,
+              code: reason.code, label: reason.label, severity: reason.severity,
             }))}/><span className="signal-expand"><span className="signal-expand-open">展开明细</span><span className="signal-expand-close">收起明细</span><ChevronDown size={13} aria-hidden="true"/></span></summary>
               <div className="signal-reason-body">{review.reasons.map(reason=><div className="signal-reason-card" key={reason.code}>
-                <strong>{reason.label}</strong><p>{reason.explanation}</p></div>)}</div>
+                <strong className={`review-level review-level-${reason.severity.toLowerCase()}`}>{reason.label}</strong><p>{reason.explanation}</p></div>)}</div>
             </details> : <ReviewReasons reasons={[]}/>}</td>
             <td><span className={`review-conclusion review-conclusion-${review.conclusion === "通过" ? "pass" : review.conclusion === "待补充资料" ? "pending" : "block"}`}>{review.conclusion}</span></td>
             <td>{signalLabel(row.signal)}<div className="stock-meta">{row.trade_date}</div></td>
