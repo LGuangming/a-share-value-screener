@@ -435,3 +435,25 @@ test("collapsed navigation fully hides wordmark and displays a dedicated compact
   assert.match(css,/html\[data-sidebar=collapsed\] \.brand-text,[^{}]+\{display:none\}/);
   assert.doesNotMatch(css,/\.brand-text strong\{font-size:0\}|\.brand-text strong:before/);
 });
+
+test("site access accepts any six-character password without composition rules",()=>{
+  const ts=require("typescript"),m={exports:{}};
+  new Function("module","exports","require",ts.transpileModule(read("lib/site-access.ts"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m,m.exports,id=>id==="server-only"?{}:require(id));
+  const previousPassword=process.env.SITE_ACCESS_PASSWORD,previousSecret=process.env.SITE_SESSION_SECRET;
+  try{
+    process.env.SITE_SESSION_SECRET="ab".repeat(32);
+    for(const password of ["123456","abcdef","!!!!!!","密码测试六位","😀😀😀😀😀😀"]){
+      process.env.SITE_ACCESS_PASSWORD=password;
+      const config=m.exports.accessConfig();
+      assert.ok(config);
+      assert.equal(m.exports.passwordMatches(password,config),true);
+    }
+    for(const password of ["12345","😀😀😀",""]){
+      process.env.SITE_ACCESS_PASSWORD=password;
+      assert.equal(m.exports.accessConfig(),null);
+    }
+  }finally{
+    if(previousPassword===undefined)delete process.env.SITE_ACCESS_PASSWORD;else process.env.SITE_ACCESS_PASSWORD=previousPassword;
+    if(previousSecret===undefined)delete process.env.SITE_SESSION_SECRET;else process.env.SITE_SESSION_SECRET=previousSecret;
+  }
+});
