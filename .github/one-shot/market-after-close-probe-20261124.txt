@@ -1,0 +1,1 @@
+Verify same-day market data readiness after market close; preserve scheduled time.

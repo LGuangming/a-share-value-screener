@@ -2,7 +2,8 @@
 import os
 import sys
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -19,8 +20,8 @@ class PipelineIsolationTests(unittest.TestCase):
         client = Mock()
         client.source = "relay"
         client.trade_open.return_value = True
-        client.stocks.return_value = [{"ts_code": "000910.SZ", "name": "Sample"}]
-        client.daily.return_value = [{"ts_code": "000910.SZ"}] * 1000
+        client.stocks.return_value = [{"ts_code": f"{i:06d}.SZ", "name": "Sample"} for i in range(1000)]
+        client.daily.return_value = [{"ts_code": f"{i:06d}.SZ", "trade_date": "20261120", "close": 10, "total_mv": 100} for i in range(1000)]
         store = Mock()
         store.upsert_stocks.return_value = 1000
         store.upsert_quotes.return_value = 1000
@@ -97,6 +98,54 @@ class PipelineIsolationTests(unittest.TestCase):
         stats = store.finish_run.call_args.args[2]
         self.assertFalse(stats["data_changed"])
         self.assertTrue(stats["recalc_needed"])
+
+    def test_early_same_day_incomplete_skips_without_quote_writes(self):
+        client, store = self.prepare()
+        now = datetime(2026,11,24,17,48,tzinfo=ZoneInfo("Asia/Shanghai"))
+        client.query.return_value = [{"cal_date":"20261124","is_open":1}]
+        client.daily.return_value = [dict(row, trade_date="20261124") for row in client.daily.return_value[:500]]
+        clock = Mock(wraps=datetime)
+        clock.now.return_value = now
+        with (patch.dict(os.environ, {"DATABASE_URL": "test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store": lambda _url: store, "datetime":clock})):
+            self.assertFalse(fetch_market(SimpleNamespace(date=None)))
+        store.upsert_stocks.assert_not_called()
+        store.upsert_quotes.assert_not_called()
+        self.assertEqual(store.finish_run.call_args.args[1], "skipped")
+        self.assertEqual(store.finish_run.call_args.args[2]["reason"], "awaiting_same_day_publication")
+        client.daily.assert_called_once_with("20261124")
+
+    def test_early_same_day_complete_ingests_today(self):
+        client, store = self.prepare()
+        now = datetime(2026,11,24,17,48,tzinfo=ZoneInfo("Asia/Shanghai"))
+        client.query.return_value = [{"cal_date":"20261124","is_open":1}]
+        client.daily.return_value = [dict(row, trade_date="20261124") for row in client.daily.return_value]
+        clock = Mock(wraps=datetime)
+        clock.now.return_value = now
+        with (patch.dict(os.environ, {"DATABASE_URL":"test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store":lambda _url:store,"datetime":clock})):
+            self.assertTrue(fetch_market(SimpleNamespace(date=None)))
+        self.assertEqual(store.upsert_quotes.call_args.args[1], date(2026,11,24))
+        self.assertEqual(store.finish_run.call_args.args[1], "success")
+        client.daily.assert_called_once_with("20261124")
+
+    def test_after_scheduled_time_incomplete_fails_without_writes(self):
+        client, store = self.prepare()
+        now = datetime(2026,11,24,19,30,tzinfo=ZoneInfo("Asia/Shanghai"))
+        client.query.return_value = [{"cal_date":"20261124","is_open":1}]
+        client.daily.return_value = [dict(row, trade_date="20261124") for row in client.daily.return_value[:500]]
+        clock = Mock(wraps=datetime)
+        clock.now.return_value = now
+        with (patch.dict(os.environ, {"DATABASE_URL":"test-only-url"}),
+              patch.object(run_scan.__globals__["TushareClient"], "from_environment", return_value=client),
+              patch.dict(run_scan.__globals__, {"Store":lambda _url:store,"datetime":clock})):
+            with self.assertRaisesRegex(RuntimeError, "Daily quotes incomplete"):
+                fetch_market(SimpleNamespace(date=None))
+        store.upsert_stocks.assert_not_called()
+        store.upsert_quotes.assert_not_called()
+        self.assertEqual(store.finish_run.call_args.args[1], "failed")
 
     def test_recalculate_uses_no_tushare_requests(self):
         client, store = self.prepare()

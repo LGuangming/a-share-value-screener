@@ -13,7 +13,7 @@ from .rules import assess, technical_signal, ScreenConfig
 from .store import Store
 from .tushare_client import TushareClient, TushareError
 from .financial_schedule import confirmed_disclosures, recent_closed_quarters
-from .market_session import market_session
+from .market_session import market_session, early_probe, minimum_quotes, validate_quotes, MARKET_CLOSE
 
 LOGGER = logging.getLogger("value_screener")
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -22,14 +22,17 @@ CN_TZ = ZoneInfo("Asia/Shanghai")
 def fetch_market(args) -> bool:
     """Fetch validated daily quotes only; do not calculate or publish NCAV.
 
-    Returns False on exchange holidays so the legacy combined CLI can skip
-    recalculation. The scheduled workflow uses this command independently.
+    Returns False on exchange holidays or an early probe awaiting publication
+    so the legacy combined CLI can skip recalculation. The scheduled workflow uses this command independently.
     """
     db = os.environ.get("DATABASE_URL", "")
     if not db:
         raise RuntimeError("DATABASE_URL is required")
     client = TushareClient.from_environment()
-    day = market_session(client, args.date, datetime.now(CN_TZ))
+    now = datetime.now(CN_TZ)
+    day = market_session(client, args.date, now)
+    if day == now.date() and (now.hour, now.minute) < MARKET_CLOSE:
+        raise ValueError("Requested same-day market data before market close")
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "market_refresh", day)
@@ -46,11 +49,22 @@ def fetch_market(args) -> bool:
             raise RuntimeError("No stock list returned")
         stats["listed_stocks"] = len(stocks)
         quotes = client.daily(day.strftime("%Y%m%d"))
-        min_rows = max(1000, round(len(stocks) * 0.70))
+        min_rows = minimum_quotes(len({s["ts_code"] for s in stocks}), args.date, day, now)
         stats["provider_quote_rows"] = len(quotes)
-        LOGGER.info("daily_basic probe: date=%s source=%s rows=%d minimum=%d",
-                    day, client.source, len(quotes), min_rows)
-        if len(quotes) < min_rows:
+        valid = validate_quotes(stocks, quotes, day)
+        stats["valid_quote_rows"] = len(valid)
+        stats["minimum_quote_rows"] = min_rows
+        LOGGER.info("daily_basic probe: date=%s source=%s rows=%d valid=%d minimum=%d",
+                    day, client.source, len(quotes), len(valid), min_rows)
+        if len(valid) < min_rows:
+            if early_probe(day, args.date, now):
+                stats["reason"] = "awaiting_same_day_publication"
+                stats["recalc_needed"] = False
+                store.finish_run(run_id, "skipped", stats)
+                LOGGER.warning("Market data not ready: date=%s valid=%d minimum=%d; "
+                               "keeping prior snapshot; scheduled refresh remains 19:30 CST",
+                               day, len(valid), min_rows)
+                return False
             # Diagnose an empty expected session without substituting another day.
             if not quotes:
                 stats["provider_empty"] = True
@@ -63,11 +77,11 @@ def fetch_market(args) -> bool:
                 except Exception as probe_error:
                     LOGGER.warning("Prior-session diagnostic unavailable: %s", type(probe_error).__name__)
             raise RuntimeError(
-                f"Daily quotes incomplete for {day}: {len(quotes)} versus {min_rows} minimum"
+                f"Daily quotes incomplete for {day}: {len(valid)} valid versus {min_rows} minimum"
             )
         signature_before = store.market_data_signature(day)
         store.upsert_stocks(stocks)
-        stats["quoted_stocks"] = store.upsert_quotes(quotes, day)
+        stats["quoted_stocks"] = store.upsert_quotes(valid, day)
         if stats["quoted_stocks"] < min_rows:
             raise RuntimeError(
                 f"Valid daily quotes incomplete: {stats['quoted_stocks']} versus {min_rows} minimum"
@@ -418,7 +432,10 @@ def bootstrap_financials(args):
 def check_api(args):
     """Read-only connectivity probe, with no Neon database writes."""
     client = TushareClient.from_environment()
-    day = market_session(client, args.date, datetime.now(CN_TZ))
+    now = datetime.now(CN_TZ)
+    day = market_session(client, args.date, now)
+    if day == now.date() and (now.hour, now.minute) < MARKET_CLOSE:
+        raise ValueError("Requested same-day market data before market close")
     open_session = client.trade_open(day.strftime("%Y%m%d"))
     stocks = client.stocks()
     if not stocks:
@@ -428,8 +445,14 @@ def check_api(args):
     if open_session:
         quotes = client.daily(day.strftime("%Y%m%d"))
         quotes_count = len(quotes)
-        if quotes_count < 1000:
-            raise TushareError(f"daily_basic incomplete: {quotes_count} quotes; expected at least 1000")
+        valid_count = len(validate_quotes(stocks, quotes, day))
+        min_rows = minimum_quotes(len({s["ts_code"] for s in stocks}), args.date, day, now)
+        if valid_count < min_rows:
+            if early_probe(day, args.date, now):
+                LOGGER.warning("API probe: awaiting same-day publication date=%s valid=%d minimum=%d; no database writes",
+                               day, valid_count, min_rows)
+                return
+            raise TushareError(f"daily_basic incomplete: {valid_count} valid quotes; expected at least {min_rows}")
         checks.append("daily_basic")
     LOGGER.info("API connectivity OK: %s", json.dumps({
         "api_source": client.source,
