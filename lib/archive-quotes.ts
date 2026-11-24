@@ -4,7 +4,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { parquetReadObjects } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
 import { unstable_cache } from "next/cache";
-import { completeBar, type MarketBar } from "./market-bars";
+import { completeBar, type MarketBar, type Factor } from "./market-bars";
 
 const PREFIX="a-share-backtest/v1";
 export class ArchiveUnavailable extends Error {}
@@ -75,3 +75,46 @@ async function queryYear(code:string,year:number):Promise<MarketBar[]>{
   } finally {client.destroy();}
 }
 export const archivedQuotes=unstable_cache(queryYear,["market-archive-v1"],{revalidate:86400});
+
+async function queryFactors(code:string,year:number):Promise<Factor[]>{
+  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2020||year>2025)throw Error("Invalid factor query");
+  const {bucket,client}=storage();
+  const prefix=PREFIX+"/phase2/adj_factor/year="+year;
+  async function get(key:string,max:number){
+    const r=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(12000)});
+    if(!r.Body||!r.ContentLength||r.ContentLength>max)throw Error("Invalid factor object size");
+    const bytes=await r.Body.transformToByteArray();
+    if(bytes.length!==r.ContentLength)throw Error("Truncated factor object");
+    return bytes;
+  }
+  try{
+    const doc=JSON.parse(new TextDecoder().decode(await get(prefix+"/manifest.json",256*1024)));
+    if(doc.format_version!==1||doc.dataset!=="adj_factor"||doc.year!==year||!Array.isArray(doc.months)||doc.months.length!==12)throw Error("Incomplete factor manifest");
+    const months=new Set<string>();
+    let total=0,sessions=0;
+    for(const p of doc.months){
+      if(p.format_version!==1||p.dataset!=="adj_factor"||p.year!==year||typeof p.month!=="string"||!/^(0[1-9]|1[0-2])$/.test(p.month)||months.has(p.month)||p.object_key!==prefix+"/month="+p.month+".parquet"||!Array.isArray(p.fields)||p.fields.join(",")!=="ts_code,trade_date,adj_factor"||!Number.isSafeInteger(p.parquet_bytes)||p.parquet_bytes<=0||p.parquet_bytes>8*1024*1024||!Number.isSafeInteger(p.rows)||p.rows<=0||!Number.isSafeInteger(p.sessions)||p.sessions<=0||!/^[a-f0-9]{64}$/.test(p.sha256))throw Error("Invalid factor partition");
+      months.add(p.month);total+=p.rows;sessions+=p.sessions;
+    }
+    if(doc.rows!==total||doc.sessions!==sessions)throw Error("Factor manifest totals mismatch");
+    const factors:Factor[]=[];
+    for(let i=0;i<doc.months.length;i+=2){
+      const parts=await Promise.all(doc.months.slice(i,i+2).map(async (p:{object_key:string;parquet_bytes:number;rows:number;month:string;sha256:string})=>{
+        const bytes=await get(p.object_key,p.parquet_bytes);
+        if(bytes.length!==p.parquet_bytes||createHash("sha256").update(bytes).digest("hex")!==p.sha256)throw Error("Factor checksum mismatch");
+        const rows=await parquetReadObjects({file:new Uint8Array(bytes).buffer,compressors,columns:["ts_code","trade_date","adj_factor"]});
+        if(rows.length!==p.rows)throw Error("Factor row count mismatch");
+        return rows.filter(r=>r.ts_code===code).map(r=>{
+          const day=isoDay(r.trade_date),factor=number(r.adj_factor);
+          if(!day.startsWith(year+"-"+p.month+"-")||factor<=0)throw Error("Invalid adjustment factor");
+          return {day,factor};
+        });
+      }));
+      factors.push(...parts.flat());
+    }
+    factors.sort((a,b)=>a.day.localeCompare(b.day));
+    if(new Set(factors.map(f=>f.day)).size!==factors.length)throw Error("Duplicate adjustment day");
+    return factors;
+  }finally{client.destroy();}
+}
+export const archivedFactors=unstable_cache(queryFactors,["market-factors-v1"],{revalidate:86400});
