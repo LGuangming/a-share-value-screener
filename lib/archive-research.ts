@@ -8,17 +8,17 @@ import {financialHistory,financialKinds,type FinancialKind,type FinancialRecord}
 
 const root="a-share-backtest/v1",phase=root+"/phase2",fin=phase+"/financial_snapshot";
 type Store=ReturnType<typeof storage>;
-async function get(s:Store,key:string,max:number):Promise<Uint8Array|null>{
+async function get(s:Store,key:string,max:number,timeout=12000):Promise<Uint8Array|null>{
   try{
-    const r=await s.client.send(new GetObjectCommand({Bucket:s.bucket,Key:key}),{abortSignal:AbortSignal.timeout(12000)});
+    const r=await s.client.send(new GetObjectCommand({Bucket:s.bucket,Key:key}),{abortSignal:AbortSignal.timeout(timeout)});
     if(!r.Body||r.ContentLength===undefined||r.ContentLength<0||r.ContentLength>max)throw Error("Invalid archive size");
     const bytes=await r.Body.transformToByteArray();
     if(bytes.length!==r.ContentLength)throw Error("Truncated archive");
     return bytes;
   }catch(e){const x=e as {name?:string;$metadata?:{httpStatusCode?:number}};if(x.name==="NoSuchKey"||x.$metadata?.httpStatusCode===404)return null;throw e;}
 }
-async function json(s:Store,key:string,max=256*1024){
-  const raw=await get(s,key,max);
+async function json(s:Store,key:string,max=256*1024,timeout=5000){
+  const raw=await get(s,key,max,timeout);
   return raw?JSON.parse(new TextDecoder().decode(raw)):null;
 }
 const int=(v:unknown):v is number=>typeof v==="number"&&Number.isSafeInteger(v)&&v>=0;
@@ -104,15 +104,15 @@ async function readArchiveOverview():Promise<ArchiveDataset[]>{
       }
     }catch{output.push({id:"historical_st",name:"历史ST",years:[],state:"error",detail:"历史ST清单暂不可读"});}
     // Listing counts are publication counts only; not effective security coverage.
-    for(const kind of financialKinds){
+    const financialOverview=await Promise.all(financialKinds.map(async(kind):Promise<ArchiveDataset>=>{
       try{
         const r=await s.client.send(new ListObjectsV2Command({Bucket:s.bucket,Prefix:fin+"/"+kind+"/",MaxKeys:1000}),{abortSignal:AbortSignal.timeout(12000)});
         if(r.IsTruncated)throw Error("Incomplete manifest list");
         const manifests=(r.Contents??[]).filter(x=>/\/start=\d{5}_count=050\.manifest\.json$/.test(x.Key??"")).length;
-        output.push({id:kind,name:({balancesheet:"历史资产负债表",income:"历史利润表",cashflow:"历史现金流量表",fina_indicator:"历史财务指标"})[kind],years:[],state:manifests?"partial":"unpublished",detail:"已发布批次 "+manifests+"（每批最多50只）"});
-      }catch{output.push({id:kind,name:kind,years:[],state:"error",detail:"批次清单暂不可读"});}
-    }
-    return output;
+        return {id:kind,name:({balancesheet:"历史资产负债表",income:"历史利润表",cashflow:"历史现金流量表",fina_indicator:"历史财务指标"})[kind],years:[],state:manifests?"partial":"unpublished",detail:"已发布批次 "+manifests+"（每批最多50只）"};
+      }catch{return {id:kind,name:({balancesheet:"历史资产负债表",income:"历史利润表",cashflow:"历史现金流量表",fina_indicator:"历史财务指标"})[kind],years:[],state:"error",detail:"批次清单暂不可读"};}
+    }));
+    return [...output,...financialOverview];
   }finally{s.client.destroy();}
 }
 export const archiveOverview=unstable_cache(readArchiveOverview,["research-archive-overview-v1"],{revalidate:600});
