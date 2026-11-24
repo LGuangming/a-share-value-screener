@@ -148,10 +148,6 @@ def recalculate_ncav(args):
         rows = store.screen_inputs(quote_day)
         stats["pre_screened"] = len(rows)
         stats["screen_scope"] = "all_sh_sz_mainboard"
-        stats["default_price_pb_pre_screened"] = sum(
-            row["quote"].get("close") is not None and float(row["quote"]["close"])<=10
-            and (row["quote"].get("pb") is None or float(row["quote"]["pb"])<=1.2) for row in rows
-        )
         results = []
         for row in rows:
             stock = {"ts_code": row["ts_code"], "name": row["name"], "is_st": row["is_st"],
@@ -183,6 +179,7 @@ def recalculate_ncav(args):
                 r["signal"] = technical_signal(
                     histories.get(r["ts_code"], []), True, r["flags"]
                 )
+        stats["default_price_pb_pre_screened"] = sum(r["price"] is not None and r["price"]<=10 and (r["pb"] is None or r["pb"]<=1.2) for r in results)
         stats["candidate_count"] = len(selected)
         stats["financial_data_gap"] = sum(r["status"] == "DATA_GAP" for r in results)
         stats["financial_ignored"] = sum(r["status"] == "FINANCIAL_IGNORED" for r in results)

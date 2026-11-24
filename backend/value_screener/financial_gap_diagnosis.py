@@ -28,7 +28,7 @@ def run():
             LEFT JOIN financial_reports r ON r.ts_code=p.ts_code
               AND r.disclosed_at<=%s AND r.end_date<=%s
             WHERE p.trade_date=%s
-              AND NOT s.is_st AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
+              AND NOT s.is_st AND s.market='主板' AND right(p.ts_code,3) IN ('.SH','.SZ')
               AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
             GROUP BY p.ts_code
             HAVING MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') IS NULL

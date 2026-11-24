@@ -251,7 +251,7 @@ class Store:
                 ) f ON true
                 WHERE p.trade_date=%s
                   
-                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
+                  AND s.market='主板' AND right(p.ts_code,3) IN ('.SH','.SZ')
             """, (quote_day,)).fetchone()
         return row["fingerprint"]
 
@@ -277,7 +277,7 @@ class Store:
                 LEFT JOIN financial_reports r ON r.ts_code=p.ts_code
                   AND r.disclosed_at<=%s AND r.end_date<=%s AND r.report_type='1'
                 WHERE p.trade_date=%s 
-                  AND NOT s.is_st AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
+                  AND NOT s.is_st AND s.market='主板' AND right(p.ts_code,3) IN ('.SH','.SZ')
                   AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                 GROUP BY p.ts_code
                 HAVING COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='balancesheet'),DATE '1900-01-01')<%s
@@ -338,7 +338,7 @@ class Store:
                 WHERE p.trade_date=%s
                   
                   AND NOT s.is_st
-                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
+                  AND s.market='主板' AND right(p.ts_code,3) IN ('.SH','.SZ')
                   AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                 GROUP BY p.ts_code, p.pb, p.market_cap_yuan, log.attempted_at
                 HAVING MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') IS NULL
@@ -378,7 +378,7 @@ class Store:
                   ON r.ts_code=e.ts_code AND r.end_date=e.period
                  AND r.disclosed_at<=%s AND r.report_type='1'
                 WHERE NOT s.is_st
-                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
+                  AND s.market='主板' AND right(p.ts_code,3) IN ('.SH','.SZ')
                   AND NOT (btrim(coalesce(s.industry,'')) = ANY(%s::text[]))
                   AND (log.attempted_at IS NULL OR
                        log.attempted_at < now()-interval '6 hours')
@@ -522,7 +522,7 @@ class Store:
                    ORDER BY f.end_date DESC,f.disclosed_at DESC LIMIT 1
                 ) c ON true
                 WHERE p.trade_date=%s 
-                  AND s.market='主板' AND (p.ts_code LIKE '%.SH' OR p.ts_code LIKE '%.SZ')
+                  AND s.market='主板' AND right(p.ts_code,3) IN ('.SH','.SZ')
                 ORDER BY p.market_cap_yuan ASC
             """, (day,)).fetchall()
         return rows

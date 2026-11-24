@@ -1,1 +1,2 @@
 Full main-board financial archive catch-up with no provider calls, then force NCAV publication.
+Retry with parameter-safe SQL suffix predicate.
