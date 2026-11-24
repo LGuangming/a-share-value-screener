@@ -1,3 +1,5 @@
 One-time phase-2 historical market enrichment 2025 through 2020. Datasets: adj_factor, stk_limit, daily_basic, suspend_d. Private Neon immutable monthly Parquet archive and SHA-256 verification. Skip published verified months; stop on errors; do not collect unauthorized stock_st or VIP financials.
 Retry after recording a bounded set of legacy unrecognized stock symbols; never claim historical ST or financial PIT completion.
 Second retry after QA review: preserve missing/zero source price limits and mark those rows unusable for strict trading. Reuse verified 2025 adj_factor partitions. Queue behind running disclosure/finance work to avoid overlapping Tushare calls.
+
+2026-11-24: resume 2020 daily_basic and suspend_d; preserve sparse source nulls.

@@ -13,6 +13,7 @@ permissions:
 # This is deliberately serialized behind the market enrichment workflow.
 concurrency:
   group: a-share-backtest-history
+  queue: max
   cancel-in-progress: false
 
 jobs:

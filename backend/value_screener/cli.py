@@ -13,6 +13,7 @@ from .rules import assess, technical_signal, ScreenConfig
 from .store import Store
 from .tushare_client import TushareClient, TushareError
 from .financial_schedule import confirmed_disclosures, recent_closed_quarters
+from .market_session import market_session
 
 LOGGER = logging.getLogger("value_screener")
 CN_TZ = ZoneInfo("Asia/Shanghai")
@@ -24,11 +25,11 @@ def fetch_market(args) -> bool:
     Returns False on exchange holidays so the legacy combined CLI can skip
     recalculation. The scheduled workflow uses this command independently.
     """
-    day = date.fromisoformat(args.date) if args.date else datetime.now(CN_TZ).date()
     db = os.environ.get("DATABASE_URL", "")
     if not db:
         raise RuntimeError("DATABASE_URL is required")
     client = TushareClient.from_environment()
+    day = market_session(client, args.date, datetime.now(CN_TZ))
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "market_refresh", day)
@@ -46,9 +47,23 @@ def fetch_market(args) -> bool:
         stats["listed_stocks"] = len(stocks)
         quotes = client.daily(day.strftime("%Y%m%d"))
         min_rows = max(1000, round(len(stocks) * 0.70))
+        stats["provider_quote_rows"] = len(quotes)
+        LOGGER.info("daily_basic probe: date=%s source=%s rows=%d minimum=%d",
+                    day, client.source, len(quotes), min_rows)
         if len(quotes) < min_rows:
+            # Diagnose an empty expected session without substituting another day.
+            if not quotes:
+                stats["provider_empty"] = True
+                try:
+                    prior = market_session(client, None, datetime.combine(day, datetime.min.time(), CN_TZ))
+                    prior_rows = len(client.daily(prior.strftime("%Y%m%d")))
+                    stats["diagnostic_prior_date"] = prior.isoformat()
+                    stats["diagnostic_prior_rows"] = prior_rows
+                    LOGGER.warning("Read-only prior-session diagnostic: date=%s rows=%d", prior, prior_rows)
+                except Exception as probe_error:
+                    LOGGER.warning("Prior-session diagnostic unavailable: %s", type(probe_error).__name__)
             raise RuntimeError(
-                f"Daily quotes incomplete: {len(quotes)} versus {min_rows} minimum"
+                f"Daily quotes incomplete for {day}: {len(quotes)} versus {min_rows} minimum"
             )
         signature_before = store.market_data_signature(day)
         store.upsert_stocks(stocks)
@@ -402,8 +417,8 @@ def bootstrap_financials(args):
 
 def check_api(args):
     """Read-only connectivity probe, with no Neon database writes."""
-    day = date.fromisoformat(args.date) if args.date else datetime.now(CN_TZ).date()
     client = TushareClient.from_environment()
+    day = market_session(client, args.date, datetime.now(CN_TZ))
     open_session = client.trade_open(day.strftime("%Y%m%d"))
     stocks = client.stocks()
     if not stocks:
@@ -432,15 +447,15 @@ def main():
     subs = parser.add_subparsers(dest="command",required=True)
     subs.add_parser("init-db", help="Create the database tables")
     check = subs.add_parser("check-api", help="Test the selected Tushare API without database writes")
-    check.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
+    check.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default latest eligible session")
     market = subs.add_parser("fetch-market", help="Update stock universe and quotes only")
-    market.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
+    market.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default latest eligible session")
     recalc = subs.add_parser("recalculate-ncav", help="Publish NCAV using cached market and financial data")
     recalc.add_argument("--date", help="Optional latest date bound (default today)")
     recalc.add_argument("--trigger-run-id", type=int,
                         help="Only recalculate if triggering Actions run successfully saved market/finance data")
     scan = subs.add_parser("scan", help="Legacy combined market fetch and NCAV calculation")
-    scan.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default today")
+    scan.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default latest eligible session")
     finance = subs.add_parser("refresh-financials", help="Independently refresh selected financial reports")
     finance.add_argument("--asof", help="Reference date in Asia/Shanghai (YYYY-MM-DD); default today")
     finance.add_argument("--budget", type=int, default=40,

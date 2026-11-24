@@ -127,6 +127,10 @@ def validate_row(dataset: str, record: dict, day: str):
     if str(record.get("trade_date")) != day or not DATE.fullmatch(day):
         raise RuntimeError(f"Invalid trade_date in {dataset} {day}")
     for col in REQUIRED_POSITIVE.get(dataset, ()):
+        # A sparse genuine source NULL is not a zero or an estimate.
+        # Keep missing valuation inputs nullable; enforce coverage per day.
+        if dataset == "daily_basic" and record.get(col) in (None, ""):
+            continue
         try:
             val = float(record.get(col))
         except (TypeError, ValueError) as exc:
@@ -155,7 +159,8 @@ def validate_row(dataset: str, record: dict, day: str):
             raise RuntimeError(f"Crossed limit quotes {day}")
     if dataset == "suspend_d" and record.get("suspend_type") not in ("S", "R"):
         raise RuntimeError(f"Invalid suspension type {day}")
-    return tuple(record.get(k) for k in DATASETS[dataset])
+    return tuple(None if record.get(k) == "" and k in REQUIRED_POSITIVE.get(dataset, ())
+                 else record.get(k) for k in DATASETS[dataset])
 
 
 def collect_month(client, dataset: str, year: int, month: str, days: list[str],
@@ -169,6 +174,9 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
     total = 0
     days_nonempty = 0
     unknown_limit_rows = 0
+    missing_total_mv_rows = 0
+    missing_total_share_rows = 0
+    unusable_valuation_rows = 0
     with csv_file.open("w", encoding="utf-8", newline="") as fp:
         writer = csv.writer(fp)
         writer.writerow(fields)
@@ -180,8 +188,15 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
             if len(records) >= API_CAP[dataset]:
                 raise RuntimeError(f"{dataset} {day}: possible provider row truncation")
             seen = set()
+            day_missing_mv = day_missing_share = day_unusable = 0
             for record in records:
                 values = validate_row(dataset, record, day)
+                if dataset == "daily_basic":
+                    missing_mv = record.get("total_mv") in (None, "")
+                    missing_share = record.get("total_share") in (None, "")
+                    day_missing_mv += int(missing_mv)
+                    day_missing_share += int(missing_share)
+                    day_unusable += int(missing_mv or missing_share)
                 if dataset == "stk_limit":
                     if any(record.get(col) in (None, "", 0, 0.0)
                            for col in ("up_limit", "down_limit")):
@@ -193,6 +208,16 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
                     raise RuntimeError(f"Duplicated data key: {dataset} {day}")
                 seen.add(key)
                 writer.writerow(values)
+            if dataset == "daily_basic":
+                # Fail closed on systemic provider missingness (over 1% daily).
+                if day_unusable > max(1, len(records) // 100):
+                    raise RuntimeError(f"Excess missing valuation inputs {day}: {day_unusable}/{len(records)}")
+                missing_total_mv_rows += day_missing_mv
+                missing_total_share_rows += day_missing_share
+                unusable_valuation_rows += day_unusable
+                if day_unusable:
+                    print(f"PHASE2_VALUATION_GAP date={day} missing_total_mv={day_missing_mv} "
+                          f"missing_total_share={day_missing_share} unusable_rows={day_unusable}", flush=True)
             total += len(records)
             days_nonempty += int(bool(records))
             print(f"PHASE2_DAY dataset={dataset} date={day} rows={len(records)}",
@@ -229,6 +254,10 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
         "rows": count, "sessions": len(days),
         "nonempty_sessions": days_nonempty,
         "unusable_limit_rows": unknown_limit_rows if dataset == "stk_limit" else None,
+        "missing_total_mv_rows": missing_total_mv_rows if dataset == "daily_basic" else None,
+        "missing_total_share_rows": missing_total_share_rows if dataset == "daily_basic" else None,
+        "unusable_valuation_rows": unusable_valuation_rows if dataset == "daily_basic" else None,
+        "valuation_null_policy": "preserve_null_exclude_from_valuation_max_1pct_daily" if dataset == "daily_basic" else None,
         "min_session": days[0], "max_session": days[-1],
         "sha256": sha, "parquet_bytes": pq_file.stat().st_size,
         "object_key": f"{prefix(dataset, year)}/month={month}.parquet",

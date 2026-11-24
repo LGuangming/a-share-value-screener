@@ -35,6 +35,17 @@ class Phase2MarketTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid price limit"):
             validate_row("stk_limit", row, "20250102")
 
+    def test_sparse_missing_valuation_is_preserved_not_zero(self):
+        row = {"ts_code": "000001.SZ", "trade_date": "20200918",
+               "total_mv": None, "total_share": 100.0}
+        self.assertIsNone(validate_row("daily_basic", row, "20200918")[2])
+        row["total_mv"] = ""
+        self.assertIsNone(validate_row("daily_basic", row, "20200918")[2])
+        for bad in (0, -1, float("nan"), "invalid"):
+            row["total_mv"] = bad
+            with self.assertRaises(RuntimeError):
+                validate_row("daily_basic", row, "20200918")
+
     def test_suspension_types_and_nullable_timing(self):
         x = {"ts_code": "600000.SH", "trade_date": "20250813",
              "suspend_type": "S", "suspend_timing": None}
