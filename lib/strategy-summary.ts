@@ -15,3 +15,14 @@ export function combineStrategyResults(groups:SummaryGroup[],selected:string[]):
   }
   return [...byCode.values()].sort((a,b)=>b.hits.length-a.hits.length||a.ts_code.localeCompare(b.ts_code));
 }
+
+export type SummaryMode="union"|"intersection"|"minimum";
+export function filterStrategyResults(groups:SummaryGroup[],selected:string[],mode:SummaryMode,minimum=2){
+  const active=groups.filter(g=>selected.includes(g.id));
+  const ready=active.filter(g=>g.state==="ready");
+  const threshold=mode==="union"?1:mode==="intersection"?active.length:Math.max(1,Math.trunc(minimum));
+  // Never silently treat unpublished strategies as satisfied or shrink the intersection.
+  const complete=mode==="union"||active.length===ready.length;
+  const rows=complete&&threshold>0&&threshold<=ready.length?combineStrategyResults(groups,selected).filter(r=>r.hits.length>=threshold):[];
+  return {rows,complete,threshold};
+}
