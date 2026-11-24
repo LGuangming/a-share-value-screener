@@ -1,0 +1,1 @@
+Start BaoStock-only historical ST backfill 2025-2020 after provider preflight. No Tushare API requests. Independent concurrency group.
