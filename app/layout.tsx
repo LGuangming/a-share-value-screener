@@ -3,9 +3,9 @@ import Nav from "@/components/nav";
 import GlobalCommand from "@/components/global-command";
 import StockPreview from "@/components/stock-preview";
 import {PreferencesRoot,AppearanceControls} from "@/components/workspace-preferences";
-import "./workspace.css";
 import "./globals.css";
 import "./theme-orange.css";
+import "./workspace.css";
 
 export const metadata: Metadata = {
   title: { default: "价值雷达 | A股多策略选股", template: "%s | 价值雷达" },
