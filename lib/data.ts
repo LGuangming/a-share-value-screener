@@ -242,3 +242,20 @@ export async function stockDetail(code: string): Promise<{ stock: ScreenerRow | 
     return { stock: null, prices: [], recent: [] };
   }
 }
+
+export async function searchStockIdentities(query:string):Promise<{ts_code:string;name:string;industry:string|null}[]>{
+  const db=connection();
+  if(!db)throw new Error("Stock directory unavailable");
+  const q=query.trim().slice(0,40);
+  if(!q)return [];
+  // Use literal substring matching, not user-supplied SQL wildcard patterns.
+  const rows=await db`
+    SELECT ts_code,name,industry FROM stocks
+    WHERE strpos(lower(ts_code),lower(${q}))>0 OR strpos(lower(name),lower(${q}))>0
+    ORDER BY CASE WHEN upper(ts_code)=upper(${q}) THEN 0
+      WHEN name=${q} THEN 1 WHEN strpos(lower(ts_code),lower(${q}))=1 THEN 2
+      WHEN strpos(lower(name),lower(${q}))=1 THEN 3 ELSE 4 END,ts_code
+    LIMIT 12
+  `;
+  return rows.map(r=>({ts_code:String(r.ts_code),name:String(r.name),industry:r.industry?String(r.industry):null}));
+}
