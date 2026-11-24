@@ -205,18 +205,20 @@ def run_financial_refresh(args):
     db = os.environ.get("DATABASE_URL", "")
     if not db:
         raise RuntimeError("DATABASE_URL is required")
-    client = TushareClient.from_environment()
+    archive_first = getattr(args, "archive_first", False)
+    archive_only = archive_first and args.budget == 0
+    client = None if archive_only else TushareClient.from_environment()
     store = Store(db)
     run_id = uuid4()
     store.start_run(run_id, "financial_refresh", day)
     stats = {"asof": day.isoformat(), "budget": args.budget,
-             "api_source": client.source, "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+             "api_source": client.source if client else "archive_only", "github_run_id": os.environ.get("GITHUB_RUN_ID"),
              "recalc_needed": False, "mode": None, "attempted": 0,
              "succeeded": 0, "failed": 0, "financial_api_calls": 0,
              "disclosure_api_calls": 0,
              "notes": "Fill incomplete statements first, then poll actual disclosures. No daily snapshot modified."}
     try:
-        if args.budget == 0:
+        if args.budget == 0 and not archive_first:
             store.finish_run(run_id, "skipped", stats)
             LOGGER.info("Financial refresh skipped: budget=0")
             return
@@ -232,6 +234,21 @@ def run_financial_refresh(args):
         # Compare only financials usable with the latest completed market
         # session; later disclosures must not rewrite that historical date.
         signature_before = store.financial_inputs_signature(quote_day)
+        if archive_first:
+            if day!=datetime.now(CN_TZ).date():
+                raise RuntimeError("Archive-first refresh requires current live date")
+            from .financial_archive_import import import_archive
+            before=store.financial_backlog(quote_day,day,0)
+            stats["backlog_before_archive"]=before["remaining"]
+            stats.update(import_archive(store,quote_day,day))
+            stats["backlog_after_archive"]=store.financial_backlog(quote_day,day,0)["remaining"]
+            LOGGER.info("Financial archive reuse: %s",json.dumps(stats,ensure_ascii=False))
+            if archive_only:
+                stats["mode"]="archive_only"
+                stats["recalc_needed"]=signature_before!=store.financial_inputs_signature(quote_day)
+                store.finish_run(run_id,"success" if stats["recalc_needed"] else "skipped",stats)
+                LOGGER.info("Financial refresh finished: %s",json.dumps(stats,ensure_ascii=False))
+                return
         backlog = store.financial_backlog(quote_day, day, args.budget)
         stats["backlog_remaining_before"] = backlog["remaining"]
         if backlog["remaining"] > 0:
@@ -254,8 +271,10 @@ def run_financial_refresh(args):
             queue = store.financial_disclosure_queue(quote_day, day, events, args.budget)
         stats["queued"] = len(queue)
         if not queue:
-            store.finish_run(run_id, "skipped", stats)
-            LOGGER.info("Financial refresh skipped: %s", json.dumps(stats, ensure_ascii=False))
+            if archive_first:
+                stats["recalc_needed"]=signature_before!=store.financial_inputs_signature(quote_day)
+            store.finish_run(run_id, "success" if stats["recalc_needed"] else "skipped", stats)
+            LOGGER.info("Financial refresh finished without provider queue: %s", json.dumps(stats, ensure_ascii=False))
             return
 
         for event in queue:
@@ -305,6 +324,8 @@ def run_financial_refresh(args):
         stats["recalc_needed"] = (
             signature_before != store.financial_inputs_signature(quote_day)
         )
+        if archive_first:
+            stats["backlog_after_refresh"]=store.financial_backlog(quote_day,day,0)["remaining"]
         store.finish_run(run_id, "success", stats)
         LOGGER.info("Financial refresh finished: %s", json.dumps(stats, ensure_ascii=False))
     except Exception as exc:
@@ -483,6 +504,7 @@ def main():
     finance.add_argument("--asof", help="Reference date in Asia/Shanghai (YYYY-MM-DD); default today")
     finance.add_argument("--budget", type=int, default=40,
                          help="Maximum companies to refresh (missing report kinds only); default 40")
+    finance.add_argument("--archive-first",action="store_true",help="Reuse verified archive before provider fallback; budget 0 = archive only")
     vip = subs.add_parser("bootstrap-financials",help="Bulk quarter reports (requires Tushare VIP access)")
     vip.add_argument("--period",required=True,help="Quarter-end YYYYMMDD, e.g. 20260930")
     vip.add_argument("--min-coverage",type=float,default=0.80,

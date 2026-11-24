@@ -264,6 +264,51 @@ class Store:
         return {"listed_stocks": int(row["listed_stocks"]),
                 "quoted_stocks": int(row["quoted_stocks"])}
 
+    def archive_financial_targets(self, quote_day: date, asof: date, cutoff: date) -> dict:
+        """Current non-ST main-board prefilter; include missing or older periods."""
+        with self.connect() as conn:
+            rows=conn.execute("""
+                SELECT p.ts_code,
+                       MAX(r.end_date) FILTER (WHERE r.kind='balancesheet') AS balancesheet,
+                       MAX(r.end_date) FILTER (WHERE r.kind='income') AS income,
+                       MAX(r.end_date) FILTER (WHERE r.kind='cashflow') AS cashflow
+                FROM daily_prices p JOIN stocks s USING(ts_code)
+                LEFT JOIN financial_reports r ON r.ts_code=p.ts_code
+                  AND r.disclosed_at<=%s AND r.end_date<=%s AND r.report_type='1'
+                WHERE p.trade_date=%s AND p.close<=10 AND (p.pb<=1.2 OR p.pb IS NULL)
+                  AND NOT s.is_st AND s.market NOT IN ('科创板','创业板','北交所')
+                GROUP BY p.ts_code
+                HAVING COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='balancesheet'),DATE '1900-01-01')<%s
+                    OR COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='income'),DATE '1900-01-01')<%s
+                    OR COALESCE(MAX(r.end_date) FILTER (WHERE r.kind='cashflow'),DATE '1900-01-01')<%s
+            """,(asof,asof,quote_day,cutoff,cutoff,cutoff)).fetchall()
+        return {r["ts_code"]:{k:r[k] for k in ("balancesheet","income","cashflow")} for r in rows}
+
+    def insert_archive_financials(self, items, asof: date) -> tuple[int,int]:
+        """Insert only new periods, never overwrite current live reports."""
+        inserted=0;companies=set()
+        with self.connect() as conn:
+            conn.execute("SET LOCAL lock_timeout='15s'")
+            conn.execute("LOCK TABLE financial_reports IN SHARE ROW EXCLUSIVE MODE")
+            for code,kind,end,disclosed,row,provenance in items:
+                if row.get("ts_code")!=code or str(row.get("report_type"))!="1" or kind not in ("balancesheet","income","cashflow") or not end<=disclosed<=asof:
+                    raise RuntimeError("Invalid archived financial import row")
+                metrics={k:v for k,v in row.items() if k not in {"ts_code","ann_date","f_ann_date","end_date","report_type","comp_type","update_flag"}}
+                raw={**row,"_archive_import":provenance}
+                result=conn.execute("""
+                    INSERT INTO financial_reports
+                      (ts_code,kind,end_date,disclosed_at,report_type,metrics,raw)
+                    SELECT %s,%s,%s,%s,'1',%s,%s
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM financial_reports WHERE ts_code=%s AND kind=%s
+                          AND report_type='1' AND end_date >= %s AND disclosed_at<=%s
+                    )
+                    ON CONFLICT (ts_code,kind,end_date,disclosed_at,report_type) DO NOTHING
+                """,(code,kind,end,disclosed,Jsonb(metrics),Jsonb(raw),code,kind,end,asof))
+                if result.rowcount:
+                    inserted+=1;companies.add(code)
+        return inserted,len(companies)
+
     def financial_backlog(self, quote_day: date, asof: date, budget: int) -> dict:
         """Find missing / mismatched financial statements for current candidates.
 
