@@ -394,3 +394,34 @@ test("review toggle shares the two-line chip packing and table headings own sort
   assert.match(screen,/onClick=\{\(\)=>sortBy/);
   assert.match(screen,/aria-sort=/);
 });
+
+test("site password gate uses signed, expiring, rotation-bound sessions and rejects unsafe return URLs",()=>{
+  const ts=require("typescript"),m={exports:{}};
+  new Function("module","exports","require",ts.transpileModule(read("lib/site-access.ts"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m,m.exports,id=>id==="server-only"?{}:require(id));
+  const a=m.exports,config={password:"test-only-password-123",secret:"ab".repeat(32)},now=1700000000;
+  assert.equal(a.passwordMatches(config.password,config),true);
+  assert.equal(a.passwordMatches("wrong",config),false);
+  const token=a.issueSession(config,now);
+  assert.equal(a.validSession(token,config,now),true);
+  assert.equal(a.validSession(token,config,now+a.SESSION_SECONDS),false);
+  assert.equal(a.validSession(token,{...config,password:"new-test-password-123"},now),false);
+  assert.equal(a.validSession(token,{...config,secret:"cd".repeat(32)},now),false);
+  assert.equal(a.validSession(token.slice(0,-1)+(token.endsWith("0")?"1":"0"),config,now),false);
+  assert.equal(a.validSession(token,null,now),false);
+  assert.equal(a.sessionCookie(token).httpOnly,true);
+  assert.equal(a.sessionCookie(token).path,"/");
+  for(const path of ["//evil.invalid","/%2fexternal.invalid","/login","/api/quotes","/_next/data","https://evil.invalid","/\\evil.invalid"])assert.equal(a.safeReturnPath(path),"/");
+  assert.equal(a.safeReturnPath("/research?code=000001.SZ"),"/research?code=000001.SZ");
+});
+test("site gate covers routes and APIs, fails closed, and login is isolated from research layout",()=>{
+  const proxy=read("proxy.ts"),login=read("app/login/route.ts"),layout=read("app/layout.tsx");
+  assert.match(proxy,/matcher:\["\/:path\*"\]/);
+  assert.match(proxy,/if\(!config\)return NextResponse.json/);
+  assert.match(proxy,/status:401/);
+  assert.match(proxy,/validSession\(/);
+  assert.match(layout,/validSession\(\(await cookies\(\)\)/);
+  assert.match(login,/sameOriginPost/);
+  assert.match(login,/response.cookies.set\(sessionCookie\(issueSession\(config\)\)\)/);
+  assert.match(login,/type="password"/);
+  assert.match(read("app/api/access/logout/route.ts"),/sessionCookie\("",0\)/);
+});
