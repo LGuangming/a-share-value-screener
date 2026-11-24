@@ -23,7 +23,7 @@ from .neon_archive import StorageConfig, preflight, s3_client, verify_archive, v
 from .phase2_market import get_optional_json, put_manifest
 from .tushare_client import TushareClient
 
-PREFIX = "a-share-backtest/v1/phase2/historical_st/v1"
+PREFIX = "a-share-backtest/v1/phase2/historical_st/v2"
 FIELDS = "ts_code,name,start_date,end_date,ann_date,change_reason"
 CODE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 BATCH = 20
@@ -125,8 +125,7 @@ def fetch_bao(bs, code, first, last):
         if attempt < 2:
             time.sleep(3 * (attempt+1))
             bs.logout()
-            if bs.login().error_code != "0":
-                raise RuntimeError("BaoStock reconnect failed")
+            login_bao(bs)
     raise RuntimeError("BaoStock daily query failed after retries")
 
 
@@ -157,15 +156,15 @@ def collect_batch(s3,bucket,client,bs,codes,first,last,root,namespace,index):
     else:
         records = []
         for code in codes:
-            names = fetch_names(client,code) if CODE.fullmatch(code) else []
-            bao = fetch_bao(bs,code,first,last)
+            names = fetch_names(client,code) if client is not None and CODE.fullmatch(code) else []
+            bao = fetch_bao(bs,code,first,last) if bs is not None else {"status":"not_collected","rows":[]}
             records.append({"ts_code":code,"namechange":names,"baostock":bao})
         raw = gzip.compress(json.dumps(records,ensure_ascii=False,allow_nan=False,
                                        separators=(",",":")).encode(),mtime=0)
         meta = save_bytes(s3,bucket,key,raw)
         put_manifest(s3,bucket,manifest_key,{**meta,"codes":codes,"first":first,"last":last})
         path.write_bytes(raw)
-    print(f"ST_RAW_BATCH index={index} symbols={len(codes)}",flush=True)
+    print(f"ST_RAW_BATCH index={index} symbols={len(codes)} status={'reused_verified' if existing is not None else 'uploaded_verified'}",flush=True)
     return path
 
 
@@ -245,58 +244,118 @@ def publish_year(con,s3,bucket,root,namespace,year,paths,baseline):
     return doc
 
 
+def login_bao(bs):
+    for attempt in range(3):
+        print(f"BAOSTOCK_LOGIN attempt={attempt+1}",flush=True)
+        result=bs.login()
+        if result.error_code=="0":
+            print("BAOSTOCK_LOGIN status=connected",flush=True)
+            return
+        print(f"BAOSTOCK_LOGIN status=failed attempt={attempt+1}",flush=True)
+        if attempt<2:
+            time.sleep(10*(attempt+1))
+    raise RuntimeError("BaoStock login failed after three attempts")
+
+
+def restore_source_batch(s3,bucket,root,namespace,source,index,codes,first,last):
+    key=f"{namespace}/{source}/raw/batch={index:05d}.json.gz"
+    meta=get_optional_json(s3,bucket,key+".manifest.json")
+    if meta is None:
+        raise RuntimeError(f"Missing verified {source} batch {index}")
+    if meta.get("codes")!=codes or meta.get("first")!=first or meta.get("last")!=last:
+        raise RuntimeError("Source batch identity mismatch")
+    path=root/f"{source}-{index:05d}.json.gz"
+    records=json.loads(gzip.decompress(load_bytes(s3,bucket,meta,key,path)))
+    if [r["ts_code"] for r in records]!=codes:
+        raise RuntimeError("Source batch code mismatch")
+    return records
+
+
+def run_archive(args,s3,bucket,client,bs):
+    import duckdb
+    first=f"{args.end_year}-01-01"
+    last=f"{args.start_year}-12-31"
+    with tempfile.TemporaryDirectory(prefix="historical-st-") as temp:
+        root=Path(temp)
+        baselines={}
+        years=range(args.start_year,args.end_year-1,-1)
+        for year in years:
+            dest=root/"baseline"
+            baselines[year]=verify_archive(s3,bucket,year,dest)
+        con=duckdb.connect()
+        try:
+            files=[str(root/"baseline"/p["path"]) for m in baselines.values() for p in m["partition_files"]]
+            codes=[r[0] for r in con.execute("SELECT DISTINCT ts_code FROM read_parquet(?) ORDER BY ts_code",[files]).fetchall()]
+            identity=hashlib.sha256(json.dumps(codes,separators=(",",":")).encode()).hexdigest()
+            namespace=f"{PREFIX}/range={args.end_year}-{args.start_year}/universe={identity}"
+            source=args.source
+            out=f"{namespace}/{source}"
+            paths=[]
+            for i in range(0,len(codes),BATCH):
+                subset=codes[i:i+BATCH]
+                index=i//BATCH
+                if source=="merged":
+                    bao=restore_source_batch(s3,bucket,root,namespace,"baostock",index,subset,first,last)
+                    names=restore_source_batch(s3,bucket,root,namespace,"namechange",index,subset,first,last)
+                    records=[{"ts_code":a["ts_code"],"baostock":a["baostock"],"namechange":b["namechange"]}
+                             for a,b in zip(bao,names)]
+                    path=root/f"merged-{index:05d}.json.gz"
+                    path.write_bytes(gzip.compress(json.dumps(records,ensure_ascii=False,allow_nan=False).encode()))
+                else:
+                    path=collect_batch(s3,bucket,client,bs,subset,first,last,root,out,index)
+                paths.append(path)
+            docs=[publish_year(con,s3,bucket,root,out,y,paths,baselines[y]) for y in years]
+            counts=Counter()
+            for doc in docs:
+                counts.update(doc["resolution_counts"])
+            put_manifest(s3,bucket,out+"/manifest.json",{
+                "source":source,"years":list(years),"universe_sha256":identity,"symbols":len(codes),
+                "rows":sum(d["rows"] for d in docs),"year_manifests":docs,
+                "resolution_counts":dict(counts),
+                "status":"archived_with_explicit_unknowns"})
+            print(f"ST_ARCHIVE_STATUS source={source} all_requested_years_verified_with_explicit_unknowns resolution_counts={dict(counts)}",flush=True)
+        finally:
+            con.close()
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--start-year",type=int,default=2025)
     parser.add_argument("--end-year",type=int,default=2020)
+    parser.add_argument("--source",choices=("baostock","namechange","merged"),required=True)
     parser.add_argument("--probe-only",action="store_true")
     args=parser.parse_args()
     if not 2020<=args.end_year<=args.start_year<date.today().year:
         parser.error("Use descending completed years from 2020")
-    import baostock as bs
-    import duckdb
+    if args.source=="merged" and args.probe_only:
+        parser.error("Merge is storage-only; no provider probe")
     cfg=StorageConfig.from_environment()
     s3=s3_client(cfg)
     preflight(s3,cfg.bucket)
-    client=TushareClient.from_environment()
-    if not fetch_names(client,"000001.SZ"):
-        raise RuntimeError("namechange preflight returned no history")
-    if bs.login().error_code != "0":
-        raise RuntimeError("BaoStock login failed")
+    client=None
+    bs=None
+    if args.source=="namechange":
+        client=TushareClient.from_environment()
+        if not fetch_names(client,"000001.SZ"):
+            raise RuntimeError("namechange preflight returned no history")
+        print("ST_PROVIDER_PREFLIGHT source=namechange status=passed",flush=True)
+    elif args.source=="baostock":
+        import socket
+        socket.setdefaulttimeout(30)
+        import baostock as bs
+        login_bao(bs)
     try:
-        probe=fetch_bao(bs,"000001.SZ","2025-01-01","2025-01-10")
-        if not any(r[1] in ("0","1") for r in probe["rows"]):
-            raise RuntimeError("BaoStock isST preflight returned no usable values")
-        print("ST_PROVIDER_PREFLIGHT both_sources_responded",flush=True)
+        if bs is not None:
+            probe=fetch_bao(bs,"000001.SZ","2025-01-01","2025-01-10")
+            if not any(r[1] in ("0","1") for r in probe["rows"]):
+                raise RuntimeError("BaoStock isST preflight returned no usable values")
+            print("ST_PROVIDER_PREFLIGHT source=baostock status=passed",flush=True)
         if args.probe_only:
             return
-        first=f"{args.end_year}-01-01"
-        last=f"{args.start_year}-12-31"
-        with tempfile.TemporaryDirectory(prefix="historical-st-") as temp:
-            root=Path(temp)
-            baselines={}
-            years=range(args.start_year,args.end_year-1,-1)
-            for year in years:
-                dest=root/"baseline"
-                baselines[year]=verify_archive(s3,cfg.bucket,year,dest)
-            con=duckdb.connect()
-            try:
-                files=[str(root/"baseline"/p["path"]) for m in baselines.values() for p in m["partition_files"]]
-                codes=[r[0] for r in con.execute("SELECT DISTINCT ts_code FROM read_parquet(?) ORDER BY ts_code",[files]).fetchall()]
-                identity=hashlib.sha256(json.dumps(codes,separators=(",",":")).encode()).hexdigest()
-                namespace=f"{PREFIX}/range={args.end_year}-{args.start_year}/universe={identity}"
-                paths=[collect_batch(s3,cfg.bucket,client,bs,codes[i:i+BATCH],first,last,root,namespace,i//BATCH)
-                       for i in range(0,len(codes),BATCH)]
-                docs=[publish_year(con,s3,cfg.bucket,root,namespace,y,paths,baselines[y]) for y in years]
-                put_manifest(s3,cfg.bucket,namespace+"/manifest.json",{
-                    "years":list(years),"universe_sha256":identity,"symbols":len(codes),
-                    "rows":sum(d["rows"] for d in docs),"year_manifests":docs,
-                    "status":"archived_with_explicit_unknowns"})
-                print("ST_ARCHIVE_STATUS all_requested_years_verified_with_explicit_unknowns",flush=True)
-            finally:
-                con.close()
+        run_archive(args,s3,cfg.bucket,client,bs)
     finally:
-        bs.logout()
+        if bs is not None:
+            bs.logout()
 
 
 if __name__=="__main__":
