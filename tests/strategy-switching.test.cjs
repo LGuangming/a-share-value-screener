@@ -547,3 +547,34 @@ test("navigation loading grows from the content left edge without sliding or sid
   assert.match(layout,/className="site-main"/);
   assert.match(layout,/<\/header>\{children\}/);
 });
+
+test("comparison grid bottom edge and distinct strategy chips",()=>{
+  const compare=read("components/stock-comparison.tsx"),css=read("app/workspace.css");
+  assert.match(css,/\.v4-compare-table tbody tr:last-child :is\(th,td\)\{border-bottom:1px solid var\(--border\)\}/);
+  assert.match(compare,/s\.hits\.map\(h=><span className="compare-strategy-chip" data-strategy=\{h\.id\} key=\{h\.id\}>\{h\.name\}/);
+  assert.match(css,/\.compare-strategy-hits\{[^}]*flex-wrap:wrap/);
+  for(const strategy of JSON.parse(read("strategies/catalog.json"))){
+    assert.ok(css.includes('.compare-strategy-chip[data-strategy="'+strategy.id+'"]'));
+    assert.ok(css.includes('html[data-theme=dark] .compare-strategy-chip[data-strategy="'+strategy.id+'"]'));
+  }
+});
+
+test("floating menus dismiss outside without treating their portal as outside",()=>{
+  const hook=read("components/use-dismiss-on-outside.ts");
+  assert.match(hook,/anchor\.current,panel\?\.current/);
+  assert.match(hook,/path\.includes\(node\)/);
+  for(const event of ["pointerdown","focusin"]){
+    assert.ok(hook.includes('addEventListener("'+event+'",outside,true)'));
+    assert.ok(hook.includes('removeEventListener("'+event+'",outside,true)'));
+  }
+  assert.match(hook,/event\.key==="Escape"/);
+  const flyout=read("components/toolbar-flyout.tsx");
+  assert.match(flyout,/useDismissOnOutside\(anchor/);
+  assert.match(flyout,/ref=\{panel\}/);
+  const screen=read("components/screener-results.tsx");
+  for(const anchor of ["searchAnchor","advancedAnchor","columnAnchor"]){
+    assert.ok(screen.includes('anchor={'+anchor+'} onDismiss='));
+  }
+  assert.match(read("components/filter-presets.tsx"),/anchor=\{anchor\} onDismiss=/);
+  assert.match(read("components/stock-comparison.tsx"),/useDismissOnOutside\(industryMenu/);
+});
