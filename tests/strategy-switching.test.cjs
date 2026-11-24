@@ -291,3 +291,5 @@ test("V3 controls persist browser-local preferences, and preview uses a modal",(
   assert.match(css,/data-density=compact/);
   assert.match(css,/prefers-reduced-motion:reduce/);
 });
+
+test("V3 mini trends are opt-in, capped and use the actual close history",()=>{const screen=read("components/screener-results.tsx");assert.match(screen,/useMiniTrends\(trendCodes,mini\)/);assert.match(screen,/slice\(0,25\)/);assert.match(read("lib/data.ts"),/recentMiniTrends/);assert.match(read("app/api/research/trends/route.ts"),/codes.length>25/);assert.match(screen,/watchOnly/);});
