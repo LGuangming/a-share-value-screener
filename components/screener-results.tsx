@@ -7,7 +7,8 @@ import type { ScreenerRow } from "@/lib/data";
 import { fixed, moneyCny, pct, signalLabel, stateLabel } from "@/lib/format";
 import { Empty } from "@/components/empty";
 import ToolbarFlyout from "@/components/toolbar-flyout";
-import {WatchButton} from "@/components/workspace-preferences";
+import {WatchButton,useWatchlist} from "@/components/workspace-preferences";
+import {MiniTrend,useMiniTrends} from "@/components/mini-trends";
 import {PreviewButton} from "@/components/stock-preview";
 
 export type ScreenTableRow = Pick<ScreenerRow,
@@ -77,6 +78,13 @@ export default function ScreenerResults({ rows, initial }: {
   const [ascending, setAscending] = useState(false);
   const [columns, setColumns] = useState<ColumnKey[]>(optionalColumns.map(c=>c.key));
   const [columnMenu, setColumnMenu] = useState(false);
+  const [advanced,setAdvanced]=useState(false);
+  const [industry,setIndustry]=useState("");
+  const [watchOnly,setWatchOnly]=useState(false);
+  const [mini,setMini]=useState(false);
+  const {items:watchlist}=useWatchlist();
+  const watchedCodes=useMemo(()=>new Set(watchlist.map(w=>w.ts_code)),[watchlist]);
+  const industries=useMemo(()=>Array.from(new Set(rows.flatMap(r=>r.industry?[r.industry]:[]))).sort((a,b)=>a.localeCompare(b,"zh-CN")),[rows]);
   const [widths,setWidths]=useState<Partial<Record<ColumnKey,number>>>({});
   const [layoutReady,setLayoutReady]=useState(false);
   useEffect(()=>{try{const saved=JSON.parse(localStorage.getItem("value-radar-columns-v3")||"null");if(saved&&Array.isArray(saved.columns)){const valid=Array.from(new Set<ColumnKey>(saved.columns.filter((k:ColumnKey)=>optionalColumns.some(c=>c.key===k))));setColumns(valid);const w:Partial<Record<ColumnKey,number>>={};for(const c of optionalColumns){const n=saved.widths?.[c.key];if(typeof n==="number"&&Number.isFinite(n))w[c.key]=Math.max(75,Math.min(420,n));}setWidths(w);}}catch{}setLayoutReady(true);},[]);
@@ -90,8 +98,9 @@ export default function ScreenerResults({ rows, initial }: {
   const suggestionListId = useId();
   const searchAnchor=useRef<HTMLDivElement>(null);
   const columnAnchor=useRef<HTMLDivElement>(null);
+  const advancedAnchor=useRef<HTMLDivElement>(null);
   const needle = q.trim().toLocaleLowerCase();
-  useEffect(()=>{const close=()=>{setColumnMenu(false);setSuggestionsOpen(false);};window.addEventListener("a-share-strategy-change",close);return()=>window.removeEventListener("a-share-strategy-change",close);},[]);
+  useEffect(()=>{const close=()=>{setColumnMenu(false);setSuggestionsOpen(false);setAdvanced(false);};window.addEventListener("a-share-strategy-change",close);return()=>window.removeEventListener("a-share-strategy-change",close);},[]);
 
 
   const viewLabel = view === "strict" ? "严格候选" : view === "gaps" ? "数据缺口" : "全部预筛";
@@ -100,6 +109,8 @@ export default function ScreenerResults({ rows, initial }: {
   // Apply price/PB/NCAV controls *before* searching; search never expands
   // into another tab or silently bypasses the selected thresholds.
   const tabRows = useMemo(() => rows.filter(row => {
+    if (industry&&row.industry!==industry) return false;
+    if (watchOnly&&!watchedCodes.has(row.ts_code)) return false;
     if (row.price !== null && row.price > maxPrice) return false;
     if (row.pb !== null && row.pb > maxPb) return false;
     if (view === "strict") return row.is_candidate && row.ncav_coverage !== null
@@ -111,7 +122,7 @@ export default function ScreenerResults({ rows, initial }: {
     if(av===null) return bv===null ? 0 : 1;
     if(bv===null) return -1;
     return ascending ? av-bv : bv-av;
-  }), [rows, view, order, ascending, maxPrice, maxPb, minCoverage]);
+  }), [rows, view, order, ascending, maxPrice, maxPb, minCoverage,industry,watchOnly,watchedCodes]);
 
   const matches = useMemo(() => {
     if (!needle) return [];
@@ -123,6 +134,8 @@ export default function ScreenerResults({ rows, initial }: {
   }, [tabRows, needle]);
 
   const filtered = needle ? matches : tabRows;
+  const trendCodes=filtered.slice(0,25).map(r=>r.ts_code);
+  const trend=useMiniTrends(trendCodes,mini);
   const suggestions = matches.slice(0, 8);
   const shownColumns=columns.flatMap(k=>optionalColumns.filter(c=>c.key===k));
   function sortBy(key:NumericKey) {
@@ -244,8 +257,12 @@ export default function ScreenerResults({ rows, initial }: {
           onChange={e=>setFilter("order",e.target.value,()=>{setOrder(e.target.value as NumericKey);setAscending(false);})}>
           {numericColumns.map(c=><option key={c.key} value={c.key}>{c.label}排序</option>)}
         </select>
+        <div className="column-control" ref={advancedAnchor} onKeyDown={e=>{if(e.key==="Escape")setAdvanced(false);}}>
+          <button type="button" className="tool-button" aria-expanded={advanced} onClick={()=>{setAdvanced(v=>!v);setColumnMenu(false);}}><Filter size={14}/> 高级筛选{industry||watchOnly?" · "+(Number(!!industry)+Number(watchOnly)):""}</button>
+          {advanced&&<ToolbarFlyout anchor={advancedAnchor} align="right" width={240}><div className="column-menu advanced-filter-menu"><label>所属行业<select aria-label="按行业筛选" value={industry} onChange={e=>{setIndustry(e.target.value);setVisibleCount(100);}}><option value="">全部行业</option>{industries.map(i=><option key={i}>{i}</option>)}</select></label><label><input type="checkbox" checked={watchOnly} onChange={e=>{setWatchOnly(e.target.checked);setVisibleCount(100);}}/>仅显示自选股</label><label><input type="checkbox" checked={mini} onChange={e=>setMini(e.target.checked)}/>近20日走势（前25只）</label><button type="button" className="tool-button" onClick={()=>{setIndustry("");setWatchOnly(false);setVisibleCount(100);setAdvanced(false);}}>清空高级筛选</button></div></ToolbarFlyout>}
+        </div>
         <div className="column-control" ref={columnAnchor} onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
-          <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>setColumnMenu(v=>!v)}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
+          <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>{setColumnMenu(v=>!v);setAdvanced(false);}}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
           {columnMenu && <ToolbarFlyout anchor={columnAnchor} align="right" width={290}><div className="column-menu">
             {[...shownColumns,...optionalColumns.filter(c=>!columns.includes(c.key))].map(c=><div className="column-order-row" key={c.key}><label><input type="checkbox" checked={columns.includes(c.key)} onChange={e=>setColumns(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>{c.label}</label><button type="button" aria-label={c.label+"向前移动"} disabled={columns.indexOf(c.key)<=0} onClick={()=>moveColumn(c.key,-1)}><ArrowUp size={13}/></button><button type="button" aria-label={c.label+"向后移动"} disabled={!columns.includes(c.key)||columns.indexOf(c.key)===columns.length-1} onClick={()=>moveColumn(c.key,1)}><ArrowDown size={13}/></button></div>)}
             <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setWidths({});setColumnMenu(false);}}>恢复默认</button>
@@ -257,14 +274,15 @@ export default function ScreenerResults({ rows, initial }: {
     {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
       {viewLabel} · 匹配 {matches.length} 只 / 当前 {tabRows.length} 只
     </div>}
-    {filtered.length ? <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:250+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
-      <colgroup><col style={{width:180}}/>{shownColumns.map(c=><col key={c.key} style={{width:widths[c.key]??105}}/>)}<col style={{width:100}}/></colgroup>
+    {mini&&trend.error&&<div className="stock-search-feedback" role="status">近期走势暂不可用</div>}
+    {filtered.length ? <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:280+(mini?105:0)+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
+      <colgroup><col style={{width:180}}/>{shownColumns.map(c=><col key={c.key} style={{width:widths[c.key]??105}}/>)}{mini&&<col style={{width:105}}/>}<col style={{width:100}}/></colgroup>
       <thead><tr><th className="security-col">股票 / 行业</th>
         {shownColumns.map(c=><th key={c.key} className={c.key==="status"||c.key==="signal"?"":"numeric-col"}
           aria-sort={order===c.key?(ascending?"ascending":"descending"):undefined}>
           {c.key==="status"||c.key==="signal"?c.label:<button type="button" className="sort-heading" onClick={()=>sortBy(c.key as NumericKey)}>{c.label}<ArrowUpDown size={12} className={order===c.key?"sort-active":""}/></button>}
           <button type="button" className="column-resizer" aria-label={c.label+"调整列宽"} onPointerDown={e=>resizeColumn(c.key,e)} onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();setWidths(prev=>({...prev,[c.key]:Math.max(75,Math.min(420,(prev[c.key]??105)+(e.key==="ArrowLeft"?-10:10)))}));}}}/>
-        </th>)}<th aria-label="研究操作">操作</th></tr></thead>
+        </th>)}{mini&&<th>近20日走势</th>}<th aria-label="研究操作">操作</th></tr></thead>
       <tbody>{filtered.slice(0,visibleCount).map(row=><tr key={row.ts_code}>
         <td className="security-col"><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           {row.name}<ArrowUpRight size={13}/></Link>
@@ -273,6 +291,7 @@ export default function ScreenerResults({ rows, initial }: {
           {c.key==="status"?<span className={tagClass(row.status)}>{displayValue(row,c.key)}</span>:
            <span className={c.key==="ncav_coverage" && row.ncav_coverage!==null && row.ncav_coverage>=1.25?"highlight":""}>{displayValue(row,c.key)}</span>}
         </td>)}
+        {mini&&<td>{trend.loading&&trendCodes.includes(row.ts_code)?<span className="muted">…</span>:<MiniTrend points={trend.trends[row.ts_code]}/>}</td>}
         <td><div className="row-actions"><WatchButton stock={row}/><PreviewButton stock={row}/><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           <ArrowRight size={16}/></Link></div></td>
       </tr>)}</tbody></table></div>
