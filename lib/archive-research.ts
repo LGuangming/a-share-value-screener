@@ -6,7 +6,8 @@ import {unstable_cache} from "next/cache";
 import {storage} from "./archive-quotes";
 import {financialHistory,financialKinds,type FinancialKind,type FinancialRecord} from "./research-analysis";
 
-const root="a-share-backtest/v1",phase=root+"/phase2",fin=phase+"/financial_snapshot";
+import { RAW_PREFIX as root } from "./archive-paths";
+const phase=root,fin=root+"/financial";
 type Store=ReturnType<typeof storage>;
 async function get(s:Store,key:string,max:number,timeout=12000):Promise<Uint8Array|null>{
   try{
@@ -26,7 +27,7 @@ async function readFinancial(code:string){
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code))throw Error("Invalid code");
   const s=storage();
   try{
-    const universe=await json(s,phase+"/universe/stock_basic_snapshot.json",4*1024*1024);
+    const universe=await json(s,phase+"/stock_basic/stock_basic_snapshot.json",4*1024*1024);
     if(!universe||universe.status!=="current_snapshot_not_historical"||!Array.isArray(universe.records))throw Error("Missing archive universe");
     const codes=[...new Set<string>(universe.records.map((r:{ts_code:string})=>r.ts_code))].sort();
     const index=codes.indexOf(code);
@@ -53,7 +54,7 @@ async function readFinancial(code:string){
     return {points:financialHistory(records,today),sources};
   }finally{s.client.destroy();}
 }
-export const archivedFinancialHistory=unstable_cache(readFinancial,["research-financial-v1"],{revalidate:3600});
+export const archivedFinancialHistory=unstable_cache(readFinancial,["research-financial-raw-v1"],{revalidate:3600});
 
 export type ArchiveDataset={id:string;name:string;years:{year:number;rows:number;sessions:number|null;unknown?:number}[];state:"ready"|"partial"|"unpublished"|"error";detail:string};
 async function readArchiveOverview():Promise<ArchiveDataset[]>{
@@ -64,7 +65,7 @@ async function readArchiveOverview():Promise<ArchiveDataset[]>{
     for(const spec of specs){
       const checked=await Promise.all(Array.from({length:6},(_,i)=>2020+i).map(async year=>{
         try{
-          const m=await json(s,(spec.id==="prices"?root+"/prices":phase+"/"+spec.id)+"/year="+year+"/manifest.json");
+          const m=await json(s,(spec.id==="prices"?root+"/daily_prices":phase+"/"+spec.id)+"/year="+year+"/manifest.json");
           if(!m)return {state:"unpublished" as const};
           const parts=spec.id==="prices"?m.partition_files:m.months;
           if(m.year!==year||m.dataset!==(spec.id==="prices"?"a_share_daily":spec.id)||!Array.isArray(parts)||parts.length!==12||!parts.every((p:{rows:unknown})=>int(p.rows)))throw Error("Invalid manifest");
@@ -115,4 +116,4 @@ async function readArchiveOverview():Promise<ArchiveDataset[]>{
     return [...output,...financialOverview];
   }finally{s.client.destroy();}
 }
-export const archiveOverview=unstable_cache(readArchiveOverview,["research-archive-overview-v1"],{revalidate:600});
+export const archiveOverview=unstable_cache(readArchiveOverview,["research-archive-overview-raw-v1"],{revalidate:600});

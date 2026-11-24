@@ -17,7 +17,7 @@ from .neon_archive import StorageConfig, preflight, s3_client, verify_object
 from .phase2_market import get_optional_json, put_manifest, PREFIX as MARKET_PREFIX
 from .tushare_client import TushareClient
 
-BASE = "a-share-backtest/v1/phase2/financial_snapshot"
+BASE = f"{MARKET_PREFIX}/financial"
 START_DATE = "20180101"
 END_DATE = "20261231"
 FIELDS = {
@@ -38,7 +38,7 @@ FIELDS = {
 
 
 def universe_codes(s3, bucket):
-    key = f"{MARKET_PREFIX}/universe/stock_basic_snapshot.json"
+    key = f"{MARKET_PREFIX}/stock_basic/stock_basic_snapshot.json"
     snapshot = get_optional_json(s3, bucket, key)
     if (not snapshot or snapshot.get("status") != "current_snapshot_not_historical"
             or not isinstance(snapshot.get("records"), list)):

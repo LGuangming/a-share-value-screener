@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - '.github/one-shot/market-refresh-recovery-20261124.txt'
+      - '.github/one-shot/raw-cutover-daily-check-20261124.txt'
   workflow_dispatch:
     inputs:
       trade_date:

@@ -1,0 +1,1 @@
+Validate normal daily market refresh after historical archive path cutover, preserving scheduled time.

@@ -66,7 +66,7 @@ def export_year(client: TushareClient, year: int, root: Path,
     if not 1000 <= min_quotes <= 6000:
         raise ValueError("min_quotes must be between 1000 and 6000")
     days = sessions_for_year(client, year)
-    base = root / "prices" / f"year={year}"
+    base = root / "daily_prices" / f"year={year}"
     base.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
     manifest = {

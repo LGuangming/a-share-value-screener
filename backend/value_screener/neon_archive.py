@@ -21,11 +21,11 @@ import re
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-PREFIX = "a-share-backtest/v1"
+from .archive_paths import RAW_PREFIX as PREFIX
 NEON_HOST = re.compile(
     r"^br-[a-z0-9-]+\.storage\.c-[0-9]+\.([a-z0-9-]+)\.aws\.neon\.tech$"
 )
-KEY_PATTERN = re.compile(r"^prices/year=(20[0-9]{2})/month=(0[1-9]|1[0-2])\.parquet$")
+KEY_PATTERN = re.compile(r"^daily_prices/year=(20[0-9]{2})/month=(0[1-9]|1[0-2])\.parquet$")
 CHECKSUM_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -210,7 +210,7 @@ def preflight(client,bucket:str) -> None:
 
 
 def _manifest_key(year:int) -> str:
-    return f"{PREFIX}/prices/year={year}/manifest.json"
+    return f"{PREFIX}/daily_prices/year={year}/manifest.json"
 
 
 def _remote_manifest(client,bucket:str,year:int) -> tuple[dict,bytes] | None:

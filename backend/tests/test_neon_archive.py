@@ -41,7 +41,7 @@ class FakeS3:
 
 
 def build_archive(root,year=2025):
-    base=root/"prices"/f"year={year}"
+    base=root/"daily_prices"/f"year={year}"
     base.mkdir(parents=True)
     parts=[]
     for month in range(1,13):
@@ -49,7 +49,7 @@ def build_archive(root,year=2025):
         file=base/f"month={month:02d}.parquet"
         file.write_bytes(payload)
         parts.append({
-            "path":f"prices/year={year}/month={month:02d}.parquet",
+            "path":f"daily_prices/year={year}/month={month:02d}.parquet",
             "month":f"{month:02d}","rows":50000,"sessions":20,
             "bytes":len(payload),"sha256":hashlib.sha256(payload).hexdigest(),
             "min_session":f"{year}{month:02d}01",
@@ -123,7 +123,7 @@ class TestArchive(unittest.TestCase):
             build_archive(root)
             store=FakeS3()
             upload_archive(store,"private",2025,root)
-            key="a-share-backtest/v1/prices/year=2025/month=01.parquet"
+            key="a-share-backtest/01_raw_data/daily_prices/year=2025/month=01.parquet"
             original,meta=store.objects[("private",key)]
             store.objects[("private",key)]=(b"BAD!"+original[4:],meta)
             with self.assertRaisesRegex(RuntimeError,"SHA-256 mismatch"):
@@ -142,7 +142,7 @@ class TestArchive(unittest.TestCase):
             root=Path(folder)
             build_archive(root)
             store=FakeS3()
-            key="a-share-backtest/v1/prices/year=2025/month=01.parquet"
+            key="a-share-backtest/01_raw_data/daily_prices/year=2025/month=01.parquet"
             store.put_object(Bucket="private",Key=key,Body=b"broken",
                              Metadata={"sha256":"0"*64})
             upload_archive(store,"private",2025,root)

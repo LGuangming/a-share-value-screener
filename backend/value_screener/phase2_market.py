@@ -22,7 +22,7 @@ from .history_parquet import sessions_for_year
 from .neon_archive import StorageConfig, preflight, s3_client, verify_object
 from .tushare_client import TushareClient
 
-PREFIX = "a-share-backtest/v1/phase2"
+from .archive_paths import RAW_PREFIX as PREFIX
 DATASETS = {
     "adj_factor": ("ts_code", "trade_date", "adj_factor"),
     "stk_limit": ("ts_code", "trade_date", "up_limit", "down_limit"),
@@ -366,7 +366,7 @@ def archive_year(s3, bucket, client, dataset: str, year: int):
 
 def snapshot_universe(s3, bucket, client):
     """Today's listed and delisted sets, not a historical point-in-time name table."""
-    key = f"{PREFIX}/universe/stock_basic_snapshot.json"
+    key = f"{PREFIX}/stock_basic/stock_basic_snapshot.json"
     existing = get_optional_json(s3, bucket, key)
     if existing:
         if existing.get("status") != "current_snapshot_not_historical":

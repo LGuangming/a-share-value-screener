@@ -1,0 +1,1 @@
+Verify all consolidated data and historical backtest reads using only 01_raw_data.

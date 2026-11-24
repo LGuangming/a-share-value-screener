@@ -1,3 +1,4 @@
+import { RAW_PREFIX } from "@/lib/archive-paths";
 import { NextResponse } from "next/server";
 import { archivedQuotes, ArchiveUnavailable } from "@/lib/archive-quotes";
 
@@ -13,7 +14,7 @@ export async function GET(request:Request,{params}:{params:Promise<{code:string}
     return NextResponse.json({error:"无效股票代码或年份"},{status:400,headers});
   try{
     const bars=await archivedQuotes(code,year);
-    return NextResponse.json({code,year,adjustment:"unadjusted",bars},{headers});
+    return NextResponse.json({code,year,adjustment:"unadjusted",archive_prefix:RAW_PREFIX,bars},{headers});
   }catch(e){
     if(e instanceof ArchiveUnavailable)return NextResponse.json({error:e.message},{status:503,headers});
     console.error("Historical quote archive query failed");

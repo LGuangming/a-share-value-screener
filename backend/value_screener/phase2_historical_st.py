@@ -23,7 +23,8 @@ from .neon_archive import StorageConfig, preflight, s3_client, verify_archive, v
 from .phase2_market import get_optional_json, put_manifest
 from .tushare_client import TushareClient
 
-PREFIX = "a-share-backtest/v1/phase2/historical_st/v2"
+from .archive_paths import RAW_PREFIX
+PREFIX = f"{RAW_PREFIX}/historical_st/v2"
 FIELDS = "ts_code,name,start_date,end_date,ann_date,change_reason"
 CODE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 BATCH = 20
@@ -303,7 +304,7 @@ def restore_source_batch(s3,bucket,root,namespace,source,index,codes,first,last)
 
 def audit_baostock(con,s3,bucket,root,namespace,baselines,codes):
     """Audit the existing source against the exact frozen OHLCV universe."""
-    snapshot = get_optional_json(s3,bucket,"a-share-backtest/v1/phase2/universe/stock_basic_snapshot.json")
+    snapshot = get_optional_json(s3,bucket,f"{RAW_PREFIX}/stock_basic/stock_basic_snapshot.json")
     listing = {r["ts_code"]:r.get("list_status") for r in (snapshot or {}).get("records",[])}
     groups = Counter()
     symbol_totals = Counter()

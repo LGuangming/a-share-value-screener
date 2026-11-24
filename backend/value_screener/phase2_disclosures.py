@@ -16,7 +16,8 @@ from .neon_archive import StorageConfig, preflight, s3_client, verify_object
 from .phase2_market import get_optional_json, put_manifest
 from .tushare_client import TushareClient
 
-PREFIX = "a-share-backtest/v1/phase2/disclosures"
+from .archive_paths import RAW_PREFIX
+PREFIX = f"{RAW_PREFIX}/disclosures"
 FIELDS = ("ts_code", "end_date", "actual_date", "ann_date", "pre_date")
 
 

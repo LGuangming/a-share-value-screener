@@ -6,7 +6,7 @@ import { compressors } from "hyparquet-compressors";
 import { unstable_cache } from "next/cache";
 import { completeBar, type MarketBar, type Factor } from "./market-bars";
 
-const PREFIX="a-share-backtest/v1";
+import { RAW_PREFIX as PREFIX } from "./archive-paths";
 export class ArchiveUnavailable extends Error {}
 export function storage(){
   const endpoint=process.env.NEON_STORAGE_ENDPOINT;
@@ -43,13 +43,13 @@ async function queryYear(code:string,year:number):Promise<MarketBar[]>{
     return bytes;
   }
   try {
-    const raw=await get(PREFIX+"/prices/year="+year+"/manifest.json",128*1024);
+    const raw=await get(PREFIX+"/daily_prices/year="+year+"/manifest.json",128*1024);
     const doc=JSON.parse(new TextDecoder().decode(raw));
     if(doc.format_version!==1||doc.dataset!=="a_share_daily"||doc.adjustment!=="unadjusted"||doc.year!==year||!Array.isArray(doc.partition_files)||doc.partition_files.length!==12)throw new Error("Invalid year manifest");
     const parts:Part[]=doc.partition_files;
     const months=new Set<string>();
     for(const p of parts){
-      if(!p||typeof p.month!=="string"||!/^(0[1-9]|1[0-2])$/.test(p.month)||months.has(p.month)||p.path!=="prices/year="+year+"/month="+p.month+".parquet"||!Number.isInteger(p.bytes)||p.bytes<=0||p.bytes>8*1024*1024||!/^[a-f0-9]{64}$/.test(p.sha256)||!Number.isInteger(p.rows)||p.rows<=0)throw new Error("Invalid archive partition");
+      if(!p||typeof p.month!=="string"||!/^(0[1-9]|1[0-2])$/.test(p.month)||months.has(p.month)||p.path!=="daily_prices/year="+year+"/month="+p.month+".parquet"||!Number.isInteger(p.bytes)||p.bytes<=0||p.bytes>8*1024*1024||!/^[a-f0-9]{64}$/.test(p.sha256)||!Number.isInteger(p.rows)||p.rows<=0)throw new Error("Invalid archive partition");
       months.add(p.month);
     }
     const bars:MarketBar[]=[];
@@ -74,12 +74,12 @@ async function queryYear(code:string,year:number):Promise<MarketBar[]>{
     return bars;
   } finally {client.destroy();}
 }
-export const archivedQuotes=unstable_cache(queryYear,["market-archive-v1"],{revalidate:86400});
+export const archivedQuotes=unstable_cache(queryYear,["market-archive-raw-v1"],{revalidate:86400});
 
 async function queryFactors(code:string,year:number):Promise<Factor[]>{
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2020||year>2025)throw Error("Invalid factor query");
   const {bucket,client}=storage();
-  const prefix=PREFIX+"/phase2/adj_factor/year="+year;
+  const prefix=PREFIX+"/adj_factor/year="+year;
   async function get(key:string,max:number){
     const r=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(12000)});
     if(!r.Body||!r.ContentLength||r.ContentLength>max)throw Error("Invalid factor object size");
@@ -117,4 +117,4 @@ async function queryFactors(code:string,year:number):Promise<Factor[]>{
     return factors;
   }finally{client.destroy();}
 }
-export const archivedFactors=unstable_cache(queryFactors,["market-factors-v1"],{revalidate:86400});
+export const archivedFactors=unstable_cache(queryFactors,["market-factors-raw-v1"],{revalidate:86400});
