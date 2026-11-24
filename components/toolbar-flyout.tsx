@@ -9,7 +9,7 @@ export default function ToolbarFlyout({anchor,children,align="left",width}:{anch
     function update(){
       if(!anchor.current)return;
       const rect=anchor.current.getBoundingClientRect();
-      const toolbar=anchor.current.closest(".filters")?.getBoundingClientRect();
+      const toolbar=(anchor.current.closest(".filter-form")??anchor.current.closest(".filters"))?.getBoundingClientRect();
       if(toolbar&&(rect.right<=toolbar.left||rect.left>=toolbar.right)){setPos(null);return;}
       const w=Math.min(width,window.innerWidth-16);
       const left=Math.max(8,Math.min(window.innerWidth-w-8,align==="right"?rect.right-w:rect.left));
