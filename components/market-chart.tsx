@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CandlestickSeries, HistogramSeries, LineSeries, createChart, createSeriesMarkers, ColorType, CrosshairMode } from "lightweight-charts";
 import { Maximize2, Minimize2, RotateCcw } from "lucide-react";
+import {useWorkspacePreferences} from "@/components/workspace-preferences";
 import { aggregateBars, completeBar, movingAverage, type MarketBar, type TradeMark } from "@/lib/market-bars";
 
 const MA=[{period:5,color:"#D04A02"},{period:10,color:"#B58516"},{period:20,color:"#5475AC"},{period:50,color:"#8C66A4"},{period:60,color:"#217E83"},{period:120,color:"#7B8792"},{period:250,color:"#4E5660"}];
@@ -13,6 +14,8 @@ type Props={code:string;name:string;prices:MarketBar[];marks?:TradeMark[]};
 const NO_MARKS:TradeMark[]=[];
 
 export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
+  const {prefs}=useWorkspacePreferences();
+  const dark=prefs.theme==="dark";
   const host=useRef<HTMLDivElement>(null);
   const root=useRef<HTMLElement>(null);
   const api=useRef<ReturnType<typeof createChart>|null>(null);
@@ -55,11 +58,11 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
     if(!host.current||!bars.length||loading||error)return;
     const chart=createChart(host.current,{
       autoSize:true,
-      layout:{background:{type:ColorType.Solid,color:"#ffffff"},textColor:"#606770",fontSize:12,attributionLogo:true},
-      grid:{vertLines:{color:"#f0f1f2"},horzLines:{color:"#e9ecef"}},
+      layout:{background:{type:ColorType.Solid,color:dark?"#1b2027":"#ffffff"},textColor:dark?"#bbc3cf":"#606770",fontSize:12,attributionLogo:true},
+      grid:{vertLines:{color:dark?"#303740":"#f0f1f2"},horzLines:{color:dark?"#303740":"#e9ecef"}},
       crosshair:{mode:CrosshairMode.Normal},
-      rightPriceScale:{borderColor:"#dfe3e7",scaleMargins:{top:.12,bottom:showVolume && hasVolume ? .24 : .09}},
-      timeScale:{borderColor:"#dfe3e7",timeVisible:false,secondsVisible:false},
+      rightPriceScale:{borderColor:dark?"#3b444f":"#dfe3e7",scaleMargins:{top:.12,bottom:showVolume && hasVolume ? .24 : .09}},
+      timeScale:{borderColor:dark?"#3b444f":"#dfe3e7",timeVisible:false,secondsVisible:false},
       localization:{locale:"zh-CN"},
     });
     api.current=chart;
@@ -93,7 +96,7 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
       setChartError(true);
     }
     return ()=>{api.current=null;chart.remove();};
-  },[bars,candleMode,enabled,showVolume,hasVolume,loading,error,period,marks]);
+  },[bars,candleMode,enabled,showVolume,hasVolume,loading,error,period,marks,dark]);
 
   useEffect(()=>{
     const handle=()=>{if(!document.fullscreenElement)setExpanded(false);};
