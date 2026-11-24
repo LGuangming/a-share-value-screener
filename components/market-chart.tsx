@@ -10,10 +10,11 @@ const UP="#c93738",DOWN="#19805b";
 const money=(n:number|undefined)=>n===undefined?"—":n.toFixed(2);
 const volume=(n:number|undefined)=>n===undefined?"—":n.toLocaleString("zh-CN",{maximumFractionDigits:2});
 type Props={code:string;name:string;prices:MarketBar[];marks?:TradeMark[]};
+const NO_MARKS:TradeMark[]=[];
 
-export default function MarketChart({code,name,prices,marks=[]}:Props){
+export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   const host=useRef<HTMLDivElement>(null);
-  
+  const root=useRef<HTMLElement>(null);
   const api=useRef<ReturnType<typeof createChart>|null>(null);
   const [source,setSource]=useState("recent");
   const [archive,setArchive]=useState<MarketBar[]>([]);
@@ -92,18 +93,26 @@ export default function MarketChart({code,name,prices,marks=[]}:Props){
       setChartError(true);
     }
     return ()=>{api.current=null;chart.remove();};
-  // Marks are serialized server data; avoid remounting for the default empty list.
-  },[bars,candleMode,enabled,showVolume,hasVolume,loading,error,period,marks.length]);
+  },[bars,candleMode,enabled,showVolume,hasVolume,loading,error,period,marks]);
 
   useEffect(()=>{
-    if(!expanded)return;
-    const handle=(e:KeyboardEvent)=>{if(e.key==="Escape")setExpanded(false);};
-    window.addEventListener("keydown",handle);
-    return ()=>window.removeEventListener("keydown",handle);
-  },[expanded]);
+    const handle=()=>{if(!document.fullscreenElement)setExpanded(false);};
+    const key=(e:KeyboardEvent)=>{if(e.key==="Escape")setExpanded(false);};
+    document.addEventListener("fullscreenchange",handle);
+    window.addEventListener("keydown",key);
+    return ()=>{document.removeEventListener("fullscreenchange",handle);window.removeEventListener("keydown",key);};
+  },[]);
+  async function toggleExpanded(){
+    if(expanded){
+      if(document.fullscreenElement===root.current)await document.exitFullscreen().catch(()=>{});
+      setExpanded(false);return;
+    }
+    setExpanded(true);
+    if(root.current?.requestFullscreen)await root.current.requestFullscreen().catch(()=>{});
+  }
 
   function chooseSource(value:string){if(value!==source){setHover(null);setArchive([]);setError("");setLoading(value!=="recent");setSource(value);}}
-  return <section className={"market-chart-shell"+(expanded?" chart-expanded":"")} aria-label={name+"行情分析"}>
+  return <section ref={root} className={"market-chart-shell"+(expanded?" chart-expanded":"")} aria-label={name+"行情分析"}>
     <div className="chart-toolbar">
       <div className="chart-group"><select aria-label="行情数据区间" value={source} onChange={e=>chooseSource(e.target.value)}>
         <option value="recent">近期行情</option>{[2025,2024,2023,2022,2021,2020].map(y=><option key={y} value={y}>{y}年归档</option>)}
@@ -111,7 +120,7 @@ export default function MarketChart({code,name,prices,marks=[]}:Props){
       <div className="chart-group" aria-label="行情周期">{(["D","W","M"] as const).map((p,i)=><button type="button" key={p} aria-pressed={period===p} onClick={()=>setPeriod(p)}>{["日线","周线","月线"][i]}</button>)}</div>
       <div className="chart-group"><button type="button" aria-pressed={candleMode} disabled={!candles} onClick={()=>setKind("candle")}>K线</button><button type="button" aria-pressed={!candleMode} onClick={()=>setKind("line")}>收盘价</button></div>
       <div className="chart-actions"><button type="button" title="重置视图" aria-label="重置视图" onClick={()=>api.current?.timeScale().fitContent()}><RotateCcw size={15}/></button>
-      <button type="button" title={expanded?"退出大图":"放大图表"} aria-label={expanded?"退出大图":"放大图表"} onClick={()=>setExpanded(v=>!v)}>{expanded?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button></div>
+      <button type="button" title={expanded?"退出大图":"放大图表"} aria-label={expanded?"退出大图":"放大图表"} onClick={toggleExpanded}>{expanded?<Minimize2 size={17}/>:<Maximize2 size={17}/>}</button></div>
     </div>
     <div className="chart-indicators">
       {MA.map(m=><button type="button" key={m.period} style={{"--ma-color":m.color} as React.CSSProperties} aria-pressed={enabled.includes(m.period)} onClick={()=>setEnabled(prev=>prev.includes(m.period)?prev.filter(x=>x!==m.period):[...prev,m.period])}>MA{m.period}</button>)}
