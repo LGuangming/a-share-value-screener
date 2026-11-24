@@ -5,7 +5,8 @@ const path = require("node:path");
 
 const data = fs.readFileSync(path.join(__dirname, "../lib/data.ts"), "utf8");
 const stockPage = fs.readFileSync(path.join(__dirname, "../app/stocks/[code]/page.tsx"), "utf8");
-const spark = fs.readFileSync(path.join(__dirname, "../components/sparkline.tsx"), "utf8");
+const chart = fs.readFileSync(path.join(__dirname, "../components/market-chart.tsx"), "utf8");
+const archive = fs.readFileSync(path.join(__dirname, "../lib/archive-quotes.ts"), "utf8");
 const schema = fs.readFileSync(path.join(__dirname, "../database/neon-schema.sql"), "utf8");
 const workflow = fs.readFileSync(path.join(__dirname, "../.github/workflows/recent-price-history.yml"), "utf8");
 
@@ -27,10 +28,16 @@ test("history query failures cannot hide an otherwise available stock detail", (
   assert.match(detail, /return \{ stock: recent\[0\] \?\? null, prices, recent \}/);
 });
 
-test("chart is backed by merged history and exposes the loaded session count", () => {
-  assert.match(stockPage, /<Sparkline prices=\{prices\}/);
-  assert.match(stockPage, /最近 \{prices\.length\} 个交易日收盘价/);
-  assert.match(spark, /prices\.length < 2/);
+test("chart uses merged closes and directly reads verified monthly archives", () => {
+  assert.match(stockPage, /<MarketChart[^\n]*prices=\{prices\}/);
+  assert.match(chart, /CandlestickSeries/);
+  assert.match(chart, /LineSeries/);
+  assert.match(chart, /bars\.every\(completeBar\)/);
+  assert.match(chart, /createSeriesMarkers/);
+  assert.match(archive, /parquetReadObjects/);
+  assert.match(archive, /createHash\("sha256"\)/);
+  assert.match(archive, /NEON_STORAGE_READ_ACCESS_KEY_ID/);
+  assert.doesNotMatch(archive, /PutObjectCommand|DeleteObjectCommand/);
 });
 
 test("Neon schema contains the compact price history table", () => {
