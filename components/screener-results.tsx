@@ -278,7 +278,7 @@ export default function ScreenerResults({ rows, initial }: {
     </div>
     {mini&&trend.error&&<div className="stock-search-feedback" role="status">近期走势暂不可用</div>}
     <div ref={resultsRegion} className="screener-result-region" style={{minHeight:needle?searchHeight:undefined}}>
-    {<div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:280+(mini?105:0)+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
+    <div className="table-scroll"><table className="results-table resizable-results" style={{minWidth:280+(mini?105:0)+shownColumns.reduce((sum,c)=>sum+(widths[c.key]??105),0)}}>
       <colgroup><col style={{width:180}}/>{shownColumns.map(c=><col key={c.key} style={{width:widths[c.key]??105}}/>)}{mini&&<col style={{width:105}}/>}<col style={{width:100}}/></colgroup>
       <thead><tr><th className="security-col">股票 / 行业</th>
         {shownColumns.map(c=><th key={c.key} className={c.key==="status"||c.key==="signal"?"":"numeric-col"}
@@ -297,7 +297,7 @@ export default function ScreenerResults({ rows, initial }: {
         {mini&&<td>{trend.loading&&trendCodes.includes(row.ts_code)?<span className="muted">…</span>:<MiniTrend points={trend.trends[row.ts_code]}/>}</td>}
         <td><div className="row-actions"><WatchButton stock={row}/><PreviewButton stock={row}/><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           <ArrowRight size={16}/></Link></div></td>
-      </tr>)}</tbody></table></div>}
+      </tr>)}</tbody></table></div>
     {!filtered.length && <Empty title={needle ? "暂无匹配的股票" : "暂无符合筛选条件的股票"}
       detail={needle ? `${viewLabel}中没有匹配的股票，试试更短的名称或代码。` : "可调整筛选条件或切换到“全部预筛”视图。"}/>}
     {filtered.length > visibleCount && <button type="button" className="filter-button screener-load-more"
