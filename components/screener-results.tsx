@@ -12,7 +12,7 @@ import {MiniTrend,useMiniTrends} from "@/components/mini-trends";
 import {PreviewButton} from "@/components/stock-preview";
 import {useCompareSelection,CompareCheckbox,CompareToolbar} from "@/components/compare-selection";
 import FilterPresets,{type FilterPreset} from "@/components/filter-presets";
-import {initialBound,parseBound,matchesBounds,screenCounts} from "@/lib/screener-filters";
+import {initialBound,parseBound,matchesBounds,screenCounts,passesStress} from "@/lib/screener-filters";
 
 export type ScreenTableRow = Pick<ScreenerRow,
   "ts_code" | "name" | "industry" | "price" | "pb" | "market_cap_yuan" |
@@ -68,7 +68,7 @@ function matchRank(row: ScreenTableRow, needle: string): number | null {
 export default function ScreenerResults({ rows, initial, fullScope }: {
   rows: ScreenTableRow[]; initial: Filters; fullScope: boolean;
 }) {
-  const [view, setView] = useState(["all","strict","gaps"].includes(initial.view ?? "")
+  const [view, setView] = useState(["all","strict","stress","gaps"].includes(initial.view ?? "")
     ? initial.view! : "strict");
   const [q, setQ] = useState(initial.q ?? "");
   const [priceInput,setPriceInput]=useState(()=>initialBound(initial.max_price,10));
@@ -110,7 +110,7 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
   useEffect(()=>{const close=()=>{setColumnMenu(false);setSuggestionsOpen(false);setAdvanced(false);};window.addEventListener("a-share-strategy-change",close);return()=>window.removeEventListener("a-share-strategy-change",close);},[]);
 
 
-  const viewLabel = view === "strict" ? "严格候选" : view === "gaps" ? "数据缺口" : "全部预筛";
+  const viewLabel = view === "strict" ? "严格候选" : view === "stress" ? "压力通过" : view === "gaps" ? "数据缺口" : "全部预筛";
 
   // Scope each search to the exact row set that the active tab can show.
   // Apply price/PB/NCAV controls *before* searching; search never expands
@@ -124,6 +124,7 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
   const tabRows = useMemo(() => baseRows.filter(row => {
     if (view === "strict") return row.is_candidate && row.ncav_coverage !== null
       && row.ncav_coverage >= minCoverage;
+    if (view === "stress") return passesStress(row,minCoverage);
     if (view === "gaps") return row.status === "DATA_GAP" || row.status === "STALE_FINANCIALS";
     return true;
   }).sort((a,b)=>{
@@ -224,7 +225,7 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
     <div className="stats-grid" aria-live="polite">
       <div className="stat-card"><span><Layers size={16}/>筛选预检股票</span><strong>{counts.total.toLocaleString("zh-CN")}</strong><small>当前筛选 {counts.total.toLocaleString("zh-CN")} / {rows.length.toLocaleString("zh-CN")} 只</small><small className="netnet-total-note">{fullScope?"全量预计算":"已加载样本"}：{rows.length.toLocaleString("zh-CN")} 只</small></div>
       <div className="stat-card"><span><ShieldCheck size={16}/>满足NCAV门槛</span><strong className="stat-green">{counts.candidates.toLocaleString("zh-CN")}</strong><small>覆盖率≥{minCoverage*100}%且未被排除</small></div>
-      <div className="stat-card"><span><BarChart3 size={16}/>压力测试通过</span><strong>{counts.stress.toLocaleString("zh-CN")}</strong><small>调整后覆盖率≥100%</small></div>
+      <button type="button" className={`stat-card stress-stat-action${view==="stress"?" is-selected":""}`} aria-pressed={view==="stress"} aria-label={`查看压力测试通过的${counts.stress}只严格候选股票`} onClick={()=>{setFilter("view","stress",()=>setView("stress"));setQ("");setSearchHeight(undefined);setSuggestionsOpen(false);setHighlightedIndex(-1);}}><span><BarChart3 size={16}/>压力测试通过 <ArrowRight size={14} className="stress-stat-arrow"/></span><strong className="stat-green">{counts.stress.toLocaleString("zh-CN")}</strong><small>调整后覆盖率≥100% · {view==="stress"?"已选中":"点击查看"}</small></button>
       <div className="stat-card"><span><AlertTriangle size={16}/>财报待核验</span><strong className="stat-orange">{counts.gaps.toLocaleString("zh-CN")}</strong><small>缺失及过期报告</small><small style={{display:"block"}}>金融股忽略 {counts.ignored.toLocaleString("zh-CN")} 只（不适用NCAV，非财报短缺）</small></div>
     </div>
     {!fullScope&&<p className="source-note" role="status">当前为旧预筛快照或全量数据未就绪，放宽条件可能无法覆盖全部主板股票。</p>}
@@ -235,7 +236,7 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
       <div className="tabs" role="tablist" aria-label="筛选视图">
-        {([["strict","严格候选"],["all","全部预筛"],["gaps","数据缺口"]] as const)
+        {([["strict","严格候选"],["stress","压力通过"],["all","全部预筛"],["gaps","数据缺口"]] as const)
           .map(([key,label]) => <button type="button" role="tab" aria-selected={view === key}
             className={`tab${view === key ? " active" : ""}`} key={key}
             onClick={() => setFilter("view",key,()=>setView(key))}>{label}</button>)}
@@ -306,7 +307,7 @@ export default function ScreenerResults({ rows, initial, fullScope }: {
           <div className="stock-meta">{row.ts_code} · {row.industry || "行业待补充"}</div></div></div></td>
         {shownColumns.map(c=><td key={c.key} className={c.key==="status"||c.key==="signal"?"":"number numeric-col"}>
           {c.key==="status"?<span className={tagClass(row.status)}>{displayValue(row,c.key)}</span>:
-           <span className={c.key==="ncav_coverage" && row.ncav_coverage!==null && row.ncav_coverage>=1.25?"highlight":""}>{displayValue(row,c.key)}</span>}
+           <span className={c.key==="stress_coverage" && passesStress(row,minCoverage)?"stress-pass-value":c.key==="ncav_coverage" && row.ncav_coverage!==null && row.ncav_coverage>=1.25?"highlight":""}>{displayValue(row,c.key)}</span>}
         </td>)}
         {mini&&<td>{trend.loading&&trendCodes.includes(row.ts_code)?<span className="muted">…</span>:<MiniTrend points={trend.trends[row.ts_code]}/>}</td>}
         <td><div className="row-actions"><WatchButton stock={row}/><PreviewButton stock={row}/><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>

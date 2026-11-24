@@ -509,3 +509,19 @@ test("live parameter controls are always visible above cards and disclose full p
   assert.ok(s.slice(cards,toolbar).includes('rows.length.toLocaleString("zh-CN")'));
   assert.match(css,/\.netnet-parameter-controls\{[^}]*flex-wrap:wrap/);
 });
+
+
+test("stress pass card selects the same qualified rows counted in statistics",()=>{
+ const {passesStress,screenCounts}=loadV4Module("lib/screener-filters.ts");
+ const r={price:8,pb:1,is_candidate:true,ncav_coverage:1.5,stress_coverage:1,status:"NET_NET"};
+ const rows=[r,{...r,stress_coverage:.99},{...r,stress_coverage:null},{...r,is_candidate:false},{...r,ncav_coverage:1.1}];
+ assert.equal(rows.filter(row=>passesStress(row,1.25)).length,1);
+ assert.equal(screenCounts(rows,1.25).stress,1);
+ assert.equal(screenCounts(rows,1.75).stress,0);
+ const s=read("components/screener-results.tsx");
+ assert.match(s,/if \(view === "stress"\) return passesStress\(row,minCoverage\)/);
+ assert.match(s,/aria-pressed=\{view==="stress"\}/);
+ assert.match(s,/\["stress","压力通过"\]/);
+ assert.match(s,/stress-pass-value/);
+ assert.match(read("components/filter-presets.tsx"),/"strict","stress","gaps"/);
+});

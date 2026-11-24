@@ -16,9 +16,12 @@ export function matchesBounds(row:Pick<Row,"price"|"pb">,bounds:FilterBounds):bo
   if(row.pb===null)return bounds.includeMissingPb;
   return bounds.maxPb===null||row.pb<=bounds.maxPb;
 }
+export function passesStress(row:Row,minCoverage:number):boolean{
+  return row.is_candidate&&row.ncav_coverage!==null&&row.ncav_coverage>=minCoverage&&row.stress_coverage!==null&&row.stress_coverage>=1;
+}
 export function screenCounts(rows:Row[],minCoverage:number){
   const candidates=rows.filter(r=>r.is_candidate&&r.ncav_coverage!==null&&r.ncav_coverage>=minCoverage);
-  return {total:rows.length,candidates:candidates.length,stress:candidates.filter(r=>r.stress_coverage!==null&&r.stress_coverage>=1).length,
+  return {total:rows.length,candidates:candidates.length,stress:rows.filter(r=>passesStress(r,minCoverage)).length,
     gaps:rows.filter(r=>r.status==="DATA_GAP"||r.status==="STALE_FINANCIALS").length,
     ignored:rows.filter(r=>r.status==="FINANCIAL_IGNORED").length};
 }
