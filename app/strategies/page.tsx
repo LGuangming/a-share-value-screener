@@ -19,27 +19,26 @@ export default function StrategiesPage() {
       <div className="stat-card"><span>研究测试</span><strong>{research}</strong><small>规则验证中</small></div>
       <div className="stat-card"><span>等待开发</span><strong>{strategies.length-enabled-research}</strong><small>待上线</small></div>
     </div>
-    <section className="panel">
+    <section className="panel strategy-library">
       <div className="panel-heading"><div><div className="section-kicker">STRATEGY LIBRARY</div>
         <h2>选股策略库</h2>
         <p>查看各策略的筛选条件、参数与数据要求。</p>
       </div></div>
-      <div className="strategy-catalog-grid">
-        {strategies.map(s=><article key={s.id} className="strategy-catalog-card">
-          <div className="strategy-card-header"><span className="strategy-family">{s.family}</span>
-            <span className={`strategy-state strategy-state-${s.status}`}>{strategyStatusLabel[s.status]}</span>
-          </div>
-          <h3>{s.name}</h3>
-          <p>{s.description}</p>
-          <div className="strategy-meta">ID：{s.id} · v{s.version}</div>
-          <div className="strategy-requirements">
-            {s.requirements.slice(0,3).map(req=><span key={req}>{requirementLabels[req] ?? req}</span>)}
-            {s.requirements.length>3 && <span>+{s.requirements.length-3}类数据</span>}
-          </div>
-          <Link className="inline-link" href={`/strategies/${encodeURIComponent(s.id)}`}>
-            查看策略详情 <ArrowUpRight size={15}/>
-          </Link>
-        </article>)}
+      <div className="table-scroll">
+        <table className="results-table strategy-library-table">
+          <thead><tr><th>策略 / 版本</th><th>分类</th><th>策略规则</th><th>数据要求</th><th>运行状态</th><th>持仓周期</th><th>回测</th><th>详情</th></tr></thead>
+          <tbody>{strategies.map(s=><tr key={s.id}>
+            <td><Link className="stock-name" href={`/strategies/${encodeURIComponent(s.id)}`}>{s.name}</Link>
+              <div className="stock-meta">v{s.version} · {s.id}</div></td>
+            <td>{s.family}</td>
+            <td className="strategy-description">{s.description}</td>
+            <td className="strategy-description">{s.requirements.map(req=>requirementLabels[req] ?? req).join("、")}</td>
+            <td><span className={`strategy-state strategy-state-${s.status}`}>{strategyStatusLabel[s.status]}</span></td>
+            <td>{s.id==="oversold_reversion_v0"?"5–20交易日（拟）":"—"}</td>
+            <td><Link className="inline-link" href={`/backtest?strategy=${encodeURIComponent(s.id)}`}>查看回测</Link></td>
+            <td><Link className="inline-link" href={`/strategies/${encodeURIComponent(s.id)}`} aria-label={`查看${s.name}详情`}>查看 <ArrowUpRight size={14}/></Link></td>
+          </tr>)}</tbody>
+        </table>
       </div>
     </section>
   </main>;
