@@ -55,7 +55,8 @@ export default function Nav() {
   }
   return <>
     <aside className="sidebar">
-      <Link className="brand" href={strategyHref("/")}>
+      <Link className="brand" href={strategyHref("/")} aria-label="价值雷达 · 返回选股中心" title="价值雷达">
+        <span className="brand-compact" aria-hidden="true"><Radar size={22}/></span>
         <span className="brand-text"><strong>价值雷达</strong><small>A 股多策略研究</small></span>
       </Link>
       <div className="nav-caption">研究工作台</div>
