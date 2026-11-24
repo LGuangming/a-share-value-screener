@@ -238,8 +238,8 @@ test("V2 page controls preserve local filtering and use actual research data",()
 test("single-row toolbar keeps export and settings together with unclipped dropdowns",()=>{
   const css=read("app/theme-orange.css");
   const screen=read("components/screener-results.tsx");
-  assert.match(css,/\.market-panel>\.filters \{[^}]*flex-wrap:nowrap[^}]*overflow-x:auto/);
-  assert.match(css,/\.market-panel>\.filters>\.filter-form \{[^}]*flex-wrap:nowrap/);
+  assert.match(css,/\.market-panel>\.filters \{[^}]*flex-wrap:nowrap[^}]*overflow:visible/);
+  assert.match(css,/\.market-panel>\.filters>\.filter-form \{[^}]*justify-content:safe flex-end[^}]*min-width:0[^}]*flex-wrap:nowrap[^}]*overflow-x:auto/);
   assert.match(screen,/<ToolbarFlyout anchor=\{searchAnchor\}/);
   assert.match(screen,/<ToolbarFlyout anchor=\{columnAnchor\}/);
   assert.match(read("components/toolbar-flyout.tsx"),/createPortal/);
@@ -293,3 +293,17 @@ test("V3 controls persist browser-local preferences, and preview uses a modal",(
 });
 
 test("V3 mini trends are opt-in, capped and use the actual close history",()=>{const screen=read("components/screener-results.tsx");assert.match(screen,/useMiniTrends\(trendCodes,mini\)/);assert.match(screen,/slice\(0,25\)/);assert.match(read("lib/data.ts"),/recentMiniTrends/);assert.match(read("app/api/research/trends/route.ts"),/codes.length>25/);assert.match(screen,/watchOnly/);});
+
+test("V3 polish keeps search height stable, preserves tabs, and uses readable strategy columns and review cards",()=>{
+  const screen=read("components/screener-results.tsx"),home=read("app/page.tsx"),strategies=read("app/strategies/page.tsx"),signals=read("app/signals/page.tsx"),css=read("app/theme-orange.css");
+  assert.doesNotMatch(screen,/匹配 \{matches\.length\} 只 \/ 当前/);
+  assert.match(screen,/Net-Net筛选结果 <span className="count-badge" aria-live="polite">/);
+  assert.doesNotMatch(home,/Net-Net筛选步骤|数据及交易状态/);
+  assert.match(css,/\.market-panel>\.filters>\.tabs \{[^}]*min-width:max-content/);
+  assert.match(strategies,/<colgroup>/);
+  assert.match(css,/\.strategy-library-table \{table-layout:fixed;min-width:1460px/);
+  assert.match(signals,/signal-expand-open">展开明细/);
+  assert.match(signals,/signal-expand-close">收起明细/);
+  assert.match(signals,/className="signal-reason-card"/);
+  assert.match(css,/\.signal-reason-details\[open\] \.signal-expand-close \{display:inline/);
+});
