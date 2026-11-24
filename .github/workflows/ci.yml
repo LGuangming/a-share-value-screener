@@ -33,6 +33,8 @@ jobs:
         run: npm run test:price-history
       - name: Multi-strategy catalog and UI tests
         run: npm run test:strategies
+      - name: General company research tests
+        run: node --test tests/company-research.test.cjs
       - name: Typecheck
         run: npm run typecheck
       - name: Build
