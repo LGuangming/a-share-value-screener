@@ -33,6 +33,22 @@ export default async function StockPage({params}: Props) {
         <div className="stat-card"><span>压力价值覆盖率</span><strong>{pct(stock.stress_coverage,1)}</strong><small>假设性回收率测算</small></div>
         <div className="stat-card"><span>当前信号</span><strong className="status-stat">{signalLabel(stock.signal)}</strong><small>趋势观察</small></div>
       </div>
+      <div className="detail-grid">
+        <section className="panel"><div className="panel-heading"><div><div className="section-kicker">PRICE HISTORY</div><h2>收盘价变化</h2></div><TrendingUp size={18} className="muted"/></div>
+          <Sparkline prices={prices}/><p className="note">最近 {prices.length} 个交易日收盘价（未复权）。</p>
+        </section>
+        <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
+          <dl className="detail-list">
+            <div><dt>总市值</dt><dd>{moneyCny(stock.market_cap_yuan)}</dd></div>
+            <div><dt>账面净流动资产 NCAV</dt><dd>{moneyCny(stock.ncav_yuan)}</dd></div>
+            <div><dt>统一压力测试价值</dt><dd>{moneyCny(stock.stress_ncav_yuan)}</dd></div>
+            <div><dt>市净率 PB</dt><dd>{fixed(stock.pb)}</dd></div>
+            <div><dt>资产负债率</dt><dd>{pct(stock.liability_ratio,1)}</dd></div>
+            <div><dt>最近披露报告期累计经营现金流</dt><dd>{moneyCny(stock.operating_cf_yuan)}</dd></div>
+            <div><dt>最近披露报告期累计合并净利润</dt><dd>{moneyCny(stock.net_profit_yuan)}</dd></div>
+          </dl>
+        </section>
+      </div>
       {review && <section className="panel review-detail-panel">
         <div className="panel-heading"><div>
           <div className="section-kicker">FUNDAMENTAL RISK REVIEW</div>
@@ -54,22 +70,6 @@ export default async function StockPage({params}: Props) {
           </div>)}
         </div> : <p className="review-muted">暂无重点复核事项。</p>}
       </section>}
-      <div className="detail-grid">
-        <section className="panel"><div className="panel-heading"><div><div className="section-kicker">PRICE HISTORY</div><h2>收盘价变化</h2></div><TrendingUp size={18} className="muted"/></div>
-          <Sparkline prices={prices}/><p className="note">最近 {prices.length} 个交易日收盘价（未复权）。</p>
-        </section>
-        <section className="panel"><div className="section-kicker">ACCOUNTING SNAPSHOT</div><h2>关键财务指标</h2>
-          <dl className="detail-list">
-            <div><dt>总市值</dt><dd>{moneyCny(stock.market_cap_yuan)}</dd></div>
-            <div><dt>账面净流动资产 NCAV</dt><dd>{moneyCny(stock.ncav_yuan)}</dd></div>
-            <div><dt>统一压力测试价值</dt><dd>{moneyCny(stock.stress_ncav_yuan)}</dd></div>
-            <div><dt>市净率 PB</dt><dd>{fixed(stock.pb)}</dd></div>
-            <div><dt>资产负债率</dt><dd>{pct(stock.liability_ratio,1)}</dd></div>
-            <div><dt>最近披露报告期累计经营现金流</dt><dd>{moneyCny(stock.operating_cf_yuan)}</dd></div>
-            <div><dt>最近披露报告期累计合并净利润</dt><dd>{moneyCny(stock.net_profit_yuan)}</dd></div>
-          </dl>
-        </section>
-      </div>
       <div className="detail-grid">
         <section className="panel"><div className="section-kicker">FUNDAMENTAL REVIEW</div><h2>基本面初步评价</h2>
           <p className="assessment">{stock.assessment}</p>
