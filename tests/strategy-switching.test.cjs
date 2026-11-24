@@ -212,7 +212,7 @@ test("screener view switches never update Next.js searchParams or remount the lo
   assert.doesNotMatch(screen,/window\.history\.replaceState/);
   assert.match(loader,/route-loading-indicator/);
   assert.doesNotMatch(loader,/A-SHARE RESEARCH WORKSPACE/);
-  assert.match(css,/\.route-loading-indicator\{position:fixed/);
+  assert.match(css,/\.route-loading-indicator\{position:relative/);
 });
 
 test("V2 page controls preserve local filtering and use actual research data",()=>{
@@ -534,4 +534,16 @@ test("compound Net-Net numeric fields use a single accessible outer focus ring",
   const panel=read("components/screener-results.tsx");
   assert.match(panel,/className="screen-bound"><span>股价≤<\/span><input[^>]*type="number"/);
   assert.match(panel,/className="screen-bound"><span>PB≤<\/span><input[^>]*type="number"/);
+});
+
+test("navigation loading grows from the content left edge without sliding or sidebar offsets",()=>{
+  const css=read("app/globals.css"),theme=read("app/theme-orange.css"),layout=read("app/layout.tsx");
+  assert.match(css,/\.route-loading-indicator\{position:relative;[^}]*width:100%/);
+  assert.match(css,/\.route-loading-indicator-bar\{[^}]*transform-origin:left center;[^}]*animation:route-progress-grow[^}]*forwards/);
+  assert.match(css,/@keyframes route-progress-grow\{\s*0%\{transform:scaleX\(\.04\);\}\s*100%\{transform:scaleX\(\.88\);\}/);
+  assert.doesNotMatch(css,/route-progress-slide/);
+  assert.doesNotMatch(css+"\n"+theme,/\.route-loading-indicator\s*\{[^}]*\bleft:/);
+  assert.match(css,/prefers-reduced-motion:reduce\)\{\.route-loading-indicator-bar\{animation:none;transform:scaleX\(\.35\);\}\}/);
+  assert.match(layout,/className="site-main"/);
+  assert.match(layout,/<\/header>\{children\}/);
 });

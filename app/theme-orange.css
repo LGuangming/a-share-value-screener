@@ -177,7 +177,7 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
 .research-disclaimer {background:#f3f5f6;color:var(--muted);border-radius:4px;}
 .signal-alert {background:#fff9ed;border-color:#ead8b2;color:#795400;}
 .backtest-strategy-form {margin-top:12px;}
-.route-loading-indicator {left:var(--sidebar-width);background:#f7e5d9;}
+.route-loading-indicator {background:var(--accent-soft);}
 .route-loading-indicator-bar {background:var(--accent);}
 .route-transition {animation-duration:180ms;}
 .strategy-view-enter {animation-duration:160ms;}
@@ -219,7 +219,6 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
   .filter-form {gap:6px;}
   .filter-form select {max-width:100%;}
   .footer {padding:14px 12px 76px;}
-  .route-loading-indicator {left:0;}
 }
 @media(prefers-reduced-motion:reduce) {
   html {scroll-behavior:auto;}
