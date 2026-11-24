@@ -50,3 +50,21 @@ test("one-off history workflow defaults to 160 total calendar days", () => {
   assert.match(workflow, /HISTORY_DAYS:.*'160'/);
   assert.match(workflow, /bootstrap-prices --days/);
 });
+
+const ts = require("typescript");
+const barModule = {exports:{}};
+const source = fs.readFileSync(path.join(__dirname,"../lib/market-bars.ts"),"utf8");
+new Function("module","exports",ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(barModule,barModule.exports);
+const {completeBar,aggregateBars,movingAverage}=barModule.exports;
+test("weekly aggregation uses first open, last close and genuine range and volume",()=>{
+  const a={day:"2025-01-06",open:10,high:11,low:9,close:10.5,volume:100,amount:500};
+  const b={day:"2025-01-07",open:10.5,high:12,low:10,close:11,volume:200,amount:700};
+  assert.deepEqual(aggregateBars([a,b],"W"),[{day:"2025-01-07",open:10,high:12,low:9,close:11,volume:300,amount:1200}]);
+  assert.equal(completeBar({day:b.day,close:b.close}),false);
+  assert.deepEqual(aggregateBars([a,{day:b.day,close:11}],"W"),[{day:b.day,close:11}]);
+});
+test("moving average omits insufficient history and uses actual closes",()=>{
+  const bars=[{day:"2025-01-06",close:1},{day:"2025-01-07",close:2},{day:"2025-01-08",close:3}];
+  assert.deepEqual(movingAverage(bars,2),[{time:"2025-01-07",value:1.5},{time:"2025-01-08",value:2.5}]);
+  assert.deepEqual(movingAverage(bars,5),[]);
+});
