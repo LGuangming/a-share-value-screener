@@ -10,7 +10,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 export default function ReviewReasons({
   reasons,
 }: {
-  reasons: ReadonlyArray<{ code: string; label: string }>;
+  reasons: ReadonlyArray<{ code: string; label: string; severity?: "HIGH"|"MEDIUM"|"LOW" }>;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const rulerRef = useRef<HTMLDivElement>(null);
@@ -67,7 +67,7 @@ export default function ReviewReasons({
     title={reasons.map(reason => reason.label).join("；") || "当前规则未识别到重点风险"}>
     {reasons.length
       ? reasons.slice(0, visibleCount).map(reason =>
-          <span key={reason.code} className="review-reason">{reason.label}</span>)
+          <span key={reason.code} className={`review-reason${reason.severity?` review-level-${reason.severity.toLowerCase()}`:""}`}>{reason.label}</span>)
       : <span className="review-muted">当前规则未识别到重点风险</span>}
     {hiddenCount > 0 && <span className="review-more">另有{hiddenCount}项</span>}
     <div className="review-reasons-ruler" ref={rulerRef} aria-hidden="true">
