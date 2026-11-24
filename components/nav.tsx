@@ -52,9 +52,9 @@ export default function Nav() {
   return <>
     <aside className="sidebar">
       <Link className="brand" href={strategyHref("/")}>
-        <span className="brand-text"><strong>价值雷达</strong><small>MULTI-STRATEGY / A-SHARE</small></span>
+        <span className="brand-text"><strong>价值雷达</strong><small>A 股多策略研究</small></span>
       </Link>
-      <div className="nav-caption">RESEARCH WORKSPACE</div>
+      <div className="nav-caption">研究工作台</div>
       <nav className="nav-main" aria-label="主导航">
         {links.map(({ href, label, Icon }) => {
           const isActive = activeHref === href;
