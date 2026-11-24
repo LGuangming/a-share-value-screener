@@ -1,6 +1,7 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
 import { unstable_cache } from "next/cache";
+import {companyMarket,companyReport,type CompanyOverview} from "./company-research";
 
 // Vercel Function read-only queries use HTTPS to Neon's SQL endpoint.
 // The previous postgres.js TCP path was repeatedly failing with CONNECT_TIMEOUT
@@ -336,4 +337,22 @@ export async function publishedCandidateChanges(day:string,previous:string){
     ORDER BY CASE WHEN p.ts_code IS NULL THEN 0 WHEN c.ts_code IS NULL THEN 1 ELSE 2 END,COALESCE(c.ts_code,p.ts_code)
   `;
   return rows.map(r=>({code:String(r.ts_code),name:String(r.name),industry:r.industry?String(r.industry):null,change:String(r.change) as "added"|"removed"|"retained",previousCoverage:numeric(r.previous_coverage),currentCoverage:numeric(r.current_coverage),previousPrice:numeric(r.previous_price),currentPrice:numeric(r.current_price)}));
+}
+
+/** Direct directory, latest quote and disclosed consolidated reports, independent of screening. */
+export async function companyOverview(code:string):Promise<{identity:{ts_code:string;name:string;industry:string|null};overview:CompanyOverview}|null>{
+  const db=connection();
+  if(!db)throw Error("Database reader unavailable");
+  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code))return null;
+  const [identities,quotes,reports]=await Promise.all([
+    db`SELECT ts_code,name,industry,market,list_date,is_st FROM stocks WHERE ts_code=${code}`,
+    db`SELECT trade_date,close,pb,turnover_rate,market_cap_yuan,raw FROM daily_prices WHERE ts_code=${code} ORDER BY trade_date DESC LIMIT 1`,
+    db`SELECT DISTINCT ON (kind) kind,end_date,disclosed_at,raw FROM financial_reports
+        WHERE ts_code=${code} AND report_type='1' AND disclosed_at<=(now() AT TIME ZONE 'Asia/Shanghai')::date
+        AND end_date<=disclosed_at ORDER BY kind,end_date DESC,disclosed_at DESC`
+  ]);
+  const s=identities[0];if(!s)return null;
+  const report=(kind:string)=>{const r=reports.find(x=>x.kind===kind);return r?companyReport(dateString(r.end_date)??"",dateString(r.disclosed_at)??"", (r.raw??{}) as Record<string,unknown>,kind):null;};
+  return {identity:{ts_code:String(s.ts_code),name:String(s.name),industry:s.industry?String(s.industry):null},overview:{market:quotes[0]?companyMarket(dateString(quotes[0].trade_date)??"",quotes[0]):null,
+    balance:report("balancesheet"),income:report("income"),cashflow:report("cashflow"),marketType:s.market?String(s.market):null,listDate:dateString(s.list_date),isST:s.is_st===true}};
 }
