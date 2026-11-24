@@ -19,22 +19,22 @@ export default function StockComparison({initialCodes}:{initialCodes:string[]}){
   const metrics:{name:string;value:(d:WorkspaceDetail)=>string}[]=[
     {name:"所属行业",value:d=>d.identity.industry??"—"},
     {name:"筛选日期",value:d=>d.stock?.trade_date??"—"},
-    {name:"财务报告期",value:d=>d.stock?.report_date??"—"},
-    {name:"财报披露日",value:d=>d.stock?.disclosed_at??"—"},
-    {name:"最近收盘价",value:d=>fixed(d.prices.at(-1)?.close??d.stock?.price??null)},
-    {name:"行情日期",value:d=>d.prices.at(-1)?.day??d.stock?.trade_date??"—"},
-    {name:"总市值",value:d=>moneyCny(d.stock?.market_cap_yuan??null)},
-    {name:"市净率",value:d=>fixed(d.stock?.pb??null)},
-    {name:"NCAV",value:d=>moneyCny(d.stock?.ncav_yuan??null)},
-    {name:"NCAV覆盖率",value:d=>pct(d.stock?.ncav_coverage??null,1)},
-    {name:"压力NCAV覆盖率",value:d=>pct(d.stock?.stress_coverage??null,1)},
-    {name:"资产负债率",value:d=>pct(d.stock?.liability_ratio??null,1)},
-    {name:"累计合并净利润",value:d=>moneyCny(d.stock?.net_profit_yuan??null)},
-    {name:"累计经营现金流",value:d=>moneyCny(d.stock?.operating_cf_yuan??null)},
-    {name:"筛选状态",value:d=>d.stock?stateLabel(d.stock.status):"—"},
-    {name:"交易观察",value:d=>d.stock?signalLabel(d.stock.signal):"—"},
-    {name:"风险等级",value:d=>d.stock?severityLabel[evaluateFundamentalReview(d.stock).severity]:"—"},
-    {name:"主要风险",value:d=>d.stock?evaluateFundamentalReview(d.stock).reasons.map(r=>r.label).join("；")||"暂无重点事项":"—"}
+    {name:"利润表报告期",value:d=>d.overview.income?.period??"—"},
+    {name:"利润表披露日",value:d=>d.overview.income?.disclosed??"—"},
+    {name:"最近收盘价",value:d=>fixed(d.prices.at(-1)?.close??d.overview.market?.close??null)},
+    {name:"行情日期",value:d=>d.prices.at(-1)?.day??d.overview.market?.day??"—"},
+    {name:"总市值",value:d=>moneyCny(d.overview.market?.marketCap??null)},
+    {name:"市净率",value:d=>fixed(d.overview.market?.pb??null)},
+    {name:"Net-Net NCAV",value:d=>moneyCny(d.stock?.ncav_yuan??null)},
+    {name:"Net-Net NCAV覆盖率",value:d=>pct(d.stock?.ncav_coverage??null,1)},
+    {name:"Net-Net 压力覆盖率",value:d=>pct(d.stock?.stress_coverage??null,1)},
+    {name:"资产负债率",value:d=>pct(d.overview.balance?.leverage??null,1)},
+    {name:"累计合并净利润",value:d=>moneyCny(d.overview.income?.profit??null)},
+    {name:"累计经营现金流",value:d=>moneyCny(d.overview.cashflow?.operatingCash??null)},
+    {name:"Net-Net 筛选状态",value:d=>d.stock?stateLabel(d.stock.status):"—"},
+    {name:"Net-Net 交易观察",value:d=>d.stock?signalLabel(d.stock.signal):"—"},
+    {name:"Net-Net 风险等级",value:d=>d.stock?severityLabel[evaluateFundamentalReview(d.stock).severity]:"—"},
+    {name:"Net-Net 主要风险",value:d=>d.stock?evaluateFundamentalReview(d.stock).reasons.map(r=>r.label).join("；")||"暂无重点事项":"—"}
   ];
   return <section className="panel"><div className="panel-heading"><div><h2>股票对比</h2><p>已选择 {codes.length}/5 只股票</p></div><button className="tool-button" onClick={()=>update([])} disabled={!codes.length}>清空</button></div>
     <div className="v4-compare-search"><div className="search-field"><Search size={15}/><input value={query} maxLength={40} onChange={e=>setQuery(e.target.value)} placeholder="搜索股票名称 / 代码" aria-label="添加对比股票"/></div>{query&&<div className="v4-compare-options">{lookup.loading?<p>搜索中…</p>:lookup.error?<p>{lookup.error}</p>:lookup.stocks.length?lookup.stocks.map(s=><button className="tool-button" key={s.ts_code} disabled={codes.includes(s.ts_code)||codes.length>=5} onClick={()=>add(s)}>{s.name} · {s.ts_code}</button>):<p>暂无匹配股票</p>}</div>}</div>
