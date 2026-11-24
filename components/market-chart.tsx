@@ -16,16 +16,17 @@ const CURRENT_YEAR=new Date(Date.now()+8*3600000).getUTCFullYear();
 const RANGES:Record<string,number[]>={[`2020-${CURRENT_YEAR}`]:Array.from({length:CURRENT_YEAR-2019},(_,i)=>2020+i),[`2023-${CURRENT_YEAR}`]:Array.from({length:CURRENT_YEAR-2022},(_,i)=>2023+i)};
 const yearsFor=(source:string)=>RANGES[source]??[/^20\d{2}$/.test(source)&&Number(source)>=2020&&Number(source)<=CURRENT_YEAR?Number(source):0].filter(Boolean);
 
-export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
+export default function MarketChart({code,name,marks=NO_MARKS}:Props){
   const {prefs}=useWorkspacePreferences();
   const dark=prefs.theme==="dark";
   const host=useRef<HTMLDivElement>(null);
   const root=useRef<HTMLElement>(null);
   const api=useRef<ReturnType<typeof createChart>|null>(null);
-  const [source,setSource]=useState(String(CURRENT_YEAR));
+  const [source,setSource]=useState("recent");
   const [coverageNote,setCoverageNote]=useState("");
   const [archive,setArchive]=useState<MarketBar[]>([]);
-  const [loading,setLoading]=useState(false);
+  const [recentRange,setRecentRange]=useState<{from:string;to:string}|null>(null);
+  const [loading,setLoading]=useState(true);
   const [progress,setProgress]=useState("");
   const [adjustment,setAdjustment]=useState<Adjustment>("unadjusted");
   const [factors,setFactors]=useState<{key:string;values:Factor[]}|null>(null);
@@ -45,11 +46,22 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   const requestCache=useRef(new Map<string,MarketBar[]>());
 
   useEffect(()=>{
-    if(source==="recent"){setLoading(false);setError("");setCoverageNote("");return;}
     const controller=new AbortController();
     const years=yearsFor(source);
-    setArchive([]);setLoading(true);setError("");setProgress("");setCoverageNote("");
+    setArchive([]);setRecentRange(null);setLoading(true);setError("");setProgress("");setCoverageNote("");
     async function load(){
+      if(source==="recent"){
+        const res=await fetch("/api/quotes/"+encodeURIComponent(code)+"?range=recent",{signal:controller.signal});
+        const data=await res.json();
+        if(!res.ok)throw Error(data.error||"近期行情暂不可用");
+        if(data.code!==code||data.range!=="recent"||data.adjustment!=="unadjusted"||!Array.isArray(data.bars)||!data.coverage||typeof data.coverage.from!=="string"||typeof data.coverage.to!=="string"||data.coverage.archivedSessions>120||data.bars.length>120)throw Error("近期行情响应异常");
+        if(!controller.signal.aborted){
+          setArchive(mergeArchivedBars([data.bars]));
+          setRecentRange({from:data.coverage.from,to:data.coverage.to});
+          if(data.coverage.partial)setCoverageNote("已归档 "+data.coverage.archivedSessions+" 个市场交易日 · 最新 "+data.coverage.latest);
+        }
+        return;
+      }
       const all:MarketBar[][]=[];
       for(let i=0;i<years.length;i+=2){
         const batch=await Promise.all(years.slice(i,i+2).map(async year=>{
@@ -74,12 +86,21 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
     return ()=>controller.abort();
   },[source,code]);
 
-  const factorKey=code+":"+source;
+  const factorKey=code+":"+source+(source==="recent"&&recentRange?":"+recentRange.from+":"+recentRange.to:"");
   useEffect(()=>{
-    if(source==="recent"||adjustment==="unadjusted"){setFactorLoading(false);setFactorError("");return;}
+    if(adjustment==="unadjusted"||(source==="recent"&&!recentRange)){setFactorLoading(false);setFactorError("");return;}
     const controller=new AbortController(),years=yearsFor(source);
     setFactorLoading(true);setFactorError("");
     async function load(){
+      if(source==="recent"&&recentRange){
+        const {from,to}=recentRange;
+        const res=await fetch("/api/quotes/"+encodeURIComponent(code)+"/factors?range=recent&from="+encodeURIComponent(from)+"&to="+encodeURIComponent(to),{signal:controller.signal});
+        const data=await res.json();
+        if(!res.ok)throw Error(data.error||"近期复权因子暂不可用");
+        if(data.code!==code||data.range!=="recent"||data.from!==from||data.to!==to||!Array.isArray(data.factors))throw Error("近期复权响应异常");
+        if(!controller.signal.aborted)setFactors({key:factorKey,values:data.factors as Factor[]});
+        return;
+      }
       const all:Factor[]=[];
       for(let i=0;i<years.length;i+=2){
         const result=await Promise.all(years.slice(i,i+2).map(async year=>{
@@ -98,9 +119,9 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
     }
     load().catch(e=>{if(!controller.signal.aborted)setFactorError(e instanceof Error?e.message:"复权因子暂不可用");}).finally(()=>{if(!controller.signal.aborted)setFactorLoading(false);});
     return ()=>controller.abort();
-  },[source,code,adjustment,factorKey]);
+  },[source,code,adjustment,factorKey,recentRange]);
 
-  const rawDaily=source==="recent"?prices:archive;
+  const rawDaily=archive;
   const adjusted=useMemo(()=>{
     if(adjustment==="unadjusted")return {bars:rawDaily,error:""};
     if(factors?.key!==factorKey)return {bars:[] as MarketBar[],error:""};
@@ -200,13 +221,13 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
     if(root.current?.requestFullscreen)await root.current.requestFullscreen().catch(()=>{});
   }
 
-  function chooseSource(value:string){if(value!==source){setHover(null);setArchive([]);setError("");setLoading(value!=="recent");setAdjustment("unadjusted");setFactorError("");setFactorLoading(false);setSource(value);}}
+  function chooseSource(value:string){if(value!==source){setHover(null);setArchive([]);setError("");setLoading(true);setRecentRange(null);setKind("candle");setAdjustment("unadjusted");setFactorError("");setFactorLoading(false);setSource(value);}}
   return <section ref={root} className={"market-chart-shell"+(expanded?" chart-expanded":"")} aria-label={name+"行情分析"}>
     <div className="chart-toolbar">
       <div className="chart-group"><select aria-label="行情数据区间" value={source} onChange={e=>chooseSource(e.target.value)}>
-        <option value="recent">近期行情</option><option value={`2020-${CURRENT_YEAR}`}>2020–{CURRENT_YEAR} 连续行情</option><option value={`2023-${CURRENT_YEAR}`}>2023–{CURRENT_YEAR} 连续行情</option>{Array.from({length:CURRENT_YEAR-2019},(_,i)=>CURRENT_YEAR-i).map(y=><option key={y} value={y}>{y}年归档</option>)}
+        <option value="recent">近期行情（120个交易日）</option><option value={`2020-${CURRENT_YEAR}`}>2020–{CURRENT_YEAR} 连续行情</option><option value={`2023-${CURRENT_YEAR}`}>2023–{CURRENT_YEAR} 连续行情</option>{Array.from({length:CURRENT_YEAR-2019},(_,i)=>CURRENT_YEAR-i).map(y=><option key={y} value={y}>{y}年归档</option>)}
       </select></div>
-      <div className="chart-group"><select aria-label="复权方式" value={adjustment} disabled={source==="recent"} onChange={e=>{setHover(null);setFactorError("");setAdjustment(e.target.value as Adjustment);}}><option value="unadjusted">不复权</option><option value="forward">前复权（区间末）</option><option value="backward">后复权（区间首）</option></select></div>
+      <div className="chart-group"><select aria-label="复权方式" value={adjustment} disabled={loading||!archive.length} onChange={e=>{setHover(null);setFactorError("");setAdjustment(e.target.value as Adjustment);}}><option value="unadjusted">不复权</option><option value="forward">前复权（区间末）</option><option value="backward">后复权（区间首）</option></select></div>
       <div className="chart-group" aria-label="行情周期">{(["D","W","M"] as const).map((p,i)=><button type="button" key={p} aria-pressed={period===p} onClick={()=>setPeriod(p)}>{["日线","周线","月线"][i]}</button>)}</div>
       <div className="chart-group"><button type="button" aria-pressed={candleMode} disabled={!candles} onClick={()=>setKind("candle")}>K线</button><button type="button" aria-pressed={!candleMode} onClick={()=>setKind("line")}>收盘价</button></div>
       <div className="chart-actions"><button type="button" title="重置视图" aria-label="重置视图" onClick={()=>api.current?.timeScale().fitContent()}><RotateCcw size={15}/></button>
@@ -226,6 +247,6 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
       <div className="chart-canvas" ref={host} style={{visibility:busy||displayError||!bars.length||chartError?"hidden":"visible"}}/>
       {(busy||displayError||!bars.length||chartError)&&<div className="chart-placeholder" role="status">{busy?<><span className="chart-spinner"/>{factorLoading?"正在读取复权因子":"正在读取已归档行情"} {loading?progress:""}</>:displayError|| (chartError?"行情图暂不可用":"当前区间暂无行情")}</div>}
     </div>
-    <div className="chart-footer"><span>{source==="recent"?"近期收盘价":source+"年历史行情"} · {adjustment==="unadjusted"?"不复权":adjustment==="forward"?"前复权（区间末）":"后复权（区间首）"} · {daily.length} 个交易日{coverageNote?" · "+coverageNote:""}</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™ · © 2025 TradingView, Inc.</a></div>
+    <div className="chart-footer"><span>{source==="recent"?"近期归档行情":source+"年历史行情"} · {adjustment==="unadjusted"?"不复权":adjustment==="forward"?"前复权（区间末）":"后复权（区间首）"} · {daily.length} 个交易日{coverageNote?" · "+coverageNote:""}</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™ · © 2025 TradingView, Inc.</a></div>
   </section>;
 }

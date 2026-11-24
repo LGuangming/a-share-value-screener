@@ -4,7 +4,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { parquetReadObjects } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
 import { unstable_cache } from "next/cache";
-import { completeBar, type MarketBar, type Factor } from "./market-bars";
+import { completeBar, recentWindow, recentMonthRange, RECENT_SESSIONS, type MarketBar, type Factor } from "./market-bars";
 
 import { RAW_PREFIX as PREFIX } from "./archive-paths";
 export class ArchiveUnavailable extends Error {}
@@ -32,7 +32,7 @@ function number(value:unknown):number {
   return value;
 }
 type Part={path:string;month:string;bytes:number;sha256:string;rows:number};
-async function queryYear(code:string,year:number):Promise<MarketBar[]>{
+async function queryYear(code:string,year:number,selectedMonths?:string[],sessionDates?:Set<string>):Promise<MarketBar[]>{
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2020||year>2025)throw new Error("Invalid query");
   const {bucket,client}=storage();
   async function get(key:string,max:number){
@@ -54,13 +54,15 @@ async function queryYear(code:string,year:number):Promise<MarketBar[]>{
     }
     const bars:MarketBar[]=[];
     // Bounded batches: preserve the original monthly objects and verify every read.
-    for(let i=0;i<parts.length;i+=2){
-      const result=await Promise.all(parts.slice(i,i+2).map(async p=>{
+    const selected=selectedMonths?parts.filter(p=>selectedMonths.includes(p.month)):parts;
+    for(let i=0;i<selected.length;i+=2){
+      const result=await Promise.all(selected.slice(i,i+2).map(async p=>{
         const bytes=await get(PREFIX+"/"+p.path,p.bytes);
         if(bytes.byteLength!==p.bytes||createHash("sha256").update(bytes).digest("hex")!==p.sha256)throw new Error("Archive checksum mismatch");
         const file=new Uint8Array(bytes).buffer;
         const records=await parquetReadObjects({file,compressors,columns:["ts_code","trade_date","open","high","low","close","vol","amount"]});
         if(records.length!==p.rows)throw new Error("Archive row count mismatch");
+        if(sessionDates){for(const r of records){const d=isoDay(r.trade_date);if(!d.startsWith(year+"-"+p.month+"-"))throw Error("Invalid archive session");sessionDates.add(d);}}
         return records.filter(r=>r.ts_code===code).map(r=>{
           const b={day:isoDay(r.trade_date),open:number(r.open),high:number(r.high),low:number(r.low),close:number(r.close),volume:number(r.vol),amount:number(r.amount)};
           if(!b.day.startsWith(year+"-"+p.month+"-")||!completeBar(b)||b.volume<0||b.amount<0)throw new Error("Invalid archived bar");
@@ -74,9 +76,9 @@ async function queryYear(code:string,year:number):Promise<MarketBar[]>{
     return bars;
   } finally {client.destroy();}
 }
-export const archivedQuotes=unstable_cache(queryYear,["market-archive-raw-v1"],{revalidate:86400});
+export const archivedQuotes=unstable_cache((code:string,year:number)=>queryYear(code,year),["market-archive-raw-v1"],{revalidate:86400});
 
-async function queryFactors(code:string,year:number):Promise<Factor[]>{
+async function queryFactors(code:string,year:number,selectedMonths?:string[]):Promise<Factor[]>{
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2020||year>2025)throw Error("Invalid factor query");
   const {bucket,client}=storage();
   const prefix=PREFIX+"/adj_factor/year="+year;
@@ -98,8 +100,9 @@ async function queryFactors(code:string,year:number):Promise<Factor[]>{
     }
     if(doc.rows!==total||doc.sessions!==sessions)throw Error("Factor manifest totals mismatch");
     const factors:Factor[]=[];
-    for(let i=0;i<doc.months.length;i+=2){
-      const parts=await Promise.all(doc.months.slice(i,i+2).map(async (p:{object_key:string;parquet_bytes:number;rows:number;month:string;sha256:string})=>{
+    const selected=selectedMonths?doc.months.filter((p:{month:string})=>selectedMonths.includes(p.month)):doc.months;
+    for(let i=0;i<selected.length;i+=2){
+      const parts=await Promise.all(selected.slice(i,i+2).map(async (p:{object_key:string;parquet_bytes:number;rows:number;month:string;sha256:string})=>{
         const bytes=await get(p.object_key,p.parquet_bytes);
         if(bytes.length!==p.parquet_bytes||createHash("sha256").update(bytes).digest("hex")!==p.sha256)throw Error("Factor checksum mismatch");
         const rows=await parquetReadObjects({file:new Uint8Array(bytes).buffer,compressors,columns:["ts_code","trade_date","adj_factor"]});
@@ -117,19 +120,19 @@ async function queryFactors(code:string,year:number):Promise<Factor[]>{
     return factors;
   }finally{client.destroy();}
 }
-export const archivedFactors=unstable_cache(queryFactors,["market-factors-raw-v1"],{revalidate:86400});
+export const archivedFactors=unstable_cache((code:string,year:number)=>queryFactors(code,year),["market-factors-raw-v1"],{revalidate:86400});
 
 
 // 2026+ partial-year reader: read only published, content-addressed monthly
 // snapshots; never pretend that missing months or sessions were archived.
 type MonthReader={format_version:number;status:string;dataset:string;year:number;month:string;through:string;dates:string[];expected_dates:string[];missing_dates:string[];rows:number;object_key:string;bytes:number;sha256:string;fields:string[];source_sha256:string[]};
 type Coverage={months:number;archivedSessions:number;missingMonths:string[];missingSessions:string[];latest:string;through:string;partial:boolean};
-async function readIncremental(code:string,year:number,dataset:"daily_prices"|"adj_factor"){
+async function readIncremental(code:string,year:number,dataset:"daily_prices"|"adj_factor",selectedMonths?:string[]){
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2026||year>new Date(Date.now()+8*3600000).getUTCFullYear())throw Error("Invalid incremental query");
   const {bucket,client}=storage();
   const now=new Date(Date.now()+8*3600000);
   const lastMonth=year===now.getUTCFullYear()?now.getUTCMonth()+1:12;
-  const months=Array.from({length:lastMonth},(_,i)=>String(i+1).padStart(2,"0"));
+  const months=selectedMonths??Array.from({length:lastMonth},(_,i)=>String(i+1).padStart(2,"0"));
   const dayPattern=/^\d{4}-\d{2}-\d{2}$/;
   const wanted=dataset==="daily_prices"?["ts_code","trade_date","open","high","low","close","vol","amount"]:["ts_code","trade_date","adj_factor"];
   async function get(key:string,max:number,optional=false){
@@ -172,13 +175,59 @@ async function readIncremental(code:string,year:number,dataset:"daily_prices"|"a
         }
       }
     }
-    if(!count)throw new ArchiveUnavailable("该年度尚无已验证行情归档");
+    if(!count&&!selectedMonths)throw new ArchiveUnavailable("该年度尚无已验证行情归档");
     bars.sort((a,b)=>a.day.localeCompare(b.day));factors.sort((a,b)=>a.day.localeCompare(b.day));
     if(new Set(bars.map(b=>b.day)).size!==bars.length||new Set(factors.map(b=>b.day)).size!==factors.length)throw Error("Duplicate incremental day");
     const latest=dates.at(-1)??"";
     const coverage:Coverage={months:count,archivedSessions:dates.length,missingMonths,missingSessions,latest,through,partial:!!(missingMonths.length||missingSessions.length)};
-    return {bars,factors,coverage};
+    return {bars,factors,coverage,dates};
   }finally{client.destroy();}
 }
 export const incrementalQuotes=unstable_cache((code:string,year:number)=>readIncremental(code,year,"daily_prices"),["market-incremental-quotes-v1"],{revalidate:60});
 export const incrementalFactors=unstable_cache((code:string,year:number)=>readIncremental(code,year,"adj_factor"),["market-incremental-factors-v1"],{revalidate:60});
+
+
+// Read the newest verified monthly partitions first, stopping once 120 market
+// sessions are covered. This avoids loading the full current and previous years
+// for the default chart and works at month/year boundaries.
+async function queryRecent(code:string){
+  const now=new Date(Date.now()+8*3600000);
+  const cursor=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1));
+  const sessions=new Set<string>(),bars:MarketBar[]=[],missingMonths:string[]=[],missingSessions:string[]=[];
+  for(let i=0;i<18&&sessions.size<RECENT_SESSIONS&&cursor.getUTCFullYear()>=2020;i++){
+    const year=cursor.getUTCFullYear(),month=String(cursor.getUTCMonth()+1).padStart(2,"0");
+    if(year>=2026){
+      const result=await readIncremental(code,year,"daily_prices",[month]);
+      result.dates.forEach(d=>sessions.add(d));bars.push(...result.bars);
+      missingMonths.push(...result.coverage.missingMonths.map(m=>year+"-"+m));
+      missingSessions.push(...result.coverage.missingSessions);
+    }else{
+      bars.push(...await queryYear(code,year,[month],sessions));
+    }
+    cursor.setUTCMonth(cursor.getUTCMonth()-1);
+  }
+  const window=recentWindow(bars,[...sessions]);
+  if(!window.dates.length)throw new ArchiveUnavailable("近期暂无已验证行情归档");
+  const gaps=missingSessions.filter(d=>d>=window.from);
+  return {bars:window.bars,coverage:{from:window.from,to:window.to,latest:window.to,
+    archivedSessions:window.dates.length,missingMonths,missingSessions:gaps,
+    partial:window.dates.length<RECENT_SESSIONS||!!(missingMonths.length||gaps.length)}};
+}
+export const recentQuotes=unstable_cache(queryRecent,["market-recent-120-v1"],{revalidate:60});
+
+async function queryRecentFactors(code:string,from:string,to:string){
+  const today=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
+  const months=recentMonthRange(from,to);
+  if(to>today)throw Error("Future factor range");
+  const groups=new Map<number,string[]>();
+  for(const {year,month} of months){const list=groups.get(year)??[];list.push(month);groups.set(year,list);}
+  const factors:Factor[]=[];
+  for(const [year,months] of groups){
+    if(year>=2026)factors.push(...(await readIncremental(code,year,"adj_factor",months)).factors);
+    else factors.push(...await queryFactors(code,year,months));
+  }
+  const result=factors.filter(f=>f.day>=from&&f.day<=to).sort((a,b)=>a.day.localeCompare(b.day));
+  if(new Set(result.map(f=>f.day)).size!==result.length)throw Error("Duplicate recent factor");
+  return result;
+}
+export const recentFactors=unstable_cache(queryRecentFactors,["market-recent-factors-v1"],{revalidate:60});

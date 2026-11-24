@@ -107,7 +107,33 @@ test("V4 chart requests yearly archives in bounded batches and checks factor int
   assert.match(archive,/Factor checksum mismatch/);
   assert.match(archive,/Factor manifest totals mismatch/);
   assert.match(archive,/Factor row count mismatch/);
-  assert.match(chart,/disabled=\{source==="recent"\}/);
+  assert.match(chart,/disabled=\{loading\|\|!archive.length\}/);
 });
 
  test("current-year chart uses incremental verified month reader",()=>{assert.match(chart,/CURRENT_YEAR/);assert.match(archive,/verified_month_reader/);assert.match(archive,/Incremental checksum mismatch/);assert.match(chart,/coverageNote/);});
+
+test("recent default uses archive endpoints and enables adjustment",()=>{
+  assert.match(chart,/useState\("recent"\)/);
+  assert.match(chart,/\?range=recent/);
+  assert.match(chart,/factors\?range=recent&from=/);
+  assert.match(chart,/const rawDaily=archive/);
+  assert.doesNotMatch(chart,/source==="recent"\?prices:archive/);
+  assert.match(archive,/sessions.size<RECENT_SESSIONS/);
+});
+test("recent window follows market sessions across years without inventing suspended bars",()=>{
+  const {recentWindow,recentMonthRange}=barModule.exports;
+  const dates=Array.from({length:130},(_,i)=>new Date(Date.UTC(2025,9,1+i)).toISOString().slice(0,10));
+  const bars=dates.filter((_,i)=>i!==100).map(day=>({day,open:10,high:11,low:9,close:10,volume:100,amount:200}));
+  const result=recentWindow(bars,dates);
+  assert.equal(result.dates.length,120);
+  assert.equal(result.bars.length,119);
+  assert.equal(result.from,dates[10]);
+  assert.equal(result.to,dates.at(-1));
+  assert.equal(result.bars[0].day,dates[10]);
+  assert.deepEqual(recentMonthRange("2025-12-30","2026-02-02"),[{year:2025,month:"12"},{year:2026,month:"01"},{year:2026,month:"02"}]);
+  assert.throws(()=>recentMonthRange("2026-02-30","2026-03-01"));
+  const next=new Date(Date.UTC(2025,9,131)).toISOString().slice(0,10);
+  const shifted=recentWindow([...bars,{day:next,open:10,high:11,low:9,close:10}], [...dates,next]);
+  assert.equal(shifted.from,dates[11]);
+  assert.equal(shifted.to,next);
+});

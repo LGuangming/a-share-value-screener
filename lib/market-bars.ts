@@ -93,3 +93,25 @@ export function kdj(bars:MarketBar[],period=9){
     return [{time:b.day,k,d,j:3*k-2*d}];
   });
 }
+
+
+// Recent means the last 120 verified MARKET sessions, not 120 individual
+// stock observations. Suspensions and newly listed securities keep their
+// genuine gaps; never reach farther back just to fill a particular stock.
+export const RECENT_SESSIONS=120;
+export function recentWindow(bars:MarketBar[],sessions:string[],limit=RECENT_SESSIONS){
+  if(!Number.isInteger(limit)||limit<=0)throw Error("Invalid recent session limit");
+  const dates=[...new Set(sessions)].sort().slice(-limit);
+  const allowed=new Set(dates);
+  return {dates,bars:mergeArchivedBars([bars]).filter(b=>allowed.has(b.day)),from:dates[0]??"",to:dates.at(-1)??""};
+}
+export function recentMonthRange(from:string,to:string):{year:number;month:string}[]{
+  if(!/^20\d{2}-\d{2}-\d{2}$/.test(from)||!/^20\d{2}-\d{2}-\d{2}$/.test(to))throw Error("Invalid recent range");
+  const a=new Date(from+"T00:00:00Z"),b=new Date(to+"T00:00:00Z");
+  if(!Number.isFinite(+a)||!Number.isFinite(+b)||a.toISOString().slice(0,10)!==from||b.toISOString().slice(0,10)!==to||from<"2020-01-01"||from>to||(+b-+a)>550*86400000)throw Error("Invalid recent range");
+  const result:{year:number;month:string}[]=[];
+  for(const d=new Date(Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),1));d<=b;d.setUTCMonth(d.getUTCMonth()+1)){
+    result.push({year:d.getUTCFullYear(),month:String(d.getUTCMonth()+1).padStart(2,"0")});
+  }
+  return result;
+}
