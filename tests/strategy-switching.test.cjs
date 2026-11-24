@@ -374,3 +374,12 @@ test("V4 archive readers remain bounded, read-only and checksum verified",()=>{
   assert.match(read("components/compare-selection.tsx"),/v.length<5/);
   assert.match(read("app/stocks/[code]/page.tsx"),/<FinancialHistory/);
 });
+
+test("V4 candidate comparison is based on successful published results only",()=>{
+  const data=read("lib/data.ts");
+  assert.match(data,/export async function publishedCandidateDates/);
+  assert.match(data,/FULL OUTER JOIN previous_candidates/);
+  assert.match(data,/r.strategy='netnet_v1' AND r.trade_date=\$\{day\} AND r.is_candidate=true/);
+  assert.match(read("app/candidate-history/page.tsx"),/publishedCandidateChanges\(day,previous\)/);
+  assert.match(read("app/page.tsx"),/href="\/candidate-history"/);
+});
