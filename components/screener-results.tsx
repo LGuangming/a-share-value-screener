@@ -10,6 +10,8 @@ import ToolbarFlyout from "@/components/toolbar-flyout";
 import {WatchButton,useWatchlist} from "@/components/workspace-preferences";
 import {MiniTrend,useMiniTrends} from "@/components/mini-trends";
 import {PreviewButton} from "@/components/stock-preview";
+import {useCompareSelection,CompareCheckbox,CompareToolbar} from "@/components/compare-selection";
+import FilterPresets,{type FilterPreset} from "@/components/filter-presets";
 
 export type ScreenTableRow = Pick<ScreenerRow,
   "ts_code" | "name" | "industry" | "price" | "pb" | "market_cap_yuan" |
@@ -77,6 +79,7 @@ export default function ScreenerResults({ rows, initial }: {
   const [order, setOrder] = useState<NumericKey>(initial.order === "stress" ? "stress_coverage" : "ncav_coverage");
   const [ascending, setAscending] = useState(false);
   const [columns, setColumns] = useState<ColumnKey[]>(optionalColumns.map(c=>c.key));
+  const {codes,toggle,clear}=useCompareSelection();
   const [columnMenu, setColumnMenu] = useState(false);
   const [advanced,setAdvanced]=useState(false);
   const [industry,setIndustry]=useState("");
@@ -140,6 +143,7 @@ export default function ScreenerResults({ rows, initial }: {
   const trend=useMiniTrends(trendCodes,mini);
   const suggestions = matches.slice(0, 8);
   const shownColumns=columns.flatMap(k=>optionalColumns.filter(c=>c.key===k));
+  function applyPreset(p:FilterPreset){setView(p.view);setMaxPrice(p.maxPrice);setMinCoverage(p.minCoverage);setMaxPb(p.maxPb);setOrder(p.order as NumericKey);setAscending(p.ascending);setIndustry(p.industry);setWatchOnly(p.watchOnly);setQ("");setSearchHeight(undefined);setVisibleCount(100);setSuggestionsOpen(false);clear();}
   function sortBy(key:NumericKey) {
     if(order===key) setAscending(v=>!v);
     else {setOrder(key);setAscending(false);}
@@ -273,6 +277,8 @@ export default function ScreenerResults({ rows, initial }: {
             <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setWidths({});setColumnMenu(false);}}>恢复默认</button>
           </div></ToolbarFlyout>}
         </div>
+        <FilterPresets current={{view,maxPrice,minCoverage,maxPb,order,ascending,industry,watchOnly}} apply={applyPreset}/>
+        <CompareToolbar codes={codes} clear={clear}/>
         <button type="button" className="tool-button" onClick={exportRows} disabled={!filtered.length}><Download size={14}/> 导出 CSV</button>
       </div>
     </div>
@@ -287,9 +293,9 @@ export default function ScreenerResults({ rows, initial }: {
           <button type="button" className="column-resizer" aria-label={c.label+"调整列宽"} onPointerDown={e=>resizeColumn(c.key,e)} onKeyDown={e=>{if(e.key==="ArrowLeft"||e.key==="ArrowRight"){e.preventDefault();setWidths(prev=>({...prev,[c.key]:Math.max(75,Math.min(420,(prev[c.key]??105)+(e.key==="ArrowLeft"?-10:10)))}));}}}/>
         </th>)}{mini&&<th>近20日走势</th>}<th aria-label="研究操作">操作</th></tr></thead>
       <tbody>{filtered.slice(0,visibleCount).map(row=><tr key={row.ts_code}>
-        <td className="security-col"><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
+        <td className="security-col"><div className="v4-security-compare"><CompareCheckbox code={row.ts_code} name={row.name} codes={codes} toggle={toggle}/><div><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           {row.name}<ArrowUpRight size={13}/></Link>
-          <div className="stock-meta">{row.ts_code} · {row.industry || "行业待补充"}</div></td>
+          <div className="stock-meta">{row.ts_code} · {row.industry || "行业待补充"}</div></div></div></td>
         {shownColumns.map(c=><td key={c.key} className={c.key==="status"||c.key==="signal"?"":"number numeric-col"}>
           {c.key==="status"?<span className={tagClass(row.status)}>{displayValue(row,c.key)}</span>:
            <span className={c.key==="ncav_coverage" && row.ncav_coverage!==null && row.ncav_coverage>=1.25?"highlight":""}>{displayValue(row,c.key)}</span>}

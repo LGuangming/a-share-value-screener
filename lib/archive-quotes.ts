@@ -8,7 +8,7 @@ import { completeBar, type MarketBar } from "./market-bars";
 
 const PREFIX="a-share-backtest/v1";
 export class ArchiveUnavailable extends Error {}
-function storage(){
+export function storage(){
   const endpoint=process.env.NEON_STORAGE_ENDPOINT;
   const bucket=process.env.NEON_STORAGE_BUCKET;
   const accessKeyId=process.env.NEON_STORAGE_READ_ACCESS_KEY_ID;

@@ -283,3 +283,22 @@ export async function recentMiniTrends(codes:string[]):Promise<Record<string,{da
   for(const r of rows){const day=dateString(r.trade_date),close=numeric(r.close);if(day&&close!==null&&close>0)(out[String(r.ts_code)]??=[]).push({day,close});}
   return out;
 }
+
+export async function dataCenterSnapshot(){
+  const db=connection();
+  if(!db)throw Error("Database reader unavailable");
+  const {snapshot,error}=await latestSnapshot();
+  const jobs=await db`
+    SELECT job_type,trade_date,status,started_at,finished_at
+    FROM job_runs ORDER BY started_at DESC LIMIT 30
+  `;
+  const fresh=await db`
+    SELECT max(trade_date) AS day FROM daily_prices
+  `;
+  const day=dateString(fresh[0]?.day);
+  const counts=day?await db`
+    SELECT count(*) AS rows,count(pb) AS pb,count(market_cap_yuan) AS market_cap
+    FROM daily_prices WHERE trade_date=${day}
+  `:[];
+  return {snapshot,error,day,rows:numeric(counts[0]?.rows),pb:numeric(counts[0]?.pb),marketCap:numeric(counts[0]?.market_cap),jobs:jobs.map(r=>({type:String(r.job_type),day:dateString(r.trade_date),status:String(r.status),started:r.started_at instanceof Date?r.started_at.toISOString():String(r.started_at),finished:r.finished_at?(r.finished_at instanceof Date?r.finished_at.toISOString():String(r.finished_at)):null}))};
+}

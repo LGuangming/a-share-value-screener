@@ -7,6 +7,7 @@ import { evaluateFundamentalReview, severityLabel, priorityLabel } from "@/lib/r
 import MarketChart from "@/components/market-chart";
 import { Empty } from "@/components/empty";
 import ResearchTabs from "@/components/research-tabs";
+import FinancialHistory from "@/components/financial-history";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,7 @@ export default async function StockPage({params}: Props) {
           <tr><td>合并净利润</td><td>{moneyCny(stock.net_profit_yuan)}</td><td>报告期累计</td></tr>
         </tbody></table></div>
       </section>},
+        {id:"financial-history",label:"历史财务",content:<FinancialHistory key={stock.ts_code} code={stock.ts_code}/>},
         {id:"valuation",label:"估值分析",content:<section className="panel"><h2>资产折价与压力测试</h2>
         <div className="table-scroll"><table className="results-table financial-table"><thead><tr><th>估值项目</th><th>金额 / 比率</th><th>计算口径</th></tr></thead><tbody>
           <tr><td>总市值</td><td>{moneyCny(stock.market_cap_yuan)}</td><td>收盘日总市值</td></tr>

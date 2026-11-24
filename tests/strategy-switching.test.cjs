@@ -334,3 +334,43 @@ test("backtest strategy switches locally and uses strategy-specific draft fields
   assert.match(config,/Number\(params.ma_fast\)<Number\(params.ma_slow\)/);
   assert.match(config,/draft_not_executable/);
 });
+
+function loadV4Module(path){
+  const ts=require("typescript"),m={exports:{}};
+  new Function("module","exports",ts.transpileModule(read(path),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m,m.exports);
+  return m.exports;
+}
+test("V4 strategy modes exclude unpublished data from claimed intersections",()=>{
+  const {filterStrategyResults}=loadV4Module("lib/strategy-summary.ts");
+  const row=(ts_code)=>({ts_code,name:ts_code,industry:null,price:1,market_cap_yuan:10,is_candidate:true});
+  const groups=[{id:"a",name:"A",state:"ready",rows:[row("1"),row("2"),row("2")]},{id:"b",name:"B",state:"ready",rows:[row("2"),row("3")]},{id:"c",name:"C",state:"unpublished",rows:[]}];
+  assert.deepEqual(filterStrategyResults(groups,["a","b","c"],"union").rows.map(x=>x.ts_code),["2","1","3"]);
+  assert.deepEqual(filterStrategyResults(groups,["a","b"],"intersection").rows.map(x=>x.ts_code),["2"]);
+  assert.deepEqual(filterStrategyResults(groups,["a","b"],"minimum",2).rows.map(x=>x.ts_code),["2"]);
+  assert.equal(filterStrategyResults(groups,["a","c"],"intersection").complete,false);
+  assert.deepEqual(filterStrategyResults(groups,["a","c"],"intersection").rows,[]);
+  assert.deepEqual(filterStrategyResults(groups,[],"intersection").rows,[]);
+});
+test("V4 financial history uses dated consolidated reports and preserves missing values",()=>{
+  const {financialHistory,industryDistribution,reportDate}=loadV4Module("lib/research-analysis.ts");
+  const base={end_date:"20241231",f_ann_date:"20250430",report_type:"1"};
+  const pts=financialHistory({balancesheet:[{...base,total_assets:200,total_liab:60,total_cur_assets:100},{...base,report_type:"6",total_assets:500},{...base,f_ann_date:"20270101",total_assets:999}],income:[{...base,revenue:40,n_income:0},{...base,f_ann_date:"20250501",revenue:42,n_income:1}],cashflow:[{...base,f_ann_date:null,n_cashflow_act:9}],fina_indicator:[{end_date:"20241231",ann_date:"20250501",roe:5}]}, "2026-11-24");
+  assert.equal(pts.length,1);
+  assert.equal(pts[0].ncav,40);assert.equal(pts[0].leverage,.3);assert.equal(pts[0].revenue,42);
+  assert.equal(pts[0].operatingCash,null);assert.equal(pts[0].roe,5);
+  assert.equal(pts[0].inventory,null);assert.equal(reportDate("20250230"),null);
+  assert.deepEqual(industryDistribution([{industry:"A"},{industry:"A"},{industry:null}]),[{name:"A",count:2},{name:"未分类",count:1}]);
+});
+test("V4 archive readers remain bounded, read-only and checksum verified",()=>{
+  const source=read("lib/archive-research.ts");
+  assert.match(source,/codes_sha256!==digest/);
+  assert.match(source,/Financial checksum mismatch/);
+  assert.match(source,/maxOutputLength/);
+  assert.match(source,/m.status!=="research_not_pit_certified"/);
+  assert.doesNotMatch(source,/PutObjectCommand|DeleteObjectCommand/);
+  assert.match(source,/unknown>y.rows/);
+  assert.match(read("app/data-center/page.tsx"),/Promise.allSettled/);
+  assert.match(read("components/filter-presets.tsx"),/localStorage.setItem/);
+  assert.match(read("components/compare-selection.tsx"),/v.length<5/);
+  assert.match(read("app/stocks/[code]/page.tsx"),/<FinancialHistory/);
+});

@@ -4,14 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { findStrategy } from "@/lib/strategies";
-import { Activity, ChartCandlestick, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
+import { Activity, ChartCandlestick, Columns3, BookOpenText, ChartNoAxesCombined, Database, Layers3, Radar, SlidersHorizontal } from "lucide-react";
 
 const links = [
   { href: "/", label: "选股中心", Icon: Radar },
   { href: "/research", label: "行情研究", Icon: ChartCandlestick },
+  { href: "/compare", label: "股票对比", Icon: Columns3 },
   { href: "/strategies", label: "策略中心", Icon: Layers3 },
   { href: "/signals", label: "交易观察", Icon: Activity },
   { href: "/backtest", label: "策略回测", Icon: ChartNoAxesCombined },
+  { href: "/data-center", label: "数据中心", Icon: Database },
   { href: "/methodology", label: "筛选方法", Icon: BookOpenText },
 ];
 
