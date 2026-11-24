@@ -68,3 +68,44 @@ test("moving average omits insufficient history and uses actual closes",()=>{
   assert.deepEqual(movingAverage(bars,2),[{time:"2025-01-07",value:1.5},{time:"2025-01-08",value:2.5}]);
   assert.deepEqual(movingAverage(bars,5),[]);
 });
+
+test("continuous archive merge sorts and rejects duplicate or incomplete bars",()=>{
+  const {mergeArchivedBars}=barModule.exports;
+  const a={day:"2024-12-31",open:10,high:11,low:9,close:10,volume:12},b={...a,day:"2025-01-02"};
+  assert.deepEqual(mergeArchivedBars([[b],[a]]),[a,b]);
+  assert.throws(()=>mergeArchivedBars([[a],[a]]),/Invalid archived/);
+  assert.throws(()=>mergeArchivedBars([[{day:a.day,close:10}]]),/Invalid archived/);
+});
+test("adjustment anchors across years and refuses missing or duplicate factors",()=>{
+  const {adjustBars}=barModule.exports;
+  const a={day:"2024-12-31",open:10,high:12,low:9,close:10,volume:200,amount:1000},b={...a,day:"2025-01-02",open:5,high:6,low:4.5,close:5};
+  const factors=[{day:a.day,factor:1},{day:b.day,factor:2}];
+  assert.equal(adjustBars([a,b],factors,"forward")[0].close,5);
+  assert.equal(adjustBars([a,b],factors,"backward")[1].close,10);
+  assert.equal(adjustBars([a,b],factors,"forward")[0].volume,200);
+  assert.equal(adjustBars([a,b],factors,"forward")[0].amount,1000);
+  assert.throws(()=>adjustBars([a,b],factors.slice(0,1),"forward"),/覆盖不完整/);
+  assert.throws(()=>adjustBars([a,b],[...factors,factors[0]],"forward"),/Duplicate/);
+  assert.equal(adjustBars([a,b],[],"unadjusted")[0].close,10);
+});
+test("indicators use genuine OHLC and omit insufficient lookback",()=>{
+  const {macd,rsi,boll,kdj}=barModule.exports;
+  const flat=Array.from({length:40},(_,i)=>({day:String(i),open:10,high:10,low:10,close:10}));
+  assert.deepEqual(macd(flat)[0],{time:"33",dif:0,dea:0,histogram:0});
+  assert.equal(rsi(flat)[0].value,50);
+  assert.equal(rsi(flat.map((b,i)=>({...b,close:10+i})))[0].value,100);
+  assert.equal(rsi(flat.map((b,i)=>({...b,close:50-i})))[0].value,0);
+  assert.deepEqual(boll(flat)[0],{time:"19",middle:10,upper:10,lower:10});
+  assert.deepEqual(kdj(flat)[0],{time:"8",k:50,d:50,j:50});
+  assert.deepEqual(kdj(flat.map(b=>({day:b.day,close:b.close}))),[]);
+  assert.deepEqual(macd(flat.slice(0,20)),[]);
+});
+test("V4 chart requests yearly archives in bounded batches and checks factor integrity",()=>{
+  assert.match(chart,/i<years.length;i\+=2/);
+  assert.match(chart,/mergeArchivedBars\(all\)/);
+  assert.match(chart,/adjustBars\(rawDaily,factors.values,adjustment\)/);
+  assert.match(archive,/Factor checksum mismatch/);
+  assert.match(archive,/Factor manifest totals mismatch/);
+  assert.match(archive,/Factor row count mismatch/);
+  assert.match(chart,/disabled=\{source==="recent"\}/);
+});
