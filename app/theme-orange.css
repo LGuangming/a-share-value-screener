@@ -293,3 +293,12 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
 .strategy-library-table td:nth-child(4) {width:22%;}
 @media(max-width:700px){.research-tab-list{gap:16px;}.market-panel .results-table .security-col{min-width:125px;}.column-menu{right:auto;left:0;}.tool-button{min-height:34px;}}
 @media(prefers-reduced-motion:reduce){.tool-button,.research-tab-list button{transition:none!important;}.column-menu,.signal-reason-body{animation:none!important;}.tool-button:active{transform:none!important;}}
+
+.backtest-config {display:grid;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
+.backtest-config h3 {font-size:14px;margin:0 0 2px;}
+.backtest-config label {display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted);}
+.backtest-config input {width:100%;height:34px;border:1px solid var(--border);border-radius:4px;background:white;color:var(--ink);padding:6px 9px;font:inherit;font-variant-numeric:tabular-nums;}
+.config-universe {color:var(--ink);line-height:1.5;}
+.backtest-config .filter-button:disabled {opacity:.45;cursor:not-allowed;}
+.backtest-results-panel .backtest-empty {min-height:250px;background:repeating-linear-gradient(to bottom,transparent,transparent 49px,#f2f3f4 49px,#f2f3f4 50px);}
+@media(max-width:700px){.backtest-results-panel .backtest-empty{min-height:160px;}}
