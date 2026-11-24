@@ -45,6 +45,8 @@ test("parameter editor is explicitly a non-executing draft",()=>{
 });
 
 test("production homepage still labels the running Net-Net strategy",()=>{
-  assert.match(file("app/page.tsx"),/NET-NET \/ 已上线策略/);
+  assert.match(file("app/page.tsx"),/<StrategySwitch mode="screen"/);
+  assert.match(file("components/strategy-switch.tsx"),/strategyStatusLabel\[selected\.status\]/);
+  assert.match(file("components/strategy-switch.tsx"),/selected\.status === "live" && selected\.id === "netnet_v1"/);
   assert.match(file("app/backtest/page.tsx"),/暂无已发布的历史回测绩效/);
 });
