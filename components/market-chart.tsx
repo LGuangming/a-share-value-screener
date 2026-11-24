@@ -13,7 +13,7 @@ type Props={code:string;name:string;prices:MarketBar[];marks?:TradeMark[]};
 
 export default function MarketChart({code,name,prices,marks=[]}:Props){
   const host=useRef<HTMLDivElement>(null);
-  const root=useRef<HTMLElement>(null);
+  
   const api=useRef<ReturnType<typeof createChart>|null>(null);
   const [source,setSource]=useState("recent");
   const [archive,setArchive]=useState<MarketBar[]>([]);
@@ -57,7 +57,7 @@ export default function MarketChart({code,name,prices,marks=[]}:Props){
       layout:{background:{type:ColorType.Solid,color:"#ffffff"},textColor:"#606770",fontSize:12,attributionLogo:true},
       grid:{vertLines:{color:"#f0f1f2"},horzLines:{color:"#e9ecef"}},
       crosshair:{mode:CrosshairMode.Normal},
-      rightPriceScale:{borderColor:"#dfe3e7",scaleMargins:{top:.12,bottom:showVolume&&hasVolume?.24:.09}},
+      rightPriceScale:{borderColor:"#dfe3e7",scaleMargins:{top:.12,bottom:showVolume && hasVolume ? .24 : .09}},
       timeScale:{borderColor:"#dfe3e7",timeVisible:false,secondsVisible:false},
       localization:{locale:"zh-CN"},
     });
@@ -103,7 +103,7 @@ export default function MarketChart({code,name,prices,marks=[]}:Props){
   },[expanded]);
 
   function chooseSource(value:string){if(value!==source){setHover(null);setArchive([]);setError("");setLoading(value!=="recent");setSource(value);}}
-  return <section ref={root} className={"market-chart-shell"+(expanded?" chart-expanded":"")} aria-label={name+"行情分析"}>
+  return <section className={"market-chart-shell"+(expanded?" chart-expanded":"")} aria-label={name+"行情分析"}>
     <div className="chart-toolbar">
       <div className="chart-group"><select aria-label="行情数据区间" value={source} onChange={e=>chooseSource(e.target.value)}>
         <option value="recent">近期行情</option>{[2025,2024,2023,2022,2021,2020].map(y=><option key={y} value={y}>{y}年归档</option>)}
