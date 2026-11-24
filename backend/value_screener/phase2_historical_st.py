@@ -29,7 +29,7 @@ CODE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
 BATCH = 20
 COLUMNS = ("ts_code", "trade_date", "is_st", "baostock_is_st",
            "namechange_is_st", "resolution", "namechange_name",
-           "namechange_ann_date", "namechange_conflict")
+           "namechange_ann_date", "namechange_conflict", "st_type")
 
 
 def iso(value):
@@ -49,6 +49,25 @@ def name_status(name):
     if re.match(r"^(?:S\*ST|SST|\*ST|ST)", name):
         return 1
     return 0
+
+
+def classify_st(value, resolution, historical_name):
+    """Binary ST evidence is distinct from detailed risk-warning classification."""
+    if resolution == "conflict":
+        return "CONFLICT"
+    if value is None:
+        return "UNKNOWN"
+    name = unicodedata.normalize("NFKC", str(historical_name or "")).strip().upper()
+    if value == 1:
+        if re.match(r"^(?:S\*ST|\*ST)", name):
+            return "STAR_ST"
+        if re.match(r"^(?:SST|ST)", name):
+            return "ST"
+        return "ST_UNCLASSIFIED"
+    if name and (name.startswith("退市") or name.endswith("退")):
+        return "DELISTING"
+    # Without a historical name, non-ST does not prove non-delisting.
+    return "NORMAL" if name else "NON_ST_UNCLASSIFIED"
 
 
 def intervals(records):
@@ -173,6 +192,8 @@ def publish_year(con,s3,bucket,root,namespace,year,paths,baseline):
     annual_key = f"{year_prefix}/manifest.json"
     existing = get_optional_json(s3,bucket,annual_key)
     if existing:
+        if namespace.endswith("/merged") and existing.get("classification_version") != 1:
+            raise RuntimeError("Existing merged archive requires explicit version migration")
         months = existing.get("months",[])
         if (existing.get("year") != year or len(months)!=12 or
                 existing.get("rows") != baseline["rows"] or
@@ -192,6 +213,7 @@ def publish_year(con,s3,bucket,root,namespace,year,paths,baseline):
         by_code.setdefault(code,[]).append(day.isoformat())
     csvpath = root / f"st-{year}.csv"
     counts = Counter()
+    type_counts = Counter()
     covered = set()
     with csvpath.open("w",encoding="utf-8",newline="") as fp:
         writer = csv.writer(fp)
@@ -208,15 +230,17 @@ def publish_year(con,s3,bucket,root,namespace,year,paths,baseline):
                     a = bao.get(day)
                     b,name,ann,conflict = name_evidence(periods,day)
                     value,reason = resolve(a,b,conflict)
-                    writer.writerow((code,day,value,a,b,reason,name,ann,int(conflict)))
+                    st_type = classify_st(value, reason, name)
+                    writer.writerow((code,day,value,a,b,reason,name,ann,int(conflict),st_type))
                     counts[reason]+=1
+                    type_counts[st_type]+=1
     if not set(by_code).issubset(covered) or sum(counts.values()) != baseline["rows"]:
         raise RuntimeError("ST join does not reconcile to OHLCV")
     con.execute("CREATE OR REPLACE TEMP TABLE st AS SELECT ts_code,CAST(trade_date AS DATE) trade_date,"
                 "CAST(is_st AS TINYINT) is_st,CAST(baostock_is_st AS TINYINT) baostock_is_st,"
                 "CAST(namechange_is_st AS TINYINT) namechange_is_st,resolution,namechange_name,"
                 "CAST(namechange_ann_date AS DATE) namechange_ann_date,"
-                "CAST(namechange_conflict AS BOOLEAN) namechange_conflict "
+                "CAST(namechange_conflict AS BOOLEAN) namechange_conflict,CAST(st_type AS VARCHAR) st_type "
                 "FROM read_csv(?,header=true,all_varchar=true)",[str(csvpath)])
     total,unique = con.execute("SELECT count(*),count(DISTINCT (ts_code,trade_date)) FROM st").fetchone()
     if total != unique or total != baseline["rows"]:
@@ -233,14 +257,20 @@ def publish_year(con,s3,bucket,root,namespace,year,paths,baseline):
             raise RuntimeError("ST month count mismatch")
         key=f"{year_prefix}/month={month:02d}.parquet"
         meta=save_bytes(s3,bucket,key,dest.read_bytes())
-        entry={**meta,"month":month,"rows":expected,"resolution_counts":stats}
+        types=dict(con.execute("SELECT st_type,count(*) FROM st WHERE month(trade_date)=? GROUP BY st_type",
+                               [month]).fetchall())
+        if sum(types.values()) != expected:
+            raise RuntimeError("ST classification totals mismatch")
+        entry={**meta,"month":month,"rows":expected,"resolution_counts":stats,
+               "st_type_counts":types}
         put_manifest(s3,bucket,key+".manifest.json",entry)
         months.append(entry)
     doc={"year":year,"rows":total,"resolution_counts":dict(counts),"months":months,
+         "st_type_counts":dict(type_counts),"classification_version":1,
          "status":"archived_with_explicit_unknowns","research_only":True,
          "captured_at_utc":datetime.now(timezone.utc).isoformat()}
     put_manifest(s3,bucket,annual_key,doc)
-    print(f"ST_YEAR year={year} rows={total} resolution_counts={dict(counts)}",flush=True)
+    print(f"ST_YEAR year={year} rows={total} resolution_counts={dict(counts)} st_type_counts={dict(type_counts)}",flush=True)
     return doc
 
 
@@ -271,6 +301,65 @@ def restore_source_batch(s3,bucket,root,namespace,source,index,codes,first,last)
     return records
 
 
+def audit_baostock(con,s3,bucket,root,namespace,baselines,codes):
+    """Audit the existing source against the exact frozen OHLCV universe."""
+    snapshot = get_optional_json(s3,bucket,"a-share-backtest/v1/phase2/universe/stock_basic_snapshot.json")
+    listing = {r["ts_code"]:r.get("list_status") for r in (snapshot or {}).get("records",[])}
+    groups = Counter()
+    symbol_totals = Counter()
+    symbol_unknown = Counter()
+    years = {}
+    for year,baseline in baselines.items():
+        prefix=f"{namespace}/baostock/year={year}"
+        manifest=get_optional_json(s3,bucket,prefix+"/manifest.json")
+        if not manifest or manifest.get("rows")!=baseline["rows"] or len(manifest.get("months",[]))!=12:
+            raise RuntimeError(f"Missing or invalid BaoStock year {year}")
+        files=[]
+        for i,part in enumerate(manifest["months"],1):
+            key=f"{prefix}/month={i:02d}.parquet"
+            expected=next(p["rows"] for p in baseline["partition_files"] if p["path"].endswith(f"month={i:02d}.parquet"))
+            if part.get("month")!=i or part.get("object_key")!=key or part.get("rows")!=expected:
+                raise RuntimeError("BaoStock audit partition identity mismatch")
+            dest=root/f"audit-{year}-{i:02d}.parquet"
+            verify_object(s3,bucket,key,part["bytes"],part["sha256"],dest)
+            files.append(str(dest))
+        records=con.execute(
+            "SELECT ts_code,count(*),count(*) FILTER (WHERE is_st IS NULL) FROM read_parquet(?) GROUP BY ts_code",
+            [files]).fetchall()
+        total=sum(r[1] for r in records)
+        unknown=sum(r[2] for r in records)
+        if total!=baseline["rows"] or unknown!=manifest["resolution_counts"].get("unknown",0):
+            raise RuntimeError("BaoStock audit row counts do not reconcile")
+        years[str(year)]={"rows":total,"unknown":unknown,"known":total-unknown}
+        for code,n,u in records:
+            symbol_totals[code]+=n
+            symbol_unknown[code]+=u
+            key=(year,code.rsplit(".",1)[-1],listing.get(code) or "UNKNOWN")
+            groups[(key,"rows")]+=n
+            groups[(key,"unknown")]+=u
+        print(f"ST_COVERAGE_YEAR year={year} rows={total} unknown={unknown}",flush=True)
+    if set(symbol_totals)!=set(codes):
+        raise RuntimeError("BaoStock coverage universe does not reconcile")
+    strata=[{"year":y,"exchange":e,"snapshot_list_status":s,"rows":groups[((y,e,s),"rows")],
+             "unknown":groups[((y,e,s),"unknown")]} for y,e,s in sorted({k for k,_ in groups})]
+    affected=[{"ts_code":c,"rows":symbol_totals[c],"unknown":u,
+               "snapshot_list_status":listing.get(c) or "UNKNOWN",
+               "gap_type":"UNSUPPORTED_EXCHANGE" if c.endswith(".BJ") else
+                          "NO_VALID_DAILY_ST" if u==symbol_totals[c] else "PARTIAL_DAILY_GAP"}
+              for c,u in sorted(symbol_unknown.items()) if u]
+    doc={"source":"baostock","years":years,"rows":sum(symbol_totals.values()),
+         "unknown":sum(symbol_unknown.values()),"symbols":len(codes),
+         "affected_symbols":len(affected),"by_year_exchange_listing_status":strata,
+         "affected_symbol_details":affected,
+         "listing_status_caveat":"Frozen stock_basic snapshot status is not historical listing status.",
+         "captured_at_utc":datetime.now(timezone.utc).isoformat()}
+    put_manifest(s3,bucket,namespace+"/audit/baostock-coverage.json",doc)
+    for item in strata:
+        print("ST_COVERAGE_STRATUM "+json.dumps(item,sort_keys=True),flush=True)
+    print("ST_COVERAGE_SUMMARY "+json.dumps({k:doc[k] for k in
+          ("rows","unknown","symbols","affected_symbols")},sort_keys=True),flush=True)
+
+
 def run_archive(args,s3,bucket,client,bs):
     import duckdb
     first=f"{args.end_year}-01-01"
@@ -289,6 +378,10 @@ def run_archive(args,s3,bucket,client,bs):
             identity=hashlib.sha256(json.dumps(codes,separators=(",",":")).encode()).hexdigest()
             namespace=f"{PREFIX}/range={args.end_year}-{args.start_year}/universe={identity}"
             source=args.source
+            if source=="audit":
+                audit_baostock(con,s3,bucket,root,namespace,baselines,codes)
+                return
+            print(f"ST_UNIVERSE source={source} symbols={len(codes)}",flush=True)
             out=f"{namespace}/{source}"
             paths=[]
             for i in range(0,len(codes),BATCH):
@@ -306,14 +399,16 @@ def run_archive(args,s3,bucket,client,bs):
                 paths.append(path)
             docs=[publish_year(con,s3,bucket,root,out,y,paths,baselines[y]) for y in years]
             counts=Counter()
+            types=Counter()
             for doc in docs:
                 counts.update(doc["resolution_counts"])
+                types.update(doc.get("st_type_counts",{}))
             put_manifest(s3,bucket,out+"/manifest.json",{
                 "source":source,"years":list(years),"universe_sha256":identity,"symbols":len(codes),
                 "rows":sum(d["rows"] for d in docs),"year_manifests":docs,
-                "resolution_counts":dict(counts),
+                "resolution_counts":dict(counts),"st_type_counts":dict(types),
                 "status":"archived_with_explicit_unknowns"})
-            print(f"ST_ARCHIVE_STATUS source={source} all_requested_years_verified_with_explicit_unknowns resolution_counts={dict(counts)}",flush=True)
+            print(f"ST_ARCHIVE_STATUS source={source} all_requested_years_verified_with_explicit_unknowns resolution_counts={dict(counts)} st_type_counts={dict(types)}",flush=True)
         finally:
             con.close()
 
@@ -322,12 +417,12 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--start-year",type=int,default=2025)
     parser.add_argument("--end-year",type=int,default=2020)
-    parser.add_argument("--source",choices=("baostock","namechange","merged"),required=True)
+    parser.add_argument("--source",choices=("baostock","namechange","merged","audit"),required=True)
     parser.add_argument("--probe-only",action="store_true")
     args=parser.parse_args()
     if not 2020<=args.end_year<=args.start_year<date.today().year:
         parser.error("Use descending completed years from 2020")
-    if args.source=="merged" and args.probe_only:
+    if args.source in ("merged","audit") and args.probe_only:
         parser.error("Merge is storage-only; no provider probe")
     cfg=StorageConfig.from_environment()
     s3=s3_client(cfg)
