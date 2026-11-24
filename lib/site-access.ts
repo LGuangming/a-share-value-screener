@@ -6,7 +6,7 @@ export const COOKIE_NAME=process.env.NODE_ENV==="production"?"__Host-value-radar
 const digest=(value:string)=>createHash("sha256").update(value,"utf8").digest();
 export function accessConfig(){
   const password=process.env.SITE_ACCESS_PASSWORD,secret=process.env.SITE_SESSION_SECRET;
-  if(!password||password.length<16||password.length>512||!secret||!/^[a-fA-F0-9]{64}$/.test(secret))return null;
+  if(!password||Array.from(password).length<6||password.length>512||!secret||!/^[a-fA-F0-9]{64}$/.test(secret))return null;
   return {password,secret};
 }
 type Config=NonNullable<ReturnType<typeof accessConfig>>;
