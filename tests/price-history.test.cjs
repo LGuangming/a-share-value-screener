@@ -109,3 +109,5 @@ test("V4 chart requests yearly archives in bounded batches and checks factor int
   assert.match(archive,/Factor row count mismatch/);
   assert.match(chart,/disabled=\{source==="recent"\}/);
 });
+
+ test("current-year chart uses incremental verified month reader",()=>{assert.match(chart,/CURRENT_YEAR/);assert.match(archive,/verified_month_reader/);assert.match(archive,/Incremental checksum mismatch/);assert.match(chart,/coverageNote/);});

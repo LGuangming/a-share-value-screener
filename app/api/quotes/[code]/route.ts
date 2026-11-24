@@ -1,6 +1,6 @@
 import { RAW_PREFIX } from "@/lib/archive-paths";
 import { NextResponse } from "next/server";
-import { archivedQuotes, ArchiveUnavailable } from "@/lib/archive-quotes";
+import { archivedQuotes, incrementalQuotes, ArchiveUnavailable } from "@/lib/archive-quotes";
 
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
@@ -10,9 +10,10 @@ export async function GET(request:Request,{params}:{params:Promise<{code:string}
   const yearText=new URL(request.url).searchParams.get("year")??"";
   const year=Number(yearText);
   const headers={"Cache-Control":"private, no-store"};
-  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!/^202[0-5]$/.test(yearText))
+  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!/^20\d{2}$/.test(yearText)||year<2020||year>new Date(Date.now()+8*3600000).getUTCFullYear())
     return NextResponse.json({error:"无效股票代码或年份"},{status:400,headers});
   try{
+    if(year>=2026){const {bars,coverage}=await incrementalQuotes(code,year);return NextResponse.json({code,year,adjustment:"unadjusted",archive_prefix:RAW_PREFIX,bars,coverage},{headers});}
     const bars=await archivedQuotes(code,year);
     return NextResponse.json({code,year,adjustment:"unadjusted",archive_prefix:RAW_PREFIX,bars},{headers});
   }catch(e){

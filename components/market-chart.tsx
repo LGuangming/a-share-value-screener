@@ -12,8 +12,9 @@ const money=(n:number|undefined)=>n===undefined?"—":n.toFixed(2);
 const volume=(n:number|undefined)=>n===undefined?"—":n.toLocaleString("zh-CN",{maximumFractionDigits:2});
 type Props={code:string;name:string;prices:MarketBar[];marks?:TradeMark[]};
 const NO_MARKS:TradeMark[]=[];
-const RANGES:Record<string,number[]>={"2020-2025":[2020,2021,2022,2023,2024,2025],"2023-2025":[2023,2024,2025]};
-const yearsFor=(source:string)=>RANGES[source]??[/^202[0-5]$/.test(source)?Number(source):0].filter(Boolean);
+const CURRENT_YEAR=new Date(Date.now()+8*3600000).getUTCFullYear();
+const RANGES:Record<string,number[]>={[`2020-${CURRENT_YEAR}`]:Array.from({length:CURRENT_YEAR-2019},(_,i)=>2020+i),[`2023-${CURRENT_YEAR}`]:Array.from({length:CURRENT_YEAR-2022},(_,i)=>2023+i)};
+const yearsFor=(source:string)=>RANGES[source]??[/^20\d{2}$/.test(source)&&Number(source)>=2020&&Number(source)<=CURRENT_YEAR?Number(source):0].filter(Boolean);
 
 export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   const {prefs}=useWorkspacePreferences();
@@ -21,7 +22,8 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   const host=useRef<HTMLDivElement>(null);
   const root=useRef<HTMLElement>(null);
   const api=useRef<ReturnType<typeof createChart>|null>(null);
-  const [source,setSource]=useState("recent");
+  const [source,setSource]=useState(String(CURRENT_YEAR));
+  const [coverageNote,setCoverageNote]=useState("");
   const [archive,setArchive]=useState<MarketBar[]>([]);
   const [loading,setLoading]=useState(false);
   const [progress,setProgress]=useState("");
@@ -43,23 +45,25 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   const requestCache=useRef(new Map<string,MarketBar[]>());
 
   useEffect(()=>{
-    if(source==="recent"){setLoading(false);setError("");return;}
+    if(source==="recent"){setLoading(false);setError("");setCoverageNote("");return;}
     const controller=new AbortController();
     const years=yearsFor(source);
-    setArchive([]);setLoading(true);setError("");setProgress("");
+    setArchive([]);setLoading(true);setError("");setProgress("");setCoverageNote("");
     async function load(){
       const all:MarketBar[][]=[];
       for(let i=0;i<years.length;i+=2){
         const batch=await Promise.all(years.slice(i,i+2).map(async year=>{
           const key=code+":"+year;
           const stored=requestCache.current.get(key);
-          if(stored)return stored;
+          if(stored&&year<2026)return stored;
           const res=await fetch("/api/quotes/"+encodeURIComponent(code)+"?year="+year,{signal:controller.signal});
           const data=await res.json();
           if(!res.ok)throw Error(year+"年："+(data.error||"历史行情暂不可用"));
           if(!Array.isArray(data.bars)||data.code!==code||data.year!==year||data.adjustment!=="unadjusted")throw Error("历史行情响应异常");
           const bars=data.bars as MarketBar[];
-          requestCache.current.set(key,bars);return bars;
+          if(year<2026)requestCache.current.set(key,bars);
+          if(year>=2026&&data.coverage?.partial&&!controller.signal.aborted)setCoverageNote(year+"年归档尚未齐全 · 已归档 "+data.coverage.archivedSessions+" 个交易日 · 最新 "+data.coverage.latest);
+          return bars;
         }));
         if(controller.signal.aborted)return;
         all.push(...batch);setProgress(all.length+"/"+years.length+" 年");
@@ -80,12 +84,12 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
       for(let i=0;i<years.length;i+=2){
         const result=await Promise.all(years.slice(i,i+2).map(async year=>{
           const key=code+":"+year;
-          const saved=factorCache.current.get(key);if(saved)return saved;
+          const saved=factorCache.current.get(key);if(saved&&year<2026)return saved;
           const res=await fetch("/api/quotes/"+encodeURIComponent(code)+"/factors?year="+year,{signal:controller.signal});
           const data=await res.json();
           if(!res.ok)throw Error(year+"年："+(data.error||"复权因子暂不可用"));
           if(data.code!==code||data.year!==year||!Array.isArray(data.factors))throw Error("复权因子响应异常");
-          const value=data.factors as Factor[];factorCache.current.set(key,value);return value;
+          const value=data.factors as Factor[];if(year<2026)factorCache.current.set(key,value);return value;
         }));
         if(controller.signal.aborted)return;
         all.push(...result.flat());
@@ -200,7 +204,7 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
   return <section ref={root} className={"market-chart-shell"+(expanded?" chart-expanded":"")} aria-label={name+"行情分析"}>
     <div className="chart-toolbar">
       <div className="chart-group"><select aria-label="行情数据区间" value={source} onChange={e=>chooseSource(e.target.value)}>
-        <option value="recent">近期行情</option><option value="2020-2025">2020–2025 连续行情</option><option value="2023-2025">2023–2025 连续行情</option>{[2025,2024,2023,2022,2021,2020].map(y=><option key={y} value={y}>{y}年归档</option>)}
+        <option value="recent">近期行情</option><option value={`2020-${CURRENT_YEAR}`}>2020–{CURRENT_YEAR} 连续行情</option><option value={`2023-${CURRENT_YEAR}`}>2023–{CURRENT_YEAR} 连续行情</option>{Array.from({length:CURRENT_YEAR-2019},(_,i)=>CURRENT_YEAR-i).map(y=><option key={y} value={y}>{y}年归档</option>)}
       </select></div>
       <div className="chart-group"><select aria-label="复权方式" value={adjustment} disabled={source==="recent"} onChange={e=>{setHover(null);setFactorError("");setAdjustment(e.target.value as Adjustment);}}><option value="unadjusted">不复权</option><option value="forward">前复权（区间末）</option><option value="backward">后复权（区间首）</option></select></div>
       <div className="chart-group" aria-label="行情周期">{(["D","W","M"] as const).map((p,i)=><button type="button" key={p} aria-pressed={period===p} onClick={()=>setPeriod(p)}>{["日线","周线","月线"][i]}</button>)}</div>
@@ -222,6 +226,6 @@ export default function MarketChart({code,name,prices,marks=NO_MARKS}:Props){
       <div className="chart-canvas" ref={host} style={{visibility:busy||displayError||!bars.length||chartError?"hidden":"visible"}}/>
       {(busy||displayError||!bars.length||chartError)&&<div className="chart-placeholder" role="status">{busy?<><span className="chart-spinner"/>{factorLoading?"正在读取复权因子":"正在读取已归档行情"} {loading?progress:""}</>:displayError|| (chartError?"行情图暂不可用":"当前区间暂无行情")}</div>}
     </div>
-    <div className="chart-footer"><span>{source==="recent"?"近期收盘价":source+"年历史行情"} · {adjustment==="unadjusted"?"不复权":adjustment==="forward"?"前复权（区间末）":"后复权（区间首）"} · {daily.length} 个交易日</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™ · © 2025 TradingView, Inc.</a></div>
+    <div className="chart-footer"><span>{source==="recent"?"近期收盘价":source+"年历史行情"} · {adjustment==="unadjusted"?"不复权":adjustment==="forward"?"前复权（区间末）":"后复权（区间首）"} · {daily.length} 个交易日{coverageNote?" · "+coverageNote:""}</span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™ · © 2025 TradingView, Inc.</a></div>
   </section>;
 }

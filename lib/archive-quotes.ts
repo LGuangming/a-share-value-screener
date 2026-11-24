@@ -118,3 +118,67 @@ async function queryFactors(code:string,year:number):Promise<Factor[]>{
   }finally{client.destroy();}
 }
 export const archivedFactors=unstable_cache(queryFactors,["market-factors-raw-v1"],{revalidate:86400});
+
+
+// 2026+ partial-year reader: read only published, content-addressed monthly
+// snapshots; never pretend that missing months or sessions were archived.
+type MonthReader={format_version:number;status:string;dataset:string;year:number;month:string;through:string;dates:string[];expected_dates:string[];missing_dates:string[];rows:number;object_key:string;bytes:number;sha256:string;fields:string[];source_sha256:string[]};
+type Coverage={months:number;archivedSessions:number;missingMonths:string[];missingSessions:string[];latest:string;through:string;partial:boolean};
+async function readIncremental(code:string,year:number,dataset:"daily_prices"|"adj_factor"){
+  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2026||year>new Date(Date.now()+8*3600000).getUTCFullYear())throw Error("Invalid incremental query");
+  const {bucket,client}=storage();
+  const now=new Date(Date.now()+8*3600000);
+  const lastMonth=year===now.getUTCFullYear()?now.getUTCMonth()+1:12;
+  const months=Array.from({length:lastMonth},(_,i)=>String(i+1).padStart(2,"0"));
+  const dayPattern=/^\d{4}-\d{2}-\d{2}$/;
+  const wanted=dataset==="daily_prices"?["ts_code","trade_date","open","high","low","close","vol","amount"]:["ts_code","trade_date","adj_factor"];
+  async function get(key:string,max:number,optional=false){
+    try{
+      const r=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(15000)});
+      if(!r.Body||r.ContentLength===undefined||r.ContentLength<=0||r.ContentLength>max)throw Error("Invalid incremental object size");
+      const b=await r.Body.transformToByteArray();if(b.length!==r.ContentLength)throw Error("Truncated incremental object");
+      return b;
+    }catch(e){const x=e as {name?:string;$metadata?:{httpStatusCode?:number}};if(optional&&(x.name==="NoSuchKey"||x.$metadata?.httpStatusCode===404))return null;throw e;}
+  }
+  const bars:MarketBar[]=[], factors:Factor[]=[], dates:string[]=[], missingMonths:string[]=[],missingSessions:string[]=[];
+  let count=0,through="";
+  try{
+    for(let i=0;i<months.length;i+=2){
+      const loaded=await Promise.all(months.slice(i,i+2).map(async month=>{
+        const root=PREFIX+"/"+dataset+"/year="+year+"/month="+month;
+        const raw=await get(root+"/reader.manifest.json",256*1024,true);
+        if(!raw)return {month,doc:null,records:[]};
+        const doc=JSON.parse(new TextDecoder().decode(raw)) as MonthReader;
+        const validDates=(v:unknown):v is string[]=>Array.isArray(v)&&v.every(d=>typeof d==="string"&&dayPattern.test(d)&&d.startsWith(year+"-"+month+"-"))&&new Set(v).size===v.length&&v.every((d,i)=>!i||d>v[i-1]);
+        if(doc.format_version!==1||doc.status!=="verified_month_reader"||doc.dataset!==dataset||doc.year!==year||doc.month!==month||!dayPattern.test(doc.through)||!doc.through.startsWith(year+"-"+month+"-")||!validDates(doc.dates)||!doc.dates.length||!validDates(doc.expected_dates)||!validDates(doc.missing_dates)||!doc.dates.every(d=>doc.expected_dates.includes(d))||doc.expected_dates.some(d=>d>doc.through)||doc.missing_dates.join(",")!==doc.expected_dates.filter(d=>!doc.dates.includes(d)).join(",")||!Array.isArray(doc.fields)||doc.fields.join(",")!==wanted.join(",")||!Number.isSafeInteger(doc.rows)||doc.rows<=0||!Number.isSafeInteger(doc.bytes)||doc.bytes<=0||doc.bytes>16*1024*1024||!/^[a-f0-9]{64}$/.test(doc.sha256)||doc.object_key!==root+"/reader/sha256="+doc.sha256+".parquet"||!Array.isArray(doc.source_sha256)||doc.source_sha256.length!==doc.dates.length||doc.source_sha256.some(s=>!/^[a-f0-9]{64}$/.test(s)))throw Error("Invalid incremental month manifest");
+        const bytes=await get(doc.object_key,doc.bytes);
+        if(!bytes||bytes.length!==doc.bytes||createHash("sha256").update(bytes).digest("hex")!==doc.sha256)throw Error("Incremental checksum mismatch");
+        const records=await parquetReadObjects({file:new Uint8Array(bytes).buffer,compressors,columns:wanted});
+        if(records.length!==doc.rows)throw Error("Incremental row count mismatch");
+        return {month,doc,records:records.filter(r=>r.ts_code===code)};
+      }));
+      for(const {month,doc,records} of loaded){
+        if(!doc){missingMonths.push(month);continue;}
+        count++;dates.push(...doc.dates);missingSessions.push(...doc.missing_dates);
+        if(doc.through>through)through=doc.through;
+        for(const r of records){
+          const day=isoDay(r.trade_date);
+          if(!doc.dates.includes(day))throw Error("Incremental date outside manifest");
+          if(dataset==="daily_prices"){
+            const b={day,open:number(r.open),high:number(r.high),low:number(r.low),close:number(r.close),volume:number(r.vol),amount:number(r.amount)};
+            if(!completeBar(b)||b.volume<0||b.amount<0)throw Error("Invalid incremental bar");
+            bars.push(b);
+          }else{const factor=number(r.adj_factor);if(factor<=0)throw Error("Invalid incremental factor");factors.push({day,factor});}
+        }
+      }
+    }
+    if(!count)throw new ArchiveUnavailable("该年度尚无已验证行情归档");
+    bars.sort((a,b)=>a.day.localeCompare(b.day));factors.sort((a,b)=>a.day.localeCompare(b.day));
+    if(new Set(bars.map(b=>b.day)).size!==bars.length||new Set(factors.map(b=>b.day)).size!==factors.length)throw Error("Duplicate incremental day");
+    const latest=dates.at(-1)??"";
+    const coverage:Coverage={months:count,archivedSessions:dates.length,missingMonths,missingSessions,latest,through,partial:!!(missingMonths.length||missingSessions.length)};
+    return {bars,factors,coverage};
+  }finally{client.destroy();}
+}
+export const incrementalQuotes=unstable_cache((code:string,year:number)=>readIncremental(code,year,"daily_prices"),["market-incremental-quotes-v1"],{revalidate:60});
+export const incrementalFactors=unstable_cache((code:string,year:number)=>readIncremental(code,year,"adj_factor"),["market-incremental-factors-v1"],{revalidate:60});

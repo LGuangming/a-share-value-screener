@@ -191,12 +191,21 @@ def sessions(client,start,end):
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--trigger-run-id")
+    parser.add_argument("--backfill-2026", action="store_true", help="Backfill completed 2026 sessions, newest month first")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     args=parser.parse_args()
     now=datetime.now(CN_TZ)
     bound=now.date()-timedelta(days=int((now.hour,now.minute)<MARKET_CLOSE))
-    if args.start_date or args.end_date:
+    if args.backfill_2026 and (args.start_date or args.end_date or args.trigger_run_id):
+        parser.error("Backfill cannot be combined with date range or trigger")
+    if args.backfill_2026:
+        latest=market_run(None)
+        if latest is None or latest[0].year!=2026 or latest[0]>bound:
+            raise RuntimeError("No eligible successful 2026 market refresh")
+        start,end=date(2026,1,1),latest[0]
+        minimum=5000
+    elif args.start_date or args.end_date:
         if not args.start_date or not args.end_date or args.trigger_run_id:
             parser.error("Supply both range dates, or a successful trigger run")
         start,end=date.fromisoformat(args.start_date),date.fromisoformat(args.end_date)
@@ -206,7 +215,7 @@ def main():
             latest=market_run(None)
             if latest is None or latest[0]!=end:
                 raise RuntimeError("Today's market refresh not yet successful")
-        minimum=4000
+        minimum=5000
     else:
         result=market_run(args.trigger_run_id)
         if not result:
@@ -221,12 +230,29 @@ def main():
         raise RuntimeError("Raw archive uses official API only")
     cfg=StorageConfig.from_environment()
     s3=s3_client(cfg);preflight(s3,cfg.bucket)
-    dates=sessions(client,start,end)
-    if not dates and start==end:
-        raise RuntimeError("Successful market refresh must reference an open session")
-    for day in dates:
-        archive_session(s3,cfg.bucket,client,day,minimum)
-    print(f"RAW_INCREMENT_STATUS start={start} end={end} sessions={len(dates)} status=complete",flush=True)
+    from calendar import monthrange
+    from .raw_month_reader import publish_month
+    ranges=[]
+    cursor=start.replace(day=1)
+    while cursor<=end:
+        month_end=cursor.replace(day=monthrange(cursor.year,cursor.month)[1])
+        ranges.append((max(start,cursor),min(end,month_end)))
+        cursor=month_end+timedelta(days=1)
+    if args.backfill_2026:
+        ranges.reverse()
+        # Publish current existing daily evidence immediately for the website.
+        publish_month(s3,cfg.bucket,client,end)
+    total=0
+    for first,last in ranges:
+        dates=sessions(client,first,last)
+        if not dates and start==end:
+            raise RuntimeError("Successful market refresh must reference an open session")
+        for day in dates:
+            archive_session(s3,cfg.bucket,client,day,minimum)
+        publish_month(s3,cfg.bucket,client,last)
+        total+=len(dates)
+        print(f"RAW_INCREMENT_MONTH_DONE through={last} sessions={len(dates)}",flush=True)
+    print(f"RAW_INCREMENT_STATUS start={start} end={end} sessions={total} status=complete",flush=True)
 
 
 if __name__=="__main__":
