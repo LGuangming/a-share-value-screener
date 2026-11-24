@@ -2,7 +2,7 @@
 
 import { useId, useMemo, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Filter, Search } from "lucide-react";
+import { ArrowRight, ArrowUpRight, ArrowUpDown, ChevronDown, Download, Search, Settings2 } from "lucide-react";
 import type { ScreenerRow } from "@/lib/data";
 import { fixed, moneyCny, pct, signalLabel, stateLabel } from "@/lib/format";
 import { Empty } from "@/components/empty";
@@ -15,6 +15,30 @@ export type ScreenTableRow = Pick<ScreenerRow,
 type Filters = { q?: string; view?: string; order?: string; max_price?: string;
   min_coverage?: string; max_pb?: string };
 
+const numericColumns = [
+  {key:"price", label:"收盘价"},
+  {key:"market_cap_yuan", label:"总市值"},
+  {key:"ncav_coverage", label:"NCAV / 市值"},
+  {key:"stress_coverage", label:"压力价值覆盖率"},
+  {key:"pb", label:"市净率"},
+] as const;
+type NumericKey = typeof numericColumns[number]["key"];
+type ColumnKey = NumericKey | "status" | "signal";
+const optionalColumns: ReadonlyArray<{key:ColumnKey;label:string}> = [
+  ...numericColumns, {key:"status",label:"初筛状态"}, {key:"signal",label:"交易观察"}
+];
+function displayValue(row: ScreenTableRow, key: ColumnKey) {
+  if (key === "status") return stateLabel(row.status);
+  if (key === "signal") return signalLabel(row.signal);
+  if (key === "market_cap_yuan") return moneyCny(row[key]);
+  if (key === "ncav_coverage" || key === "stress_coverage") return pct(row[key],1);
+  return fixed(row[key]);
+}
+function csvCell(value: unknown) {
+  const raw = String(value ?? "");
+  const safe = /^[=+@\t\r\n]/.test(raw) || (/^-/.test(raw) && !/^-\d+(\.\d+)?$/.test(raw)) ? "'" + raw : raw;
+  return '"' + safe.replace(/"/g,'""') + '"';
+}
 function tagClass(status: string) {
   if (status === "NET_NET") return "pill pill-good";
   if (status === "DATA_GAP" || status === "STALE_FINANCIALS") return "pill pill-warn";
@@ -46,7 +70,10 @@ export default function ScreenerResults({ rows, initial }: {
     ? Number(initial.min_coverage) : 1.25);
   const [maxPb, setMaxPb] = useState([0.5,0.7,1,1.2].includes(Number(initial.max_pb))
     ? Number(initial.max_pb) : 1.2);
-  const [order, setOrder] = useState(initial.order === "stress" ? "stress" : "ncav");
+  const [order, setOrder] = useState<NumericKey>(initial.order === "stress" ? "stress_coverage" : "ncav_coverage");
+  const [ascending, setAscending] = useState(false);
+  const [columns, setColumns] = useState<ColumnKey[]>(optionalColumns.map(c=>c.key));
+  const [columnMenu, setColumnMenu] = useState(false);
   const [visibleCount, setVisibleCount] = useState(100);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -66,10 +93,12 @@ export default function ScreenerResults({ rows, initial }: {
       && row.ncav_coverage >= minCoverage;
     if (view === "gaps") return row.status === "DATA_GAP" || row.status === "STALE_FINANCIALS";
     return true;
-  }).sort((a, b) => order === "stress"
-    ? (b.stress_coverage ?? -Infinity) - (a.stress_coverage ?? -Infinity)
-    : (b.ncav_coverage ?? -Infinity) - (a.ncav_coverage ?? -Infinity)),
-    [rows, view, order, maxPrice, maxPb, minCoverage]);
+  }).sort((a,b)=>{
+    const av=a[order], bv=b[order];
+    if(av===null) return bv===null ? 0 : 1;
+    if(bv===null) return -1;
+    return ascending ? av-bv : bv-av;
+  }), [rows, view, order, ascending, maxPrice, maxPb, minCoverage]);
 
   const matches = useMemo(() => {
     if (!needle) return [];
@@ -82,6 +111,21 @@ export default function ScreenerResults({ rows, initial }: {
 
   const filtered = needle ? matches : tabRows;
   const suggestions = matches.slice(0, 8);
+  const shownColumns=optionalColumns.filter(c=>columns.includes(c.key));
+  function sortBy(key:NumericKey) {
+    if(order===key) setAscending(v=>!v);
+    else {setOrder(key);setAscending(false);}
+    setVisibleCount(100);
+  }
+  function exportRows() {
+    const header=["证券代码","股票名称","所属行业",...shownColumns.map(c=>c.label)];
+    const lines=[header.map(csvCell).join(","),...filtered.map(row=>[
+      row.ts_code,row.name,row.industry,...shownColumns.map(c=>
+        c.key==="status"||c.key==="signal" ? displayValue(row,c.key):row[c.key])
+    ].map(csvCell).join(","))];
+    const url=URL.createObjectURL(new Blob(["\ufeff"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));
+    const a=document.createElement("a");a.href=url;a.download="value-radar-netnet.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
 
   function setFilter(_param: string, _value: string, update: () => void) {
     // Filter views and keystrokes are local-only UI state. Updating the
@@ -125,7 +169,7 @@ export default function ScreenerResults({ rows, initial }: {
   return <section className="panel market-panel">
     <div className="panel-heading"><div><div className="section-kicker">SCREENER RESULTS · NET-NET</div>
       <h2>{needle ? "股票即时搜索" : "Net-Net筛选结果"} <span className="count-badge">{filtered.length}</span></h2>
-      <p>按股价、PB及NCAV覆盖率筛选。</p>
+      <p>共 {filtered.length.toLocaleString("zh-CN")} 只 · 当前显示 {Math.min(visibleCount,filtered.length).toLocaleString("zh-CN")} 只</p>
     </div><Link className="inline-link" href="/methodology">查看筛选口径 <ArrowUpRight size={15}/></Link></div>
     <div className="filters">
       <div className="tabs" role="tablist" aria-label="筛选视图">
@@ -184,30 +228,36 @@ export default function ScreenerResults({ rows, initial }: {
           <option value={1}>PB≤1.0</option><option value={1.2}>PB≤1.2</option>
         </select>
         <select aria-label="排序字段" value={order}
-          onChange={e=>setFilter("order",e.target.value,()=>setOrder(e.target.value === "stress" ? "stress" : "ncav"))}>
-          <option value="ncav">NCAV覆盖率排序</option><option value="stress">压力价值排序</option>
+          onChange={e=>setFilter("order",e.target.value,()=>{setOrder(e.target.value as NumericKey);setAscending(false);})}>
+          {numericColumns.map(c=><option key={c.key} value={c.key}>{c.label}排序</option>)}
         </select>
-        <span className="filter-local-hint"><Filter size={14}/> 即时筛选</span>
+        <div className="column-control" onKeyDown={e=>{if(e.key==="Escape")setColumnMenu(false);}}>
+          <button type="button" className="tool-button" aria-expanded={columnMenu} onClick={()=>setColumnMenu(v=>!v)}><Settings2 size={14}/> 列设置 <ChevronDown size={12}/></button>
+          {columnMenu && <div className="column-menu">
+            {optionalColumns.map(c=><label key={c.key}><input type="checkbox" checked={columns.includes(c.key)} onChange={e=>setColumns(prev=>e.target.checked?[...prev,c.key]:prev.filter(k=>k!==c.key))}/>{c.label}</label>)}
+            <button type="button" className="tool-button" onClick={()=>{setColumns(optionalColumns.map(c=>c.key));setColumnMenu(false);}}>恢复默认</button>
+          </div>}
+        </div>
+        <button type="button" className="tool-button" onClick={exportRows} disabled={!filtered.length}><Download size={14}/> 导出 CSV</button>
       </div>
     </div>
     {needle && <div className="stock-search-feedback" role="status" aria-live="polite">
       {viewLabel} · 匹配 {matches.length} 只 / 当前 {tabRows.length} 只
     </div>}
     {filtered.length ? <div className="table-scroll"><table className="results-table">
-      <thead><tr><th>股票 / 行业</th><th>收盘价</th><th>总市值</th>
-        <th>NCAV / 市值</th><th>压力价值覆盖率</th><th>市净率</th>
-        <th>初筛状态</th><th>交易观察</th><th></th></tr></thead>
+      <thead><tr><th className="security-col">股票 / 行业</th>
+        {shownColumns.map(c=><th key={c.key} className={c.key==="status"||c.key==="signal"?"":"numeric-col"}
+          aria-sort={order===c.key?(ascending?"ascending":"descending"):undefined}>
+          {c.key==="status"||c.key==="signal"?c.label:<button type="button" className="sort-heading" onClick={()=>sortBy(c.key as NumericKey)}>{c.label}<ArrowUpDown size={12} className={order===c.key?"sort-active":""}/></button>}
+        </th>)}<th aria-label="查看详情"></th></tr></thead>
       <tbody>{filtered.slice(0,visibleCount).map(row=><tr key={row.ts_code}>
-        <td><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
+        <td className="security-col"><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           {row.name}<ArrowUpRight size={13}/></Link>
           <div className="stock-meta">{row.ts_code} · {row.industry || "行业待补充"}</div></td>
-        <td className="number strong">{fixed(row.price)}</td>
-        <td className="number">{moneyCny(row.market_cap_yuan)}</td>
-        <td><span className={row.ncav_coverage !== null && row.ncav_coverage >= 1.25
-          ? "number highlight" : "number"}>{pct(row.ncav_coverage,1)}</span></td>
-        <td className="number">{pct(row.stress_coverage,1)}</td><td className="number">{fixed(row.pb)}</td>
-        <td><span className={tagClass(row.status)}>{stateLabel(row.status)}</span></td>
-        <td className="signal-cell">{signalLabel(row.signal)}</td>
+        {shownColumns.map(c=><td key={c.key} className={c.key==="status"||c.key==="signal"?"":"number numeric-col"}>
+          {c.key==="status"?<span className={tagClass(row.status)}>{displayValue(row,c.key)}</span>:
+           <span className={c.key==="ncav_coverage" && row.ncav_coverage!==null && row.ncav_coverage>=1.25?"highlight":""}>{displayValue(row,c.key)}</span>}
+        </td>)}
         <td><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           <ArrowRight size={16}/></Link></td>
       </tr>)}</tbody></table></div>
