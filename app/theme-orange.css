@@ -337,10 +337,10 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
 
 /* Screener toolbar: every filter and action stays on a single row. */
 .market-panel {min-width:0;}
-.market-panel>.filters {display:flex;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:12px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;min-width:0;}
-.market-panel>.filters>.tabs {flex:0 0 auto;width:auto;flex-wrap:nowrap;white-space:nowrap;gap:8px;}
-.market-panel>.filters>.filter-form {display:flex;align-items:center;flex:1 0 auto;width:auto;min-width:max-content;flex-wrap:nowrap;gap:6px;}
-.market-panel .filter-form>.stock-search {flex:1 0 168px;min-width:168px;max-width:260px;}
+.market-panel>.filters {display:flex;align-items:center;justify-content:space-between;flex-wrap:nowrap;gap:12px;overflow:visible;min-width:0;}
+.market-panel>.filters>.tabs {flex:0 0 auto;width:max-content;min-width:max-content;flex-wrap:nowrap;white-space:nowrap;gap:8px;}.market-panel>.filters>.tabs>.tab {flex:0 0 auto;white-space:nowrap;}
+.market-panel>.filters>.filter-form {display:flex;align-items:center;justify-content:safe flex-end;flex:1 1 0;width:auto;min-width:0;flex-wrap:nowrap;gap:6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;padding:4px 3px;}
+.market-panel .filter-form>.stock-search {flex:0 0 180px;min-width:180px;max-width:180px;}
 .market-panel .filter-form>.stock-search>.search-field {width:100%;min-width:0;}
 .market-panel .filter-form>select,.market-panel .filter-form>.column-control,.market-panel .filter-form>.tool-button {flex:0 0 auto;white-space:nowrap;}
 .market-panel .filter-form>select {max-width:none;padding-inline:7px;}
@@ -364,3 +364,28 @@ h1 {font-size:25px;line-height:1.35;letter-spacing:-.025em;font-weight:700;margi
 .summary-hit-list {display:flex;flex-wrap:wrap;gap:4px 8px;}
 .summary-hit-list>span {color:var(--accent);background:var(--accent-soft);padding:3px 6px;border-radius:3px;font-size:11px;white-space:nowrap;}
 @media(max-width:700px){.summary-selection{margin-inline:12px;}.summary-toolbar{padding-inline:12px;}.market-panel>.filters{gap:8px;}}
+
+
+/* Keep view tabs pinned; only the right-hand controls may scroll on narrow screens. */
+.market-panel>.filters>.filter-form>select:focus-visible,.market-panel>.filters>.filter-form .tool-button:focus-visible {outline:2px solid var(--accent);outline-offset:-2px;}
+/* Fixed metadata and action columns; only the two description columns expand. */
+.strategy-library .table-scroll {overflow-x:auto;}
+.strategy-library-table {table-layout:fixed;min-width:1460px;width:100%;white-space:nowrap;}
+.strategy-library-table th,.strategy-library-table td {padding:10px 9px;vertical-align:middle;white-space:nowrap;overflow-wrap:normal;word-break:normal;}
+.strategy-library-table td:first-child,.strategy-library-table td:nth-child(2) {min-width:0;}
+.strategy-library-table td:nth-child(3),.strategy-library-table td:nth-child(4) {width:auto;white-space:normal;vertical-align:middle;overflow-wrap:break-word;word-break:normal;}
+.strategy-library-table .stock-meta {white-space:normal;overflow-wrap:anywhere;}
+.strategy-library-table .strategy-state,.strategy-library-table .inline-link {display:inline-flex;align-items:center;white-space:nowrap;}
+.strategy-library-table :is(th,td):nth-child(n+5):nth-child(-n+9) {text-align:center;}
+/* Keep compact collapsed rows and make each expanded reason a separate card. */
+.signal-expand {display:inline-flex;align-items:center;gap:4px;padding:3px 0;color:var(--accent);font-size:11px;font-weight:600;white-space:nowrap;}
+.signal-expand-close,.signal-reason-details[open] .signal-expand-open {display:none;}
+.signal-reason-details[open] .signal-expand-close {display:inline;}
+.signal-expand svg {transition:transform 150ms ease;}
+.signal-reason-details[open] .signal-expand svg {transform:rotate(180deg);}
+.signal-reason-body {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:7px;padding:7px 0 2px;}
+.signal-reason-body>.signal-reason-card {border:1px solid var(--border);border-radius:5px;background:var(--surface);padding:9px 10px;min-width:0;white-space:normal;}
+.signal-reason-card strong {display:block;font-size:12px;line-height:1.5;color:var(--ink);}
+.signal-reason-card p {margin:5px 0 0;font-size:11px;line-height:1.6;overflow-wrap:anywhere;}
+.review-table tr:has(.signal-reason-details[open])>td {vertical-align:top;padding-top:10px;padding-bottom:10px;}
+@media(prefers-reduced-motion:reduce){.signal-expand svg{transition:none;}}
