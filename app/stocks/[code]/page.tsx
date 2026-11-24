@@ -18,9 +18,9 @@ export async function generateMetadata({params}: Props): Promise<Metadata> {
 function Facts({rows}:{rows:[string,string][]}){return <dl className="detail-list">{rows.map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>;}
 export default async function StockPage({params}: Props) {
   const {code}=await params;
-  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code))return <main className="page-container"><Empty title="无效股票代码"/></main>;
+  if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code))return <main className="page-container"><Empty title="无效股票代码" detail="请输入有效的证券代码。"/></main>;
   const [company,{stock,prices,recent}]=await Promise.all([companyOverview(code),stockDetail(code)]);
-  if(!company)return <main className="page-container"><Link className="back-link" href="/research"><ArrowLeft size={16}/> 返回行情研究</Link><div className="panel"><Empty title="未找到该证券"/></div></main>;
+  if(!company)return <main className="page-container"><Link className="back-link" href="/research"><ArrowLeft size={16}/> 返回行情研究</Link><div className="panel"><Empty title="未找到该证券" detail="股票档案暂无该证券。"/></div></main>;
   const {identity,overview:o}=company;
   const m=o.market,b=o.balance,i=o.income,c=o.cashflow;
   const review=stock?evaluateFundamentalReview(stock):null;
@@ -78,7 +78,7 @@ export default async function StockPage({params}: Props) {
           <div className="dates"><div><CalendarClock size={15}/> 财务报告期：{stock.report_date || "未取得"}</div>
             <div><CalendarClock size={15}/> 财报披露日：{stock.disclosed_at || "未取得"}</div></div>
         </section>
-      </div></></>:<section className="panel"><Empty title="暂无 Net-Net 策略记录"/></section>;
+      </div></></>:<section className="panel"><Empty title="暂无 Net-Net 策略记录" detail="该证券暂无已发布的策略记录。"/></section>;
   return <main className="page-container">
     <Link className="back-link" href={"/research?code="+encodeURIComponent(code)}><ArrowLeft size={16}/> 返回行情研究</Link>
     <div className="page-top stock-page-top"><div><h1>{identity.name} <span className="heading-period">{code}</span></h1><p className="page-lead">{identity.industry||"—"} · {o.marketType||"—"} · 上市 {o.listDate||"—"}</p></div><WatchButton stock={identity}/></div>
