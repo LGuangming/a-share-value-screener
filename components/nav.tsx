@@ -30,11 +30,11 @@ export default function Nav() {
   useEffect(() => {
     const refresh = () => {
       const id = new URLSearchParams(window.location.search).get("strategy");
-      setSelectedStrategy(id && findStrategy(id) ? id : null);
+      setSelectedStrategy(id && (findStrategy(id)||id==="summary") ? id : null);
     };
     const onStrategyChange = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
-      setSelectedStrategy(findStrategy(id) ? id : null);
+      setSelectedStrategy(findStrategy(id)||id==="summary" ? id : null);
     };
     refresh();
     window.addEventListener("a-share-strategy-change", onStrategyChange);
@@ -45,6 +45,7 @@ export default function Nav() {
     };
   }, [pathname]);
   function strategyHref(href: string): string {
+    if(selectedStrategy==="summary") return href==="/" ? "/?strategy=summary" : href;
     return selectedStrategy && (href === "/" || href === "/signals" || href === "/methodology")
       ? `${href}?strategy=${encodeURIComponent(selectedStrategy)}`
       : href;
