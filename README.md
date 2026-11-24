@@ -203,3 +203,33 @@ are server-side GitHub Actions secrets only. Archive/restore cannot be declared
 operational until a PRIVATE Neon bucket and scoped credentials are connected
 and both live workflows complete. See
 [docs/MULTI_STRATEGY_BACKTEST.md](docs/MULTI_STRATEGY_BACKTEST.md).
+
+
+## Interactive historical market chart (Lightweight Charts)
+
+Stock detail pages use TradingView Lightweight Charts™ for unadjusted historical
+prices. The initial view uses the existing Neon compact close history. Selecting
+a completed archive year (2020–2025) reads the existing monthly Parquet files
+directly, without repartitioning, uploading new objects or making Tushare requests.
+
+The year reader validates the published manifest, byte sizes, SHA-256 hashes,
+row counts and OHLC bounds, then returns only the requested ticker. The server
+caches successful ticker/year queries for 24 hours; a cold query reads twelve
+monthly partitions. Weekly/monthly bars are aggregated in the browser. K-line
+and volume controls are available only where the underlying data supplies OHLCV.
+Trade marker types are reserved for actual strategy or backtest events.
+
+To enable archived candles in a Vercel environment, configure server-side
+environment variables (never prefix these with NEXT_PUBLIC_):
+- NEON_STORAGE_ENDPOINT — existing branch-scoped Neon HTTPS storage endpoint
+- NEON_STORAGE_BUCKET — existing private archive bucket
+- NEON_STORAGE_REGION — optional, derived from endpoint when absent
+- NEON_STORAGE_PRIVATE_CONFIRMED — true only after confirming the bucket is private
+- NEON_STORAGE_READ_ACCESS_KEY_ID — a separate read-only S3 credential
+- NEON_STORAGE_READ_SECRET_ACCESS_KEY — its secret, not the ingestion write key
+
+Use the same already-published archive prefix, a-share-backtest/v1/prices.
+Do not copy writer credentials to the frontend. If the read-only variables are
+missing or the archive cannot be verified, the historical-year selection reports
+unavailability; the existing recent close chart remains independent. No 2026
+OHLCV is fabricated from recent close-only history.
