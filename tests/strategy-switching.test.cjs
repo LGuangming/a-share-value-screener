@@ -271,7 +271,7 @@ test("V3 workstation shares actual archive chart and read-only candidate data",(
   assert.match(page,/combineStrategyResults/);
   assert.match(page,/screeningRowsStatus/);
   assert.match(workspace,/<MarketChart/);
-  assert.match(workspace,/detail\.recent\.map/);
+  assert.match(workspace,/detail\?\.recent\.map/);
   assert.match(detail,/stockDetail\(code\)/);
   assert.match(read("lib/data.ts"),/FROM stocks\s+WHERE strpos/);
   assert.match(read("components/nav.tsx"),/label: "行情研究"/);
