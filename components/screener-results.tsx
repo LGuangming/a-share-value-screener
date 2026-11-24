@@ -7,6 +7,8 @@ import type { ScreenerRow } from "@/lib/data";
 import { fixed, moneyCny, pct, signalLabel, stateLabel } from "@/lib/format";
 import { Empty } from "@/components/empty";
 import ToolbarFlyout from "@/components/toolbar-flyout";
+import {WatchButton} from "@/components/workspace-preferences";
+import {PreviewButton} from "@/components/stock-preview";
 
 export type ScreenTableRow = Pick<ScreenerRow,
   "ts_code" | "name" | "industry" | "price" | "pb" | "market_cap_yuan" |
@@ -253,7 +255,7 @@ export default function ScreenerResults({ rows, initial }: {
         {shownColumns.map(c=><th key={c.key} className={c.key==="status"||c.key==="signal"?"":"numeric-col"}
           aria-sort={order===c.key?(ascending?"ascending":"descending"):undefined}>
           {c.key==="status"||c.key==="signal"?c.label:<button type="button" className="sort-heading" onClick={()=>sortBy(c.key as NumericKey)}>{c.label}<ArrowUpDown size={12} className={order===c.key?"sort-active":""}/></button>}
-        </th>)}<th aria-label="查看详情"></th></tr></thead>
+        </th>)}<th aria-label="研究操作">操作</th></tr></thead>
       <tbody>{filtered.slice(0,visibleCount).map(row=><tr key={row.ts_code}>
         <td className="security-col"><Link className="stock-name" href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
           {row.name}<ArrowUpRight size={13}/></Link>
@@ -262,8 +264,8 @@ export default function ScreenerResults({ rows, initial }: {
           {c.key==="status"?<span className={tagClass(row.status)}>{displayValue(row,c.key)}</span>:
            <span className={c.key==="ncav_coverage" && row.ncav_coverage!==null && row.ncav_coverage>=1.25?"highlight":""}>{displayValue(row,c.key)}</span>}
         </td>)}
-        <td><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
-          <ArrowRight size={16}/></Link></td>
+        <td><div className="row-actions"><WatchButton stock={row}/><PreviewButton stock={row}/><Link aria-label={`查看${row.name}`} href={`/stocks/${encodeURIComponent(row.ts_code)}`}>
+          <ArrowRight size={16}/></Link></div></td>
       </tr>)}</tbody></table></div>
     : <Empty title={needle ? "暂无匹配的股票" : "暂无符合筛选条件的股票"}
       detail={needle ? `${viewLabel}中没有匹配的股票，试试更短的名称或代码。` : "可调整筛选条件或切换到“全部预筛”视图。"}/>}
