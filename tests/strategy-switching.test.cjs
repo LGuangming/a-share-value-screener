@@ -457,3 +457,26 @@ test("site access accepts any six-character password without composition rules",
     if(previousSecret===undefined)delete process.env.SITE_SESSION_SECRET;else process.env.SITE_SESSION_SECRET=previousSecret;
   }
 });
+
+test("login origin validation supports browser forms behind Vercel without accepting cross-site requests",()=>{
+  const ts=require("typescript"),m={exports:{}};
+  new Function("module","exports","require",ts.transpileModule(read("lib/site-access.ts"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText)(m,m.exports,id=>id==="server-only"?{}:require(id));
+  const a=m.exports,publicOrigin="https://stock.guangming.blog";
+  const req=(headers,method="POST")=>new Request("https://internal.example/login",{method,headers});
+  assert.equal(a.PRIVATE_HEADERS["Referrer-Policy"],"same-origin");
+  assert.equal(a.sameOriginPost(req({host:"stock.guangming.blog",origin:publicOrigin})),true);
+  assert.equal(a.sameOriginPost(req({host:"internal.example",origin:publicOrigin,"sec-fetch-site":"same-origin"})),true);
+  assert.equal(a.sameOriginPost(req({origin:"null","sec-fetch-site":"same-origin"})),true);
+  assert.equal(a.sameOriginPost(req({"sec-fetch-site":"same-origin"})),true);
+  assert.equal(a.sameOriginPost(req({origin:"null"})),false);
+  assert.equal(a.sameOriginPost(req({})),false);
+  assert.equal(a.sameOriginPost(req({origin:publicOrigin})),false);
+  assert.equal(a.sameOriginPost(req({origin:publicOrigin,"x-forwarded-host":"stock.guangming.blog"})),false);
+  for(const site of ["cross-site","same-site","none"]){
+    assert.equal(a.sameOriginPost(req({host:"stock.guangming.blog",origin:publicOrigin,"sec-fetch-site":site})),false);
+    assert.equal(a.sameOriginPost(req({origin:"null","sec-fetch-site":site})),false);
+  }
+  assert.equal(a.sameOriginPost(req({origin:"https://evil.example"})),false);
+  assert.equal(a.sameOriginPost(req({origin:"garbage","sec-fetch-site":"same-origin"})),false);
+  assert.equal(a.sameOriginPost(req({"sec-fetch-site":"same-origin"},"GET")),false);
+});
