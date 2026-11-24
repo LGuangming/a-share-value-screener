@@ -34,7 +34,7 @@ export function useWatchlist(){
   useEffect(()=>{const sync=()=>setItems(normalizeWatch(read<unknown>(WATCH,[])));sync();window.addEventListener(WATCH,sync);window.addEventListener("storage",sync);return()=>{window.removeEventListener(WATCH,sync);window.removeEventListener("storage",sync);};},[]);
   const toggle=useCallback((stock:StockIdentity)=>{
     const current=normalizeWatch(read<unknown>(WATCH,[]));
-    write(WATCH,current.some(x=>x.ts_code===stock.ts_code)?current.filter(x=>x.ts_code!==stock.ts_code):[...current,stock].slice(-300));
+    write(WATCH,current.some(x=>x.ts_code===stock.ts_code)?current.filter(x=>x.ts_code!==stock.ts_code):[...current,{ts_code:stock.ts_code,name:stock.name,industry:stock.industry??null}].slice(-300));
   },[]);
   return {items,toggle};
 }
