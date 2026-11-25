@@ -84,3 +84,13 @@ manual wrapper's dispatch-only publish-test job has that permission. No
 secrets inherited. The wrapper and reusable workflow must retain identical
 REVIEWED_SHA and REVIEWED_RUN; mismatch also fails the accepted-pair receipt
 check before publication. No publish job exists in the push review path.
+
+Historical-run API reconciliation: run 45630877479 is completed/success,
+but the independent gate job endpoint reported status in_progress with
+success conclusion and a recorded completed_at. Keep the top-level run
+terminal check, exact six job names, every successful conclusion and
+nonempty valid completion time bounded by the finished run, and require
+the independent gate's exact step completed/success. The stale per-job
+status is logged, not used to override a missing/failed conclusion or
+completion timestamp. Initial review correctly stopped at the inconsistent
+historical status and skipped image builds; revised review is required.
