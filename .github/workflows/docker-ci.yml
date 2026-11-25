@@ -511,10 +511,14 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib, collections
-          for p in sorted(pathlib.Path("eval-reports").glob("*-trivy0762-vuln.json")):
+          for name in ("minimal", "web"):
+              p = pathlib.Path("eval-reports") / (name + "-trivy0762-vuln.json")
+              if not p.is_file():
+                  print(p.name, "MISSING: no scan result available")
+                  continue
               data = json.loads(p.read_text())
-              counts = collections.Counter(v["Severity"] for r in data.get("Results", []) for v in r.get("Vulnerabilities", []))
-              print(p.name, dict(counts))
+              counts = collections.Counter(v["Severity"] for r in (data.get("Results") or []) for v in (r.get("Vulnerabilities") or []))
+              print(p.name, {"HIGH": counts["HIGH"], "CRITICAL": counts["CRITICAL"]})
           PY
       - name: Preserve evaluation evidence
         if: always()
