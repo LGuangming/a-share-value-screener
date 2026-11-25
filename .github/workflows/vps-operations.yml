@@ -45,14 +45,65 @@ jobs:
           printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > "$workdir/known_hosts"
           chmod 600 "$workdir/key" "$workdir/known_hosts"
           unset VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS
-          # Use the host key obtained out of band from the VPS, never ssh-keyscan.
-          if ! awk -v host="[$VPS_HOST]:$VPS_PORT" '
-            NF { if (NF != 3 || $1 != host || $2 != "ssh-ed25519") bad=1; n++ }
+          failed=0
+          fail() {
+            echo "::error::$1"
+            failed=1
+          }
+          echo "PASS: required secrets and SSH connection configuration"
+          # Independently validate both secrets without disclosing their contents.
+          if awk -v host="[$VPS_HOST]:$VPS_PORT" '
+            NF { if (NF != 3 || $1 != host || $2 != "ssh-ed25519") bad=1; n++; print $2, $3 }
             END { exit !(n == 1 && !bad) }
-          ' "$workdir/known_hosts" ||
-            ! ssh-keygen -lf "$workdir/known_hosts" >/dev/null 2>&1 ||
-            ! ssh-keygen -y -P '' -f "$workdir/key" >/dev/null 2>&1; then
-            echo "::error::Invalid host key record or SSH private key"
+          ' "$workdir/known_hosts" > "$workdir/host.pub"; then
+            echo "PASS: known_hosts record format and endpoint match"
+            if host_info="$(ssh-keygen -E sha256 -lf "$workdir/host.pub" 2>/dev/null)"; then
+              echo "PASS: host public key parses"
+              # Out-of-band fingerprints verified during VPS setup.
+              if [[ "$(awk '{print $2}' <<< "$host_info")" == 'SHA256:sSlO+u6QQJrbn/fq3FQ0Pp5wfl2kp3ydErm2lYt9efg' ]]; then
+                echo "PASS: VPS host fingerprint matches"
+              else
+                fail "VPS_KNOWN_HOSTS: host fingerprint mismatch"
+              fi
+            else
+              fail "VPS_KNOWN_HOSTS: invalid ED25519 public key"
+            fi
+          else
+            fail "VPS_KNOWN_HOSTS: expected one [host]:port ssh-ed25519 key record matching VPS_HOST"
+          fi
+
+          if ! grep -Fxq -- '-----BEGIN OPENSSH PRIVATE KEY-----' "$workdir/key" ||
+             ! grep -Fxq -- '-----END OPENSSH PRIVATE KEY-----' "$workdir/key"; then
+            fail "VPS_SSH_PRIVATE_KEY: missing OpenSSH private key header or footer"
+          elif ! ssh-keygen -y -P '' -f "$workdir/key" > "$workdir/client.pub" 2>"$workdir/key.stderr" </dev/null; then
+            if grep -Eqi 'passphrase|decrypt' "$workdir/key.stderr"; then
+              fail "VPS_SSH_PRIVATE_KEY: encrypted key or incorrect empty passphrase"
+            else
+              fail "VPS_SSH_PRIVATE_KEY: cannot parse private key (check complete multiline content)"
+            fi
+          else
+            echo "PASS: private key parses without a passphrase"
+            if client_info="$(ssh-keygen -E sha256 -lf "$workdir/client.pub" 2>/dev/null)" &&
+               [[ "$(awk '{print $2}' <<< "$client_info")" == 'SHA256:4z3LpwUgrHeItCFW8NeDEdVvvrX7cYZg0KGHvTHmuGM' ]]; then
+              echo "PASS: private key matches the authorized operations public key"
+            else
+              fail "VPS_SSH_PRIVATE_KEY: does not match the operations public key"
+            fi
+          fi
+
+          # DNS and TCP checks disclose neither resolved addresses nor exceptions.
+          if timeout 15s getent ahosts "$VPS_HOST" >/dev/null 2>&1; then
+            echo "PASS: DNS resolution"
+            if timeout 20s python3 -c 'import socket,sys; s=socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=8); s.close()' "$VPS_HOST" "$VPS_PORT" >/dev/null 2>&1; then
+              echo "PASS: TCP port reachable"
+            else
+              fail "TCP connection failed: check DNS proxy, firewall and SSH listener"
+            fi
+          else
+            fail "DNS resolution failed: check VPS_HOST"
+          fi
+          if [[ "$failed" -ne 0 ]]; then
+            echo "SSH authentication skipped: fix the failed prerequisite checks"
             exit 1
           fi
           ssh_opts=(
@@ -78,9 +129,17 @@ jobs:
           }
           # Avoid logging raw SSH diagnostics or connection details in this public repository.
           if output="$(remote ping)" && [[ "$output" == ASHARE_OPS_OK ]]; then
-            echo "PASS: restricted SSH ping"
+            echo "PASS: SSH authentication and restricted ping"
           else
-            echo "::error::SSH ping failed (check reachability, pinned host key and key authorization)"
+            if grep -Eqi 'host key verification failed|remote host identification has changed|no .* host key is known' "$workdir/ssh.stderr"; then
+              echo "::error::SSH host verification failed: check the pinned host key"
+            elif grep -Eqi 'permission denied|no mutual signature|authentication failed' "$workdir/ssh.stderr"; then
+              echo "::error::SSH public key authentication failed: check account and authorized_keys"
+            elif grep -Eqi 'connection refused|connection timed out|connection closed|connection reset|kex_exchange_identification|no route to host' "$workdir/ssh.stderr"; then
+              echo "::error::SSH transport or handshake failed"
+            else
+              echo "::error::SSH ping failed or forced command returned an unexpected response"
+            fi
             exit 1
           fi
           if output="$(remote status)"; then
