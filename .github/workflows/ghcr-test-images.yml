@@ -1,0 +1,236 @@
+name: GHCR reviewed test images (PR 26)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ghcr-test-images.yml'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter PUBLISH-PR26-TEST to publish only reviewed test images'
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  REVIEWED_SHA: d5f1ed82ea4360cfc0619aeb6e6fa13752177aac
+concurrency:
+  group: ghcr-pr26-test-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  review-build:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [web, worker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout reviewed application commit (PR 26)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: d5f1ed82ea4360cfc0619aeb6e6fa13752177aac
+          path: source
+          persist-credentials: false
+      - name: Build reviewed linux/amd64 image
+        shell: bash
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$REVIEWED_SHA"
+          case "$KIND" in
+            web|worker) ;;
+            *) exit 1 ;;
+          esac
+          docker build --platform linux/amd64 --pull \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$REVIEWED_SHA" \
+            --label "org.opencontainers.image.version=test-pr26" \
+            -f "source/Dockerfile.$KIND" -t "ashare-$KIND:reviewed" source
+      - name: Verify image runtime metadata and identity
+        shell: bash
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          image="ashare-$KIND:reviewed"
+          expected=10001:10010
+          if [[ "$KIND" = worker ]]; then expected=10002:10010; fi
+          test "$(docker image inspect "$image" --format '{{.Config.User}}')" = "$expected"
+          test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVIEWED_SHA"
+          docker image inspect "$image" --format '{{json .Config.Env}}' | python3 -c '
+          import json, sys
+          names = {v.split("=",1)[0] for v in json.load(sys.stdin)}
+          assert not any(n in {"DATABASE_URL","DATABASE_READ_URL","SITE_ACCESS_PASSWORD","SITE_SESSION_SECRET","GITHUB_TOKEN","GH_TOKEN","ARCHIVE_LOCAL_WEB_COOKIE"} or n.startswith(("NEON_","TUSHARE_","AWS_")) for n in names), "Unexpected credential variable in image"
+          '
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh "$image" -ec "test \$(id -u):\$(id -g) = $expected"
+          docker image inspect "$image" --format 'Image={{.Id}} Bytes={{.Size}} User={{.Config.User}}'
+      - name: Scan image for embedded secrets
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-${{ matrix.kind }}:reviewed
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: Scan image vulnerabilities (HIGH and CRITICAL gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-${{ matrix.kind }}:reviewed
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+
+  authorize:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm default-branch workflow and explicit test publication
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REPOSITORY" = LGuangming/a-share-value-screener
+          test "$CONFIRM" = PUBLISH-PR26-TEST
+
+  publish-test:
+    needs: authorize
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [web, worker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout reviewed application commit (PR 26)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: d5f1ed82ea4360cfc0619aeb6e6fa13752177aac
+          path: source
+          persist-credentials: false
+      - name: Build reviewed linux/amd64 image
+        shell: bash
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          test "$(git -C source rev-parse HEAD)" = "$REVIEWED_SHA"
+          case "$KIND" in
+            web|worker) ;;
+            *) exit 1 ;;
+          esac
+          docker build --platform linux/amd64 --pull \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$REVIEWED_SHA" \
+            --label "org.opencontainers.image.version=test-pr26" \
+            -f "source/Dockerfile.$KIND" -t "ashare-$KIND:reviewed" source
+      - name: Verify image runtime metadata and identity
+        shell: bash
+        env:
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          image="ashare-$KIND:reviewed"
+          expected=10001:10010
+          if [[ "$KIND" = worker ]]; then expected=10002:10010; fi
+          test "$(docker image inspect "$image" --format '{{.Config.User}}')" = "$expected"
+          test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVIEWED_SHA"
+          docker image inspect "$image" --format '{{json .Config.Env}}' | python3 -c '
+          import json, sys
+          names = {v.split("=",1)[0] for v in json.load(sys.stdin)}
+          assert not any(n in {"DATABASE_URL","DATABASE_READ_URL","SITE_ACCESS_PASSWORD","SITE_SESSION_SECRET","GITHUB_TOKEN","GH_TOKEN","ARCHIVE_LOCAL_WEB_COOKIE"} or n.startswith(("NEON_","TUSHARE_","AWS_")) for n in names), "Unexpected credential variable in image"
+          '
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh "$image" -ec "test \$(id -u):\$(id -g) = $expected"
+          docker image inspect "$image" --format 'Image={{.Id}} Bytes={{.Size}} User={{.Config.User}}'
+      - name: Scan image for embedded secrets
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-${{ matrix.kind }}:reviewed
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: Scan image vulnerabilities (HIGH and CRITICAL gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-${{ matrix.kind }}:reviewed
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+
+      - name: Push isolated test package and verify registry digest
+        shell: bash
+        env:
+          KIND: ${{ matrix.kind }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          case "$KIND" in web|worker) ;; *) exit 1 ;; esac
+          local_image="ashare-$KIND:reviewed"
+          package="ghcr.io/lguangming/a-share-value-screener-$KIND-test-pr26"
+          tag="test-pr26-$REVIEWED_SHA-run-$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+          remote="$package:$tag"
+          auth_dir="$(mktemp -d)"
+          anon_dir="$(mktemp -d)"
+          log="$(mktemp)"
+          cleanup() {
+            DOCKER_CONFIG="$auth_dir" docker logout ghcr.io >/dev/null 2>&1 || true
+            rm -rf -- "$auth_dir" "$anon_dir" "$log"
+          }
+          trap cleanup EXIT
+          chmod 700 "$auth_dir" "$anon_dir"
+          printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$auth_dir" docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          unset GHCR_TOKEN
+          docker tag "$local_image" "$remote"
+          DOCKER_CONFIG="$auth_dir" docker push "$remote" | tee "$log"
+          digest="$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}) size:.*/\1/p' "$log" | tail -1)"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          pin="$package@$digest"
+          DOCKER_CONFIG="$auth_dir" docker pull "$pin"
+          test "$(docker image inspect "$local_image" --format '{{.Id}}')" = "$(docker image inspect "$pin" --format '{{.Id}}')"
+          # Fetch the tag independently and check that its remote manifest digest matches.
+          tagged_digest="$(DOCKER_CONFIG="$auth_dir" docker buildx imagetools inspect "$remote" | awk '/^Digest:/ {print $2; exit}')"
+          test "$tagged_digest" = "$digest"
+          # Anonymous access must be explicitly rejected; network errors are not proof.
+          if DOCKER_CONFIG="$anon_dir" docker manifest inspect "$pin" >"$log" 2>&1; then
+            echo "FAIL: package accessible anonymously; stop deployment"
+            exit 1
+          fi
+          if ! grep -Eiq 'unauthorized|denied|authentication required' "$log"; then
+            echo "FAIL: anonymous visibility check inconclusive"
+            exit 1
+          fi
+          {
+            echo "### $KIND test image"
+            echo "- Source: `$REVIEWED_SHA`"
+            echo "- Tag: `$remote`"
+            echo "- Pin: `$pin`"
+            echo "- Authenticated digest pull and anonymous denial: PASS"
+            echo "- Verify package visibility in GitHub UI before VPS use."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "PASS: verified test image $pin"
