@@ -13,6 +13,23 @@ import boto3
 from botocore.config import Config
 from common import digest, load, main_guard, write_json
 
+def same_modified(listed, received):
+    """Compare LIST timestamps with HTTP Last-Modified without losing LIST evidence.
+
+    HTTP dates have second precision. When GET supplies fractional precision,
+    retain exact comparison instead of discarding the extra evidence.
+    """
+    expected = datetime.fromisoformat(listed)
+    if not isinstance(received, datetime):
+        raise ValueError("invalid GET LastModified")
+    if expected.utcoffset() is None or received.utcoffset() is None:
+        raise ValueError("timezone required for LastModified")
+    expected = expected.astimezone(timezone.utc)
+    received = received.astimezone(timezone.utc)
+    if received.microsecond == 0:
+        expected = expected.replace(microsecond=0)
+    return expected == received
+
 def safe_key(key):
     parts=key.split("/")
     if not key or any(p in ("",".","..") for p in parts) or "\\" in key or any(ord(c)<32 or ord(c)==127 for c in key):
@@ -126,7 +143,7 @@ def sync(client, manifest, root, previous=None, workers=1):
                         size+=len(chunk)
                     f.flush()
                     os.fsync(f.fileno())
-                if size!=obj["size"] or response.get("ETag")!=obj["etag"] or response["LastModified"].isoformat()!=obj["modified"]:
+                if size!=obj["size"] or response.get("ETag")!=obj["etag"] or not same_modified(obj["modified"], response["LastModified"]):
                     raise ValueError("source changed or size mismatch")
                 claimed=response.get("Metadata",{}).get("sha256")
                 if claimed and claimed.lower()!=h.hexdigest():

@@ -1,12 +1,14 @@
 import os
+import copy
+from datetime import datetime, timezone, timedelta
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 import boto3
 from moto import mock_aws
-from common import write_json
-from storage import inventory,sync,verify,safe_key
+from common import write_json,load
+from storage import inventory,sync,verify,safe_key,same_modified,main
 
 @mock_aws
 class StorageTest(unittest.TestCase):
@@ -136,3 +138,92 @@ class StorageTest(unittest.TestCase):
             self.assertTrue(sync(self.client,m,self.root,workers=2)["passed"])
             self.assertEqual(get.call_count,1)
         self.assertFalse((self.root/"checkpoint.jsonl").exists())
+
+
+    def test_neon_list_fractional_get_seconds_and_resume(self):
+        m=self.manifest()
+        original=self.client.get_object
+        for obj in m["objects"]:
+            obj["modified"]=datetime.fromisoformat(obj["modified"]).replace(microsecond=768000).isoformat()
+        write_json(self.root/"inventory-storage.json",m)
+        def get(**kw):
+            obj=next(x for x in m["objects"] if x["key"]==kw["Key"])
+            self.assertEqual(kw["IfMatch"],obj["etag"])
+            response=original(**kw)
+            response["LastModified"]=datetime.fromisoformat(obj["modified"]).replace(microsecond=0)
+            return response
+        with patch.object(self.client,"get_object",side_effect=get):
+            self.assertTrue(sync(self.client,m,self.root,workers=2)["passed"])
+        with patch.object(self.client,"get_object",side_effect=AssertionError("repeat downloaded")):
+            self.assertTrue(sync(self.client,m,self.root,workers=2)["passed"])
+        self.assertEqual(m["objects"][0]["modified"],load(self.root/"inventory-storage.json")["objects"][0]["modified"])
+
+    def test_get_mismatches_still_rejected(self):
+        original=self.client.get_object
+        for case in ("time","fraction","etag","size","sha256","naive"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp)
+                m=inventory(self.client,self.buckets)
+                for obj in m["objects"]:
+                    obj["modified"]=datetime.fromisoformat(obj["modified"]).replace(microsecond=197000).isoformat()
+                write_json(root/"inventory-storage.json",m)
+                if case=="size":
+                    m["objects"][0]["size"]+=1
+                def get(**kw):
+                    response=original(**kw)
+                    stamp=datetime.fromisoformat(m["objects"][0]["modified"])
+                    response["LastModified"]=stamp.replace(microsecond=0)
+                    if case=="time":
+                        response["LastModified"]+=timedelta(seconds=1)
+                    elif case=="fraction":
+                        response["LastModified"]=stamp.replace(microsecond=198000)
+                    elif case=="etag":
+                        response["ETag"]='"different"'
+                    elif case=="sha256":
+                        response["Metadata"]={"sha256":"0"*64}
+                    elif case=="naive":
+                        response["LastModified"]=stamp.replace(tzinfo=None)
+                    return response
+                with patch.object(self.client,"get_object",side_effect=get):
+                    with self.assertRaises(ValueError):
+                        sync(self.client,m,root)
+                self.assertFalse((root/"verify-storage.json").exists())
+                self.assertFalse(list((root/"files").rglob(".download-*")))
+                self.assertFalse(any(p.is_file() for p in (root/"files").rglob("*")))
+
+    def test_list_fractional_change_before_or_after_sync_rejected(self):
+        env={"NEON_STORAGE_ENDPOINT":"https://fixture.invalid","NEON_STORAGE_REGION":"us-east-1",
+             "NEON_STORAGE_ACCESS_KEY_ID":"fixture","NEON_STORAGE_SECRET_ACCESS_KEY":"fixture"}
+        for after in (False,True):
+            with self.subTest(after=after), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp)
+                before=inventory(self.client,self.buckets)
+                before["objects"][0]["modified"]=datetime.fromisoformat(before["objects"][0]["modified"]).replace(microsecond=197000).isoformat()
+                changed=copy.deepcopy(before)
+                changed["objects"][0]["modified"]=datetime.fromisoformat(changed["objects"][0]["modified"]).replace(microsecond=198000).isoformat()
+                write_json(root/"inventory-storage.json",before)
+                args=["storage.py","sync","--root",str(root),"--approved-live-read"]
+                for bucket in self.buckets:
+                    args.extend(["--bucket",bucket])
+                manifests=[before,changed] if after else [changed]
+                with patch.dict(os.environ,env), patch("sys.argv",args), patch("storage.boto3.client",return_value=self.client), patch("storage.inventory",side_effect=manifests):
+                    with self.assertRaisesRegex(ValueError,"source listing changed" if after else "source changed or removed"):
+                        main()
+                self.assertFalse((root/"verify-storage.json").exists())
+
+
+class ModifiedTimestampTest(unittest.TestCase):
+    def test_precision_and_timezone(self):
+        listed="2026-11-24T10:46:45.768000+00:00"
+        for stamp in ("2026-11-24T10:46:45+00:00","2026-11-24T18:46:45+08:00",
+                      "2026-11-24T10:46:45.768000+00:00"):
+            self.assertTrue(same_modified(listed,datetime.fromisoformat(stamp)))
+        for stamp in ("2026-11-24T10:46:44+00:00","2026-11-24T10:46:46+00:00",
+                      "2026-11-24T10:46:45.769000+00:00"):
+            self.assertFalse(same_modified(listed,datetime.fromisoformat(stamp)))
+        for invalid in ("not-a-date","2026-11-24T10:46:45"):
+            with self.assertRaises(ValueError):
+                same_modified(invalid,datetime(2026,11,24,10,46,45,tzinfo=timezone.utc))
+        for invalid in (None,datetime(2026,11,24,10,46,45)):
+            with self.assertRaises(ValueError):
+                same_modified(listed,invalid)
