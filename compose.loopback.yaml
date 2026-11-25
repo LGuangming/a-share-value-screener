@@ -1,6 +1,10 @@
-# Optional override ONLY if 1Panel OpenResty runs on the host.
-# The primary compose file still requires verified external network names.
+# Host-network OpenResty: no external proxy network.
 services:
   web:
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${ASHARE_LOOPBACK_PORT:-3000}:3000"
+    networks:
+      web_loopback:
+networks:
+  web_loopback:
+    driver: bridge

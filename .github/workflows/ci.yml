@@ -20,9 +20,13 @@ jobs:
         run: python -m unittest discover -s backend/tests -v
   python-local-integration:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['postgres:17', 'postgres:18.7-alpine']
     services:
       postgres:
-        image: postgres:17
+        image: ${{ matrix.postgres }}
         env:
           POSTGRES_USER: fixture_admin
           POSTGRES_PASSWORD: fixture_only
@@ -48,9 +52,13 @@ jobs:
         run: python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
   next-build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['postgres:17', 'postgres:18.7-alpine']
     services:
       postgres:
-        image: postgres:17
+        image: ${{ matrix.postgres }}
         env:
           POSTGRES_USER: fixture_admin
           POSTGRES_PASSWORD: fixture_only

@@ -13,7 +13,7 @@ from value_screener.archive_paths import RAW_PREFIX
 
 url=os.environ["DATABASE_URL"]
 parsed=urlsplit(url)
-assert (parsed.hostname,parsed.path,parsed.username)==("postgres","/ashare_test","fixture_writer")
+assert (parsed.hostname,parsed.path,parsed.username)==("postgres","/ashare_test","screener_writer")
 assert os.environ["ARCHIVE_STORAGE_DRIVER"]=="local"
 assert os.environ["ARCHIVE_LOCAL_ROOT"]=="/data/archive"
 assert os.getuid()==10002 and os.getgid()==10010

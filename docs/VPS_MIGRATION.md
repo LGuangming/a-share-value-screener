@@ -203,3 +203,52 @@ and database, and preserve SQL/archive state across web recreation. Test
 network and volumes are removed after each run. No actual providers or
 production credentials are used. Real image size and resource use are
 reported/verified by CI and later VPS load tests; no performance promise.
+
+## Phase 11B — Host + Loopback and isolated VPS test deployment
+
+This section supersedes the earlier external-proxy-network instructions.
+The base compose has no proxy-network dependency. Select exactly one overlay:
+- `compose.loopback.yaml`: 127.0.0.1:3000 (default), separate project bridge
+  for published-port connectivity, plus the external database network.
+- `compose.bridge.yaml`: optional external PROXY_NETWORK, no published port.
+  Never combine the two.
+
+For the approved 1Panel Host-network OpenResty test use base + loopback +
+`compose.vps-test.yaml`, Docker Compose >= 2.24.4 (supports !override).
+Create dedicated /opt/ashare/test/{app,config,archive,cache/nextjs,tmp/duckdb}
+with archive owner 10002:10010 mode 2750, cache owner 10001:10010 mode 0750,
+tmp owner 10002:10010 mode 0750, root-only config (0600 files).
+Keep credentials out of git. Copy test.env.example to config/.env,
+web.test.env.example to config/web.env and worker.test.env.example to
+config/worker.env. Use only ashare_test on postgres:5432 and dedicated
+screener_reader/screener_writer. Percent-encode URI password characters.
+No cloud or provider secrets, no production mount paths. Worker test egress
+is internal; test maintenance apply is disabled. Guards run before normal
+entrypoints, reject other URLs and verify database identity. This is an
+operator guard, not a sandbox against a root administrator overriding
+entrypoints, mounts or networks. Do not run production tasks.
+
+After separate deployment approval, from /opt/ashare/test/app:
+
+    docker compose --env-file ../config/.env -f compose.yaml -f compose.loopback.yaml -f compose.vps-test.yaml --profile worker config --quiet
+    docker compose --env-file ../config/.env -f compose.yaml -f compose.loopback.yaml -f compose.vps-test.yaml up -d --wait web
+
+Inspect the port binding (127.0.0.1 only) and test actual HTTPS via OpenResty.
+The image /login health check is liveness only. Run deploy/check-readiness.cjs
+with ASHARE_READINESS_URL (HTTPS), ASHARE_READINESS_PASSWORD (read privately
+from the terminal), ASHARE_READINESS_STOCK, ASHARE_READINESS_QUERY and
+ASHARE_READINESS_YEAR for known test data. It verifies auth, Secure Cookie,
+SQL search, bars/factors and authenticated snapshot freshness. Empty test
+DB/archive cannot pass full readiness. CI alone may allow a stale synthetic
+snapshot on 127.0.0.1 using ASHARE_TEST_ALLOW_STALE=1.
+CI matrices retain PostgreSQL 17 and add postgres:18.7-alpine for Node,
+Python and Docker. CI uses disposable networks, fixture data and local
+images only. It exercises the same VPS test overlay, including guard
+rejection of production DB URLs, then container recreation. Actual 1Panel
+TLS forwarding, public port reachability, resource pressure and production
+parity still require later approval and verification.
+
+Rollback: stop only this test Compose project (no -v, no network or data
+deletion), retain isolated test directories and revert to the previous
+reviewed image digest if applicable. Never operate on ashare-postgres or
+the existing production Vercel/Neon environment.

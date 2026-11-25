@@ -1,7 +1,7 @@
 # CI-only overlay; never use with real data, credentials or network names.
 services:
   postgres:
-    image: postgres:17
+    image: ${TEST_POSTGRES_IMAGE:-postgres:17}
     environment:
       POSTGRES_USER: fixture_admin
       POSTGRES_PASSWORD: fixture_only
@@ -18,8 +18,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:3198:3000"
   worker:
     depends_on:
       postgres:

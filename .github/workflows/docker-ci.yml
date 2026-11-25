@@ -21,6 +21,10 @@ jobs:
   docker-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['postgres:17', 'postgres:18.7-alpine']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,4 +39,6 @@ jobs:
       - name: Check image size and runtime metadata
         run: docker image inspect ashare-web:ci ashare-worker:ci --format '{{.RepoTags}} size={{.Size}} user={{.Config.User}}'
       - name: Isolated Compose smoke and recreation
+        env:
+          TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
         run: bash tests/docker-smoke.sh

@@ -41,9 +41,6 @@ services:
     cpus: 1.5
     networks:
       database:
-      proxy:
-        aliases:
-          - ashare-web
   worker:
     <<: *runtime
     image: ${WORKER_IMAGE:?set WORKER_IMAGE to a reviewed image tag or digest}
@@ -77,8 +74,5 @@ networks:
   database:
     external: true
     name: ${DATABASE_NETWORK:?set actual 1Panel database network}
-  proxy:
-    external: true
-    name: ${PROXY_NETWORK:?set actual OpenResty network}
   worker_egress:
     driver: bridge
