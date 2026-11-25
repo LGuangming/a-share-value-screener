@@ -308,7 +308,7 @@ jobs:
   minimal-worker-evaluation:
     needs: resolve-base-images
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -375,6 +375,7 @@ jobs:
         with:
           node-version: '26'
       - name: Build same pinned Web image for candidate Compose
+        id: candidate_web
         env:
           NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
           WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
@@ -423,6 +424,98 @@ jobs:
           format: table
           exit-code: '1'
           cache: 'false'
+      - name: Independent upstream CPython and embedded Expat security gate
+        if: always() && steps.minimal.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p eval-reports
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,src=$PWD/tests/audit-minimal-components.py,dst=/audit-minimal-components.py,readonly" --entrypoint /usr/local/bin/python3 ashare-worker:minimal-eval /audit-minimal-components.py | tee eval-reports/upstream-components-review.json
+      - name: Trivy 0.76.2 minimal SBOM
+        if: always() && steps.minimal.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ashare-worker:minimal-eval
+          format: cyclonedx
+          output: eval-reports/minimal-trivy0762.cdx.json
+          cache: 'false'
+      - name: Trivy 0.76.2 minimal secret gate
+        if: always() && steps.minimal.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ashare-worker:minimal-eval
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: json
+          output: eval-reports/minimal-trivy0762-secret.json
+          exit-code: '1'
+          cache: 'false'
+      - name: Trivy 0.76.2 minimal HIGH and CRITICAL gate
+        if: always() && steps.minimal.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ashare-worker:minimal-eval
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: json
+          output: eval-reports/minimal-trivy0762-vuln.json
+          exit-code: '1'
+          cache: 'false'
+      - name: Trivy 0.76.2 web SBOM
+        if: always() && steps.candidate_web.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ashare-web:ci
+          format: cyclonedx
+          output: eval-reports/web-trivy0762.cdx.json
+          cache: 'false'
+      - name: Trivy 0.76.2 web secret gate
+        if: always() && steps.candidate_web.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ashare-web:ci
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: json
+          output: eval-reports/web-trivy0762-secret.json
+          exit-code: '1'
+          cache: 'false'
+      - name: Trivy 0.76.2 web HIGH and CRITICAL gate
+        if: always() && steps.candidate_web.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: 'v0.76.2'
+          scan-type: image
+          image-ref: ashare-web:ci
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: json
+          output: eval-reports/web-trivy0762-vuln.json
+          exit-code: '1'
+          cache: 'false'
+      - name: Report comparison scan results
+        if: always() && steps.minimal.outcome == 'success'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, collections
+          for p in sorted(pathlib.Path("eval-reports").glob("*-trivy0762-vuln.json")):
+              data = json.loads(p.read_text())
+              counts = collections.Counter(v["Severity"] for r in data.get("Results", []) for v in r.get("Vulnerabilities", []))
+              print(p.name, dict(counts))
+          PY
       - name: Preserve evaluation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

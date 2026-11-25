@@ -109,8 +109,16 @@ base_packages = {"libc6", "libgcc-s1", "libstdc++6", "libzstd1"}
 metadata = root / "var/lib/dpkg/status.d"
 metadata.mkdir(parents=True)
 records = []
+lock = json.loads(pathlib.Path("/minimal-debian-amd64.lock.json").read_text())
+assert lock["architecture"] == "amd64"
+locked = {entry["package"]: entry for entry in lock["packages"]}
+assert len(locked) == len(lock["packages"]) == 12
+if set(locked) != packages - base_packages:
+    raise RuntimeError(f"Native package closure changed: extra={sorted(packages - base_packages - set(locked))}, missing={sorted(set(locked) - packages)}")
 for package in sorted(packages - base_packages):
     version = run("dpkg-query", "-W", "-f=${Version}", package)
+    if version != locked[package]["version"]:
+        raise RuntimeError(f"Locked builder version changed: {package}: {version}")
     # Record the official signed-index hash and verify the downloaded bytes.
     index = run("apt-cache", "show", f"{package}:amd64={version}")
     hashes = set(re.findall(r"^SHA256: ([a-f0-9]{64})$", index, re.M))
@@ -125,8 +133,8 @@ for package in sorted(packages - base_packages):
     deb = files[0]
     with deb.open("rb") as fd:
         actual_hash = hashlib.file_digest(fd, "sha256").hexdigest()
-    if actual_hash != next(iter(hashes)):
-        raise RuntimeError(f"Debian archive hash mismatch: {package}")
+    if actual_hash != next(iter(hashes)) or actual_hash != locked[package]["sha256"]:
+        raise RuntimeError(f"Signed-index or committed Debian archive hash mismatch: {package}")
     assert run("dpkg-deb", "-f", str(deb), "Package") == package
     assert run("dpkg-deb", "-f", str(deb), "Version") == version
     assert run("dpkg-deb", "-f", str(deb), "Architecture") == "amd64"
@@ -138,7 +146,17 @@ for package in sorted(packages - base_packages):
     records.append({"package": package, "version": version, "sha256": actual_hash})
 # Preserve upstream interpreter provenance explicitly; don't pretend this is
 # a Debian Python package. Scanner coverage of this component needs separate review.
+# Record the bytes of the actual upstream interpreter and bundled XML extension.
+# No claim that the upstream interpreter is a Debian package.
+import pyexpat
+component_paths = [python_root / "bin/python3.13", *sorted((python_root / "lib").glob("libpython3.13.so*")), python_root / "lib/python3.13/lib-dynload" / pathlib.Path(pyexpat.__file__).name]
+component_files = {}
+for component in component_paths:
+    if component.is_file() and not component.is_symlink():
+        with component.open("rb") as fd:
+            component_files["/" + str(component.relative_to(root))] = hashlib.file_digest(fd, "sha256").hexdigest()
+assert any("pyexpat" in name for name in component_files)
 manifest = root / "opt/cp313-provenance.json"
 manifest.parent.mkdir(exist_ok=True)
-manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references}, indent=2)+"\n")
+manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION}, indent=2)+"\n")
 print(manifest.read_text())

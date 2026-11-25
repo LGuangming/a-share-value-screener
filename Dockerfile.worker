@@ -41,6 +41,7 @@ FROM deps AS minimal-assembly
 ARG PYTHON_BASE
 ENV PYTHON_BASE=$PYTHON_BASE
 COPY deploy/prepare-cp313-minimal.py /prepare-cp313-minimal.py
+COPY deploy/minimal-debian-amd64.lock.json /minimal-debian-amd64.lock.json
 COPY backend/value_screener /audit/value_screener
 RUN apt-get -o APT::Update::Error-Mode=any update && python /prepare-cp313-minimal.py
 
