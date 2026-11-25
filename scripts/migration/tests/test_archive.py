@@ -155,7 +155,12 @@ class ArchiveTest(unittest.TestCase):
         for case in ("coverage","bad_base64","original_hash","duplicate","array","missing_backup",
                      "backup_hash","retirement_digest","status","count","missing_done"):
             with self.subTest(case=case):
-                self.setUp("archive-fixture-"+case.replace("_","-"))
+                # Moto scopes all subtests to this mock account. Retire only
+                # the previous synthetic bucket before creating the next fixture.
+                for item in self.s3.list_objects_v2(Bucket=self.bucket).get("Contents",[]):
+                    self.s3.delete_object(Bucket=self.bucket,Key=item["Key"])
+                self.s3.delete_bucket(Bucket=self.bucket)
+                self.setUp()
                 root=self.legacy_fixture(case)
                 with self.assertRaises(ValueError):
                     inspect(root)
