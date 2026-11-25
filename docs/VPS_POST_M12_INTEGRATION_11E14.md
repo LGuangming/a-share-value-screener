@@ -89,8 +89,10 @@ gate pending rather than use the migrated DB. CI remains disposable.
 ## Next gates
 
 1. Verify this exact PR SHA: PG17/PG18.7 restricted ACL regressions and
-   default Minimal Compose smoke. OpenSSL HIGH CVE-2026-107494 and
-   CVE-2026-124709 remain blocked; never bypass release candidate acceptance.
+   default Minimal Compose smoke. 11E-14A supersedes the OpenSSL remediation
+   block only for the two approved exact Debian package findings until
+   2026-12-26 00:00 UTC; see [scoped risk acceptance](VPS_CANDIDATE_RISK_ACCEPTANCE_11E14A.md).
+   All other HIGH/CRITICAL, secrets, runtime checks and candidate acceptance remain mandatory.
 2. Obtain current read-only VPS host inventory (no SQL): actual resources,
    existing container/network, mount and directory metadata, no public DB
    or Web binding, free ports and file ownership. Old 30 GiB migration

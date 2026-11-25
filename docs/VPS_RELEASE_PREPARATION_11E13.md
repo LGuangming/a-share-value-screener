@@ -1,5 +1,9 @@
 # Phase 11E-13 — VPS release and deployment preparation (blocked)
 
+**11E-14A update:** scoped risk acceptance supersedes the historical two-CVE
+OpenSSL block only as defined in [11E-14A](VPS_CANDIDATE_RISK_ACCEPTANCE_11E14A.md).
+No other release gate or authorization changes.
+
 **Historical preparation baseline:** M12 is now complete. For current production
 integration and capacity review use [11E-14 post-M12 integration](VPS_POST_M12_INTEGRATION_11E14.md).
 The isolated test instructions below remain for fixtures only; never use the

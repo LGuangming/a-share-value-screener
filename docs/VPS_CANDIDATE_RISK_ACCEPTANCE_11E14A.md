@@ -1,0 +1,53 @@
+# 11E-14A — scoped OpenSSL risk acceptance and candidate CI
+
+Decision approved by project operator on 2026-11-25: end the dedicated
+11E-11 remediation effort, not the security scanning. Temporary acceptance
+through 2026-12-25 UTC (exclusive cutoff 2026-12-26 00:00 UTC). The duration
+is an implementation choice for review, not evidence that the vulnerability
+is fixed. No renewal by default.
+
+| Scope | Exact match |
+|---|---|
+| Candidate Web | ashare-web:ci, candidate matrix only |
+| Candidate Worker | ashare-worker:minimal-eval, default Minimal only |
+| OS | Debian 13, os-pkgs / debian |
+| Installed package | libssl3t64 3.5.9-1~deb13u1 |
+| Findings | CVE-2026-107494 and CVE-2026-124709, HIGH only |
+| Fixed version | Must be absent/empty |
+| Expiry | 2026-12-26T00:00:00Z |
+
+Evidence: prior candidate run 45599074111, job 139153010857, both
+Trivy generations; Debian libssl3t64 package metadata and OpenSSL runtime
+identity. These are QUIC denial-of-service findings in the previous scan.
+Risk is not eliminated by the host reverse proxy, loopback, internal
+network or non-root execution. Retain existing network, credential and
+resource controls; do not enable QUIC/HTTP3 as part of this phase.
+
+No global .trivyignore, no ignoring unfixed vulnerabilities, no scanner
+failure tolerance. The candidate vulnerability scan returns raw JSON with
+exit code zero for findings only; scanner execution errors remain failures.
+A required subsequent Python gate binds raw evidence to exact local image
+ID and candidate tag, checks the Debian OS result, and blocks every other
+HIGH/CRITICAL finding, including the same CVE in another component,
+different version, CRITICAL severity, or newly available fix. Missing or
+invalid reports and missing decision receipts fail closed. Original raw
+JSON, decision JSON, SBOMs, secret scans and runtime identity evidence are
+retained as artifacts. Secret gates remain unmodified. Distroless and Slim
+comparison jobs remain strict, non-release candidates and cannot satisfy
+the independent release candidate gate. Tests cover expiry, exact match,
+scope, fixed version, critical escalation and malformed evidence.
+
+CI trigger: add feature/vps-image-security to the push branch filter and
+cover deploy/docs paths as well as existing Docker/code/test paths. The
+previous SHA 5202373 had two successful Tests and Build runs but no Docker
+run; exact reason PR event did not generate Docker CI is not established.
+Both PostgreSQL 17 and 18.7 candidate jobs and the independent acceptance
+gate must pass on this revision. Additional container fixture assertions
+verify the 56 M12 table permissions with the actual non-owner worker.
+Comparison job failures remain visible; do not misrepresent whole workflow
+as green if they fail. No live VPS tests in this phase.
+
+This acceptance is for candidate CI only. PR #27 remains unchanged;
+future publication must independently enforce the same or stricter rule,
+re-evaluate expiry and scan the exact reviewed immutable pair. No merge,
+registry push, deployment, data changes or release authorization.

@@ -22,8 +22,14 @@ store=Store(url)
 store.ensure_price_history_tables()
 with store.connect() as conn:
     assert not conn.execute("SELECT has_schema_privilege(current_user,'public','CREATE') AS allowed").fetchone()["allowed"]
-    assert conn.execute("SELECT has_table_privilege(current_user,'public.screen_results','DELETE') AS allowed").fetchone()["allowed"]
-    assert not conn.execute("SELECT has_table_privilege(current_user,'public.stocks','DELETE') AS allowed").fetchone()["allowed"]
+    assert conn.execute("SELECT current_user AS role").fetchone()["role"]=="screener_writer"
+    assert not conn.execute("SELECT has_database_privilege(current_user,current_database(),'TEMP') AS allowed").fetchone()["allowed"]
+    for table in ("stocks","daily_prices","financial_reports","financial_fetch_log","job_runs","price_history","price_history_fetches","screen_results"):
+        for privilege in ("SELECT","INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER"):
+            expected = privilege in ("SELECT","INSERT","UPDATE") or (privilege=="DELETE" and table in ("daily_prices","price_history","price_history_fetches","screen_results"))
+            actual = conn.execute("SELECT has_table_privilege(current_user,%s,%s) AS allowed",("public."+table,privilege)).fetchone()["allowed"]
+            assert actual == expected,(table,privilege)
+print("PASS: 56 M12-like table ACL assertions, writer identity, no CREATE/TEMP")
 try:
     store.initialize("SELECT 1")
 except RuntimeError as exc:

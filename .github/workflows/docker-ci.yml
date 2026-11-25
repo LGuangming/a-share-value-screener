@@ -2,7 +2,7 @@ name: Docker Images and Compose
 on:
   pull_request:
   push:
-    branches: [feature/vps-docker-compose]
+    branches: [feature/vps-docker-compose, feature/vps-image-security]
     paths:
       - 'Dockerfile.*'
       - 'compose*.yaml'
@@ -13,6 +13,8 @@ on:
       - 'lib/**'
       - 'backend/**'
       - 'tests/**'
+      - 'deploy/**'
+      - 'docs/**'
       - 'next.config.ts'
       - '.github/workflows/docker-ci.yml'
 permissions:
@@ -333,6 +335,8 @@ jobs:
           test "$actual" = "$expected"
           echo "ref=$MINIMAL_RUNTIME_BASE" >> "$GITHUB_OUTPUT"
           cp deploy/minimal-base.lock "$RUNNER_TEMP/minimal-base.lock"
+      - name: Test scoped candidate vulnerability gate (no blanket CVE ignore)
+        run: python3 -m unittest discover -s tests -p test_candidate_vulnerability_gate.py -v
       - name: Test SQLite source ZIP extraction and permission restoration
         run: python3 -m unittest discover -s tests -p test_sqlite_source_zip.py -v
       - name: Build default Minimal Worker release candidate (no push)
@@ -435,18 +439,24 @@ jobs:
           format: table
           exit-code: '1'
           cache: 'false'
-      - name: Minimal comparison HIGH and CRITICAL gate
+      - name: Trivy 0.70.0 minimal raw HIGH and CRITICAL scan
+        id: raw_minimal_070
         if: always() && steps.minimal.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
+          version: 'v0.70.0'
           scan-type: image
           image-ref: ashare-worker:minimal-eval
           scanners: vuln
           severity: 'HIGH,CRITICAL'
           ignore-unfixed: 'false'
-          format: table
-          exit-code: '1'
+          format: json
+          output: eval-reports/minimal-trivy0700-vuln.json
+          exit-code: '0'
           cache: 'false'
+      - name: Trivy 0.70.0 minimal scoped vulnerability gate
+        if: always() && steps.raw_minimal_070.outcome == 'success'
+        run: python3 tests/candidate_vulnerability_gate.py --candidate minimal --image-id "$(docker image inspect ashare-worker:minimal-eval --format '{{.Id}}')" --report eval-reports/minimal-trivy0700-vuln.json --decision eval-reports/minimal-trivy0700-decision.json
       - name: Independent upstream CPython and embedded Expat security gate
         if: always() && steps.minimal.outcome == 'success'
         shell: bash
@@ -477,7 +487,8 @@ jobs:
           output: eval-reports/minimal-trivy0762-secret.json
           exit-code: '1'
           cache: 'false'
-      - name: Trivy 0.76.2 minimal HIGH and CRITICAL gate
+      - name: Trivy 0.76.2 minimal raw HIGH and CRITICAL scan
+        id: raw_minimal_076
         if: always() && steps.minimal.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
@@ -489,8 +500,11 @@ jobs:
           ignore-unfixed: 'false'
           format: json
           output: eval-reports/minimal-trivy0762-vuln.json
-          exit-code: '1'
+          exit-code: '0'
           cache: 'false'
+      - name: Trivy 0.76.2 minimal scoped vulnerability gate
+        if: always() && steps.raw_minimal_076.outcome == 'success'
+        run: python3 tests/candidate_vulnerability_gate.py --candidate minimal --image-id "$(docker image inspect ashare-worker:minimal-eval --format '{{.Id}}')" --report eval-reports/minimal-trivy0762-vuln.json --decision eval-reports/minimal-trivy0762-decision.json
       - name: Trivy 0.76.2 web SBOM
         if: always() && steps.candidate_web.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
@@ -514,7 +528,8 @@ jobs:
           output: eval-reports/web-trivy0762-secret.json
           exit-code: '1'
           cache: 'false'
-      - name: Trivy 0.76.2 web HIGH and CRITICAL gate
+      - name: Trivy 0.76.2 web raw HIGH and CRITICAL scan
+        id: raw_web_076
         if: always() && steps.candidate_web.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
@@ -526,8 +541,22 @@ jobs:
           ignore-unfixed: 'false'
           format: json
           output: eval-reports/web-trivy0762-vuln.json
-          exit-code: '1'
+          exit-code: '0'
           cache: 'false'
+      - name: Trivy 0.76.2 web scoped vulnerability gate
+        if: always() && steps.raw_web_076.outcome == 'success'
+        run: python3 tests/candidate_vulnerability_gate.py --candidate web --image-id "$(docker image inspect ashare-web:ci --format '{{.Id}}')" --report eval-reports/web-trivy0762-vuln.json --decision eval-reports/web-trivy0762-decision.json
+      - name: Require all candidate vulnerability decisions
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          for name in ("minimal-trivy0700","minimal-trivy0762","web-trivy0762"):
+              path = pathlib.Path("eval-reports") / (name + "-decision.json")
+              if not path.is_file() or json.loads(path.read_text()).get("passed") is not True:
+                  raise SystemExit("BLOCK: absent or failed candidate decision: " + name)
+          print("PASS: all three scoped vulnerability decisions")
+          PY
       - name: Report comparison scan results
         if: always() && steps.minimal.outcome == 'success'
         shell: bash
@@ -596,7 +625,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require all candidate functional and strict security jobs to pass
+      - name: Require all candidate functional and scoped security jobs to pass
         env:
           BASE_RESULT: ${{ needs.resolve-base-images.result }}
           CANDIDATE_RESULT: ${{ needs.minimal-worker-evaluation.result }}
