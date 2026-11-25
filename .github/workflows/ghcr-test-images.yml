@@ -1,4 +1,4 @@
-name: GHCR reviewed test images (PR 28)
+name: GHCR reviewed integration test images
 on:
   pull_request:
     paths:
@@ -14,8 +14,8 @@ on:
 permissions:
   contents: read
 env:
-  REVIEWED_SHA: cf928feb8463abf240356dbb381a6348fc716902
-  REVIEWED_RUN: '45630877479'
+  REVIEWED_SHA: 1a87f659f6e83d9d92d8f04cba5f3891bc769507
+  REVIEWED_RUN: '45633909294'
 concurrency:
   group: ghcr-pr28-test-${{ github.event_name }}
   cancel-in-progress: false

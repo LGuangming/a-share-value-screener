@@ -10,8 +10,8 @@ permissions:
   contents: read
   actions: read
 env:
-  REVIEWED_SHA: cf928feb8463abf240356dbb381a6348fc716902
-  REVIEWED_RUN: '45630877479'
+  REVIEWED_SHA: 1a87f659f6e83d9d92d8f04cba5f3891bc769507
+  REVIEWED_RUN: '45633909294'
 jobs:
   resolve-base-images:
     runs-on: ubuntu-latest
@@ -38,7 +38,7 @@ jobs:
               ;;
             *) exit 1 ;;
           esac
-      - name: Verify pinned PR28 successful CI and independent acceptance
+      - name: Verify pinned integration successful CI and independent acceptance
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -51,6 +51,7 @@ jobs:
           r=json.loads((root/"reviewed-run.json").read_text())
           j=json.loads((root/"reviewed-jobs.json").read_text())
           assert r["head_sha"]==os.environ["REVIEWED_SHA"] and r["status"]=="completed" and r["conclusion"]=="success" and r["event"]=="push"
+          assert r["head_branch"]=="integration/vps-11e15a"
           expected={"python-tests (3.13)", "python-local-integration (postgres:18.7-alpine)", "next-build (postgres:18.7-alpine)", "docker-pr28 / resolve-base-images", "docker-pr28 / Release candidate Web + Minimal (postgres:18.7-alpine)", "docker-pr28 / Release candidate acceptance (no publication)"}
           assert j["total_count"]==6 and {x["name"] for x in j["jobs"]}==expected
           # GitHub may report a stale per-job status even after the run has

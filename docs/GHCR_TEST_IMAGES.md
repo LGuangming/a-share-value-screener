@@ -1,7 +1,7 @@
-# 11E-15 — reviewed GHCR test pair (PR #28)
+# 11E-15C — reviewed GHCR test pair (integrated application)
 
-Source lock: `cf928feb8463abf240356dbb381a6348fc716902` (PR #28), successful CI run
-[45630877479](https://github.com/LGuangming/a-share-value-screener/actions/runs/45630877479),
+Source lock: `1a87f659f6e83d9d92d8f04cba5f3891bc769507` (integration/vps-11e15a), successful CI run
+[45633909294](https://github.com/LGuangming/a-share-value-screener/actions/runs/45633909294),
 six core jobs including independent release candidate acceptance. This PR
 does not merge source PRs, publish images or deploy. Review push/PR events
 have only read permissions. The workflow explicitly verifies the historical
@@ -94,3 +94,22 @@ the independent gate's exact step completed/success. The stale per-job
 status is logged, not used to override a missing/failed conclusion or
 completion timestamp. Initial review correctly stopped at the inconsistent
 historical status and skipped image builds; revised review is required.
+
+## 11E-15C — integrated source lock (operator approved 2026-11-25)
+
+Supersede original PR28 source `cf928feb8463abf240356dbb381a6348fc716902` / run 45630877479
+with integrated source `1a87f659f6e83d9d92d8f04cba5f3891bc769507` / run 45633909294.
+The integration combines the complete PR20/21/22/23/26/28 chain with main
+477ab29676740f42f429033b1d293c1ad7a2e654, preserving all ten obsolete
+migration-file deletions and the main-only VPS read-only operations workflow.
+All six integration jobs and independent acceptance succeeded. The original
+PR28-based 11E-15 read-only run 45633027571 is historical evidence only.
+Both wrapper and reusable workflow pin the new SHA/run; the latter also
+checks the integration branch identity. No security, artifact handoff,
+private package, identity, digest, or publication permission changes.
+The existing test-pr28 namespace and PUBLISH-PR28-TEST confirmation are
+retained to avoid changing the previously documented private-package contract;
+the tag, OCI revision and pair receipt always identify the exact integrated SHA.
+Require a fresh successful read-only pair review on this PR27 commit before
+final main integration preparation. No publication, deployment, production
+connection, main update, or change to the original integration branch.
