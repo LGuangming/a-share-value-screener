@@ -19,6 +19,18 @@ assert os.environ["ARCHIVE_LOCAL_ROOT"]=="/data/archive"
 assert os.getuid()==10002 and os.getgid()==10010
 assert not os.getenv("SITE_ACCESS_PASSWORD") and not os.getenv("SITE_SESSION_SECRET")
 store=Store(url)
+store.ensure_price_history_tables()
+with store.connect() as conn:
+    assert not conn.execute("SELECT has_schema_privilege(current_user,'public','CREATE') AS allowed").fetchone()["allowed"]
+    assert conn.execute("SELECT has_table_privilege(current_user,'public.screen_results','DELETE') AS allowed").fetchone()["allowed"]
+    assert not conn.execute("SELECT has_table_privilege(current_user,'public.stocks','DELETE') AS allowed").fetchone()["allowed"]
+try:
+    store.initialize("SELECT 1")
+except RuntimeError as exc:
+    assert "init-db disabled" in str(exc)
+else:
+    raise AssertionError("Local schema initialization was not rejected")
+print("PASS: M12-like restricted writer, no runtime DDL or grants")
 store.upsert_stocks([{"ts_code":"000001.SZ","name":"Docker Fixture","industry":"制造业","market":"主板","list_date":"19910403"}])
 store.upsert_quotes([{"ts_code":"000001.SZ","close":11,"total_mv":100,"pb":0.5,"turnover_rate":1}],date(2025,1,3))
 cfg=StorageConfig.from_environment()

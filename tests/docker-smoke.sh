@@ -59,14 +59,7 @@ print("PASS: resolved VPS-test image, guarded interpreter, identity, archive and
 ' "$worker_python"
 "${dc[@]}" up -d --wait postgres
 "${dc[@]}" exec -T postgres psql -U fixture_admin -d ashare_test -v ON_ERROR_STOP=1 < database/schema.sql
-"${dc[@]}" exec -T postgres psql -U fixture_admin -d ashare_test -v ON_ERROR_STOP=1 <<'SQL'
-CREATE ROLE screener_reader LOGIN PASSWORD 'fixture_only';
-CREATE ROLE screener_writer LOGIN PASSWORD 'fixture_only';
-GRANT CONNECT ON DATABASE ashare_test TO screener_reader,screener_writer;
-GRANT USAGE ON SCHEMA public TO screener_reader,screener_writer;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO screener_reader;
-GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO screener_writer;
-SQL
+"${dc[@]}" exec -T postgres psql -U fixture_admin -d ashare_test -v ON_ERROR_STOP=1 < tests/fixtures/m12-acl.sql
 # Reject production DB before starting any business process.
 if "${dc[@]}" run --rm --no-deps -e DATABASE_URL=postgresql://screener_writer:fixture_only@postgres:5432/ashare worker --help; then
   echo "Worker guard unexpectedly accepted production database"; exit 1

@@ -1,5 +1,11 @@
 # VPS migration — phase 05: database reader compatibility
 
+Current deployment integration after completed M12: see
+[11E-14 post-M12 integration](VPS_POST_M12_INTEGRATION_11E14.md). Historical
+migration phases below are retained for design context, not instructions to
+repeat migration. Existing ashare and archive are durable; test guards remain
+fixture-only. No release or deployment authorization.
+
 This phase changes the website reader only. No production migration, schema
 changes, deploy, data archive changes or writer configuration changes.
 

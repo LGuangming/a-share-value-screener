@@ -1,5 +1,11 @@
 # Phase 11E-13 — VPS release and deployment preparation (blocked)
 
+**Historical preparation baseline:** M12 is now complete. For current production
+integration and capacity review use [11E-14 post-M12 integration](VPS_POST_M12_INTEGRATION_11E14.md).
+The isolated test instructions below remain for fixtures only; never use the
+migrated ashare DB or archive for them. The old VPS size is not current evidence.
+No separate data migration preparation is required. Release remains blocked.
+
 Status: preparation only. Technical baseline PR #28 commit
 `0fc7602aeb67a6e1f03b3d67b767fa3efb22cc65`, Actions runs
 45597222204 and 45597222301. Tests and Build 6/6 passed; default Minimal

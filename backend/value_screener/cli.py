@@ -112,8 +112,8 @@ def recalculate_ncav(args):
     if not db:
         raise RuntimeError("DATABASE_URL is required")
     store = Store(db)
-    # Safe additive migration: existing production Neon databases need no
-    # manual SQL step before the first historical backfill runs.
+    # Local mode validates existing tables without DDL or GRANT.
+    # Preserve the legacy additive migration in cloud mode.
     store.ensure_price_history_tables()
     trigger_run_id = getattr(args, "trigger_run_id", None)
     local_trigger = getattr(args, "trigger_local_run_id", None)
@@ -372,8 +372,8 @@ def bootstrap_prices(args):
     listed_codes = {str(row["ts_code"]) for row in stocks if row.get("ts_code")}
     if not listed_codes:
         raise RuntimeError("No currently listed stocks returned")
-    store.upsert_stocks(stocks)
     store.ensure_price_history_tables()
+    store.upsert_stocks(stocks)
     min_rows = max(1000, round(len(listed_codes) * 0.70))
     sessions = client.query(
         "trade_cal",

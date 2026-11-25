@@ -8,6 +8,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from .rules import NETNET_IGNORED_INDUSTRIES
+from .archive_storage import archive_driver
 
 
 class Store:
@@ -24,6 +25,8 @@ class Store:
         return date.fromisoformat(f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}")
 
     def initialize(self, schema_text: str):
+        if archive_driver() == "local":
+            raise RuntimeError("Local database schema is provisioned by the administrator; init-db disabled")
         with self.connect() as conn:
             conn.execute(schema_text)
 
@@ -82,7 +85,15 @@ class Store:
         return len(values)
 
     def ensure_price_history_tables(self):
-        """Migrate the compact historical-close cache without manual SQL setup."""
+        """Validate migrated local tables; retain legacy cloud bootstrap behavior."""
+        if archive_driver() == "local":
+            # M12 restored these tables with a restricted non-owner writer.
+            # Never issue CREATE or GRANT against the migrated schema.
+            with self.connect() as conn:
+                conn.execute("SET TRANSACTION READ ONLY")
+                conn.execute("SELECT ts_code,trade_date,close FROM public.price_history LIMIT 0")
+                conn.execute("SELECT trade_date,rows_saved,fetched_at FROM public.price_history_fetches LIMIT 0")
+            return
         with self.connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS price_history (

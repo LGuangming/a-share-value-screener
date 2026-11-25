@@ -34,6 +34,12 @@ class LocalPipelineIntegration(unittest.TestCase):
         store=Store(url)
         schema=Path(__file__).resolve().parents[2]/"database/schema.sql"
         store.initialize(schema.read_text())
+        fixture_acl = Path(__file__).resolve().parents[2]/"tests/fixtures/m12-acl.sql"
+        with store.connect() as conn:
+            conn.execute(fixture_acl.read_text())
+        # Use the actual restricted writer for all subsequent business SQL.
+        url = "postgresql://screener_writer:fixture_only@127.0.0.1:5432/ashare_pipeline_test"
+        store = Store(url)
         today=datetime.now(CN_TZ).date()
         day=today-timedelta(days=3)
         self.assertGreaterEqual(day.year,2026)
@@ -61,6 +67,18 @@ class LocalPipelineIntegration(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{"DATABASE_URL":url,"ARCHIVE_STORAGE_DRIVER":"local","ARCHIVE_LOCAL_ROOT":tmp,
                      "PIPELINE_RUN_ID":str(uuid4()),"ARCHIVE_LOCAL_ALLOW_MAINTENANCE_APPLY":"false"}):
             run_id=os.environ["PIPELINE_RUN_ID"]
+            with self.assertRaisesRegex(RuntimeError,"init-db disabled"):
+                store.initialize(schema.read_text())
+            store.ensure_price_history_tables()
+            with store.connect() as conn:
+                self.assertEqual(conn.execute("SELECT current_user AS role").fetchone()["role"],"screener_writer")
+                self.assertFalse(conn.execute("SELECT has_schema_privilege(current_user,'public','CREATE') AS allowed").fetchone()["allowed"])
+                for table in ("stocks","daily_prices","financial_reports","financial_fetch_log","job_runs","price_history","price_history_fetches","screen_results"):
+                    for privilege in ("SELECT","INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER"):
+                        expected = privilege in ("SELECT","INSERT","UPDATE") or (privilege=="DELETE" and table in ("daily_prices","price_history","price_history_fetches","screen_results"))
+                        actual=conn.execute("SELECT has_table_privilege(current_user,%s,%s) AS allowed",("public."+table,privilege)).fetchone()["allowed"]
+                        self.assertEqual(actual,expected,(table,privilege))
+                self.assertFalse(conn.execute("SELECT has_database_privilege(current_user,current_database(),'TEMP') AS allowed").fetchone()["allowed"])
             with patch.object(cli.TushareClient,"from_environment",return_value=provider):
                 self.assertTrue(cli.fetch_market(SimpleNamespace(date=day.isoformat())))
             self.assertEqual(store.quote_coverage(day)["quoted_stocks"],1000)
