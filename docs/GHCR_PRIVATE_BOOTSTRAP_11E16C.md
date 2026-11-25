@@ -26,7 +26,8 @@ Never overwrite, delete, change visibility or grant permission automatically.
 Build isolated local scratch marker, no repository files in build context,
 no application/config/secret, network none, linux/amd64. Verify one layer
 and actual Docker-save payload contains only exact BOOTSTRAP_ONLY marker.
-No runtime command or environment. Push only unique bootstrap-run-ID-a1,
+No runtime command or environment except the exact standard Docker PATH.
+Push only unique bootstrap-run-ID-a1,
 never latest or a production release tag. Immediately verify matching
 private package and expected repository association, remote manifest
 digest, authenticated pull config ID, anonymous denial and version read.

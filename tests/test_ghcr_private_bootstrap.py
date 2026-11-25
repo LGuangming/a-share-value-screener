@@ -124,7 +124,9 @@ class BootstrapTests(unittest.TestCase):
         cfg = {"Id": ID, "Os": "linux", "Architecture": "amd64", "Config": {"Labels": b.LABELS},
                "RootFS": {"Layers": [DIG]}}
         self.assertEqual(b.validate_config(cfg), ID)
-        for key in ("Env", "Entrypoint", "Cmd", "Volumes", "ExposedPorts"):
+        cfg["Config"]["Env"] = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
+        self.assertEqual(b.validate_config(cfg), ID)
+        for key in ("Env", "Entrypoint", "Cmd", "Volumes", "ExposedPorts", "Healthcheck", "OnBuild"):
             altered = copy.deepcopy(cfg)
             altered["Config"][key] = ["bad"]
             with self.assertRaises(b.Blocked):

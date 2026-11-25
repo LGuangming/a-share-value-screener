@@ -52,7 +52,11 @@ def validate_config(cfg):
     require(cfg.get("Os") == "linux" and cfg.get("Architecture") == "amd64", "unexpected platform")
     conf = cfg.get("Config", {})
     require(conf.get("Labels") == LABELS, "unexpected bootstrap labels")
-    require(not any(conf.get(k) for k in ("Env", "Entrypoint", "Cmd", "OnBuild", "ExposedPorts", "Volumes", "Healthcheck")), "unexpected runtime configuration")
+    # Docker adds its standard PATH even to FROM scratch. No other environment is allowed.
+    default_path = "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    require(conf.get("Env") in (None, [], [default_path]), "unexpected image environment")
+    for key in ("Entrypoint", "Cmd", "OnBuild", "ExposedPorts", "Volumes", "Healthcheck"):
+        require(not conf.get(key), "unexpected image config field: " + key)
     layers = cfg.get("RootFS", {}).get("Layers")
     require(isinstance(layers, list) and len(layers) == 1 and DIGEST.fullmatch(layers[0]), "expected exactly one scratch layer")
     image_id = cfg.get("Id", "")
