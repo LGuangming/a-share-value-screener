@@ -151,3 +151,7 @@ including WAL and backup headroom. Source changes after the snapshot or S3
 download invalidate the migration: keep writers frozen until cutover or
 abort, reopen old writers and take a new full backup later. No promise about
 Neon billing or actual transfer duration.
+
+### Reviewed existing network topology
+
+The direct target guard accepts only the existing internal bridge `ashare-db` alone or together with the reviewed non-internal bridge `1panel-network`, with the latter attached only to the approved PostgreSQL container. Network IDs must match the container attachments. Unknown networks, non-internal `ashare-db`, or additional management-network peers block the migration. Keep both existing VPS networks; no network changes are required. The host port remains loopback-only. The management bridge means the entire container is not network-isolated. Recheck network scope before actual restore.

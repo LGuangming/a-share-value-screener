@@ -57,11 +57,24 @@ def host_guard(cid):
         or image["Os"]!="linux" or image["Architecture"]!="amd64" or not digests.intersection(image.get("RepoDigests") or [])
         or info["HostConfig"]["Privileged"] or info["HostConfig"]["PortBindings"]!={"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"5432"}]}):
         raise DirectError("CONTAINER_IMAGE_OR_BINDING")
-    if set(info["NetworkSettings"]["Networks"])!={"ashare-db"}:
-        raise DirectError("NETWORK_MEMBERSHIP")
-    if not json.loads(docker("network","inspect","ashare-db"))[0]["Internal"]:
-        raise DirectError("NETWORK_NOT_INTERNAL")
+    network_guard(info)
     return info
+
+def network_guard(info):
+    networks=info["NetworkSettings"]["Networks"]
+    if set(networks) not in ({"ashare-db"},{"ashare-db","1panel-network"}):
+        raise DirectError("NETWORK_MEMBERSHIP")
+    for name in sorted(networks):
+        net=json.loads(docker("network","inspect",name))[0]
+        if net["Name"]!=name or net["Id"]!=networks[name]["NetworkID"] or net["Driver"]!="bridge":
+            raise DirectError("NETWORK_IDENTITY")
+        if name=="ashare-db" and net["Internal"] is not True:
+            raise DirectError("NETWORK_NOT_INTERNAL")
+        if name=="1panel-network":
+            # Only the reviewed management network and its observed sole
+            # attachment are allowed. Do not claim whole-container isolation.
+            if net["Internal"] is not False or set(net.get("Containers") or {})!={info["Id"]}:
+                raise DirectError("MANAGEMENT_NETWORK_SCOPE")
 
 def env_guard():
     if os.getenv("ASHARE_MIGRATION_MODE","isolated")!="isolated":

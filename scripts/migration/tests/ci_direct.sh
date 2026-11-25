@@ -75,6 +75,19 @@ echo 'CREATE TABLE public.must_be_empty(id int);' | admin ashare
 expect_block TARGET_NOT_EMPTY direct check --approved-target-read
 echo 'DROP TABLE public.must_be_empty;' | admin ashare
 direct check --approved-target-read
+echo 'PASS: original single internal network accepted'
+# Disposable runner only: exercise the exact reviewed VPS network topology.
+docker network create --driver bridge 1panel-network >/dev/null
+docker network connect 1panel-network "$cid"
+direct check --approved-target-read
+echo 'PASS: reviewed 1panel-network plus internal ashare-db accepted'
+docker network create --driver bridge unexpected-network >/dev/null
+docker network connect unexpected-network "$cid"
+expect_block NETWORK_MEMBERSHIP direct check --approved-target-read
+docker network disconnect unexpected-network "$cid"
+docker network rm unexpected-network >/dev/null
+echo 'PASS: unknown third network rejected; original two networks retained'
+direct check --approved-target-read
 run ashare_source postgres scripts/migration/postgres.py backup --root "$root"
 expect_block APPROVAL_REQUIRED direct restore --approved-target-read
 direct restore --approved-target-read --approved-final-restore
@@ -95,4 +108,6 @@ expect_block PREVIOUS_RESTORE direct restore --approved-target-read --approved-f
 [[ "$(fingerprint)" == "$before" ]]
 [[ "$(echo "SELECT count(*) FROM pg_database WHERE datname='ashare_migration';" | admin postgres)" == 0 ]]
 [[ "$(echo "SELECT count(*) FROM pg_roles WHERE rolname LIKE 'ashare_mig_%';" | admin postgres)" == 0 ]]
+[[ "$(docker inspect --format '{{len .NetworkSettings.Networks}}' "$cid")" == 2 ]]
+echo 'PASS: full direct restore and verification on reviewed dual-network fixture'
 echo 'PASS: standard direct restore, full row hashes, existing ACLs, no repeat restore or new database/roles; ashare_test unchanged'
