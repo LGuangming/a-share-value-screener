@@ -237,3 +237,10 @@ on the VPS by CI. Do not use production credentials in these fixtures.
   regression remain D01-B-5 / joint acceptance requirements.
 
 B4 runner diagnostic: /opt on hosted CI was mode 0777; the strict preparation guard correctly rejected it. The fixture normalizes only the disposable runner parent after asserting refusal. Production parent ownership checks remain unchanged. The earlier pressure script used a transient Unix socket readiness check; authenticated TCP readiness now gates actual fixture execution.
+
+
+## D01-B-5 read-only host preflight and image lock
+
+Approved D01-B-4 CI pull evidence: postgres:18.7-alpine digest sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71. Compose and production-size pressure fixtures use postgres@that digest, with Compose linux/amd64 and pull_policy never. Existing 17/18 floating-tag compatibility matrix intentionally remains unchanged. Runtime control requires the exact digest reference, verified local RepoDigests, Linux amd64 and actual container image ID matching the local pinned image. An unrelated image, mutable tag, missing digest or different platform fails closed; stop uses the same checks. No image is pulled on the VPS by this PR.
+
+Run scripts/migration/vps/preflight.sh only as local root on the VPS, after reviewing its exact commit contents. It reads host resources, path ownership, Docker metadata, local image evidence, account membership and network baseline; no SQL, downloads, container execution, filesystem creation or firewall changes. A missing image is a review gate; no pull is attempted. At least 30 GiB free on each relevant filesystem is a conservative preflight rule, 1.5 GiB MemAvailable and cgroup v2 memory controller required. Separate filesystem budgets, inode headroom, actual sudo/SSH policies and outbound network reachability remain manual review. A completed preflight is not authorization for initialization. For sudo policy locally use sudo -l -U ashare-ops and, if present, sudo -l -U ashare-migrate; do not publish secret-bearing outputs. Existing VPS remote dispatcher is unchanged.

@@ -7,11 +7,13 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from ops_dispatch import validate,dispatch
 from control import identity,stop
+from image_lock import IMAGE_REF, IMAGE_DIGEST, validate_image, validate_container_image
 
 ROOT=Path("/opt/ashare/migration")
 def fixture():
     return {"Name":"/ashare-migration-postgres","Id":"a"*64,
-        "Config":{"Image":"postgres:18.7-alpine","Labels":{"com.docker.compose.project":"ashare-migration","com.docker.compose.service":"postgres","io.ashare.scope":"migration-only"}},
+        "Image":"sha256:"+"b"*64,
+        "Config":{"Image":IMAGE_REF,"Labels":{"com.docker.compose.project":"ashare-migration","com.docker.compose.service":"postgres","io.ashare.scope":"migration-only"}},
         "Mounts":[{"Destination":"/var/lib/postgresql","Type":"volume","Name":"ashare-migration-pgdata","RW":True},
                   {"Destination":"/run/migration-secrets","Type":"bind","Source":str(ROOT/"config/private/db-secrets"),"RW":False},
                   {"Destination":"/docker-entrypoint-initdb.d","Type":"bind","Source":str(ROOT/"bin/db-init"),"RW":False}],
@@ -43,3 +45,26 @@ class VpsTest(unittest.TestCase):
         with patch("control.inspect_container",return_value=first),patch("control.docker") as command:
             with self.assertRaises(ValueError): stop(ROOT)
             command.assert_not_called()
+
+    def test_locked_image_evidence(self):
+        container=fixture()
+        local={"Id":"sha256:"+"b"*64,"RepoDigests":[IMAGE_REF],"Os":"linux","Architecture":"amd64"}
+        self.assertEqual(validate_image(local),container["Image"])
+        validate_container_image(container,local)
+        for bad in (
+            {**local,"RepoDigests":["postgres@sha256:"+"c"*64]},
+            {**local,"RepoDigests":["untrusted/postgres@"+IMAGE_DIGEST]},
+            {**local,"RepoDigests":[]},
+            {**local,"Architecture":"arm64"},
+            {**local,"Os":"windows"},
+            {**local,"Id":"sha256:"+"c"*64},
+        ):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):
+                validate_container_image(container,bad)
+        for ref in ("postgres:18.7-alpine","postgres:latest","postgres@sha256:"+"c"*64):
+            wrong=copy.deepcopy(container)
+            wrong["Config"]["Image"]=ref
+            with self.assertRaises(ValueError):
+                identity(wrong,ROOT)
+            with self.assertRaises(ValueError):
+                validate_container_image(wrong,local)

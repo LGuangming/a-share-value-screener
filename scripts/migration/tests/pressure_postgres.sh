@@ -36,7 +36,7 @@ for spec in "source 55441 ashare_source" "target 55442 ashare_migration"; do
   read -r side port db <<< "$spec"
   docker run -d --name "migration-pressure-$side" --cpus=1.5 --memory=800m --memory-swap=800m \
     --shm-size=256m -p "127.0.0.1:$port:5432" \
-    -e POSTGRES_PASSWORD=fixture-only-password -e "POSTGRES_DB=$db" postgres:18.7-alpine \
+    -e POSTGRES_PASSWORD=fixture-only-password -e "POSTGRES_DB=$db" postgres@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71 \
     -c shared_buffers=192MB -c work_mem=4MB -c max_connections=30 -c idle_in_transaction_session_timeout=60s \
     -c maintenance_work_mem=64MB -c max_parallel_maintenance_workers=1 >/dev/null
   # The official image starts and stops a temporary Unix-socket-only server.

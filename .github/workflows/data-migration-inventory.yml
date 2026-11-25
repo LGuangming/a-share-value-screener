@@ -203,6 +203,6 @@ jobs:
       - name: Test fixed command and rollback boundaries
         run: |
           python -m unittest discover -s scripts/migration/vps/tests -v
-          bash -n scripts/migration/vps/db-init/10-roles.sh scripts/migration/vps/tests/ci_isolation.sh
+          for script in scripts/migration/vps/db-init/10-roles.sh scripts/migration/vps/tests/ci_isolation.sh scripts/migration/vps/preflight.sh; do bash -n "$script"; done
       - name: Disposable runner filesystem and PostgreSQL isolation
         run: bash scripts/migration/vps/tests/ci_isolation.sh

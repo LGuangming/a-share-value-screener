@@ -59,6 +59,7 @@ def prepare(root,uid,gid):
         ("prepare.py","bin/prepare.py",0o755),
         ("ops_dispatch.py","bin/ops_dispatch.py",0o755),
         ("control.py","bin/control.py",0o755),
+        ("image_lock.py","bin/image_lock.py",0o644),
     ):
         write_new(root/dest,(SOURCE/filename).read_bytes(),mode)
     # Private parent prevents host access to 0444 files; PostgreSQL's unprivileged

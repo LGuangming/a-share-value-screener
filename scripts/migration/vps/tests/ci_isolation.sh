@@ -46,10 +46,15 @@ printf '{"captured_at_epoch":0,"passed":true,"checks":3,"failed_checks":0}\n' | 
 if sudo -u nobody env SSH_ORIGINAL_COMMAND=migration-verify "$root/bin/ops_dispatch.py"; then exit 1; fi
 echo 'PASS: filesystem isolation, exact commands and stale evidence denial'
 # All Docker operations use the local disposable runner, not a VPS endpoint.
-docker pull postgres:18.7-alpine >/dev/null
+image=$(PYTHONPATH=scripts/migration/vps python -c 'from image_lock import IMAGE_REF;print(IMAGE_REF)')
+docker pull --platform linux/amd64 "$image"
+sudo docker --host unix:///var/run/docker.sock image inspect "$image" --format 'LOCKED_IMAGE_ID={{.Id}} OS={{.Os}} ARCH={{.Architecture}} DIGESTS={{json .RepoDigests}}'
+[[ "$(sudo docker --host unix:///var/run/docker.sock compose -f "$root/compose.yml" config --images)" == "$image" ]]
+echo 'PASS: compose digest lock matches runtime image lock'
 sudo docker --host unix:///var/run/docker.sock compose -f "$root/compose.yml" config --quiet
 sudo docker --host unix:///var/run/docker.sock compose -f "$root/compose.yml" up -d --no-build --pull never --wait
 sudo /usr/bin/python3 "$root/bin/control.py" monitor
+echo "PASS: real pinned container image identity and local image ID"
 export PGHOST=127.0.0.1 PGPORT=55432 PGDATABASE=ashare_migration PGSSLMODE=disable
 # Host loopback authentication as non-superuser, no production credentials.
 ready=0
@@ -79,7 +84,7 @@ if sudo env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE
 sudo env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE=disable PGUSER=screener_writer PGPASSFILE="$root/config/private/db-secrets/writer.pgpass" "$(command -v psql)" -X -v ON_ERROR_STOP=1 -c "INSERT INTO stocks(ts_code,name) VALUES ('000001.SZ','fixture');"
 echo 'PASS: non-superuser ownership, real role logins and cross-database denial'
 # Stop only the verified container; no volume deletion and no production container.
-sentinel=$(docker create --name ashare-b4-sentinel postgres:18.7-alpine)
+sentinel=$(docker create --name ashare-b4-sentinel "$image")
 cid=$(docker inspect --format '{{.Id}}' ashare-migration-postgres)
 if sudo /usr/bin/python3 "$root/bin/control.py" stop; then exit 1; fi
 sudo /usr/bin/python3 "$root/bin/control.py" stop --approved-isolated-stop

@@ -9,6 +9,8 @@ import sys
 import tempfile
 from ops_dispatch import ROOT, SCHEMAS, LIMIT, validate, trusted_dir, capacity
 
+from image_lock import IMAGE_REF, validate_container_image
+
 NAME="ashare-migration-postgres"
 PROJECT="ashare-migration"
 VOLUME="ashare-migration-pgdata"
@@ -23,7 +25,7 @@ def identity(info,root):
     labels=info["Config"]["Labels"]
     if info["Name"]!="/"+NAME or labels.get("com.docker.compose.project")!=PROJECT or labels.get("com.docker.compose.service")!="postgres" or labels.get("io.ashare.scope")!="migration-only":
         raise ValueError("unexpected container identity")
-    if info["Config"]["Image"]!="postgres:18.7-alpine":
+    if info["Config"]["Image"]!=IMAGE_REF:
         raise ValueError("unexpected image")
     mounts={m["Destination"]:m for m in info["Mounts"]}
     if set(mounts)!={"/var/lib/postgresql","/run/migration-secrets","/docker-entrypoint-initdb.d"}:
@@ -49,6 +51,8 @@ def inspect_container(root):
     trusted_dir(root)
     info=json.loads(docker("inspect","--type","container",NAME))[0]
     identity(info,root)
+    local_image=json.loads(docker("image","inspect",IMAGE_REF))[0]
+    validate_container_image(info,local_image)
     vol=json.loads(docker("volume","inspect",VOLUME))[0]
     net=json.loads(docker("network","inspect",NETWORK))[0]
     if (vol.get("Labels") or {}).get("io.ashare.scope")!="migration-only" or (vol.get("Labels") or {}).get("com.docker.compose.project")!=PROJECT or net["Internal"] or net["Driver"]!="bridge" or (net.get("Labels") or {}).get("com.docker.compose.project")!=PROJECT:
