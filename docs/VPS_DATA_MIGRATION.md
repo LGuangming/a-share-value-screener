@@ -178,7 +178,12 @@ New standalone tools live in scripts/migration/vps. They are not installed
 on the VPS by CI. Do not use production credentials in these fixtures.
 
 - Compose project ashare-migration has one fixed container, dedicated named
-  volume and internal bridge network; host binds only 127.0.0.1:55432.
+  volume and a dedicated bridge network with inter-container communication disabled;
+  host binds only 127.0.0.1:55432. Docker internal-only networks do not expose
+  the required host port on the tested runner, so this bridge is not internal.
+  This does NOT enforce outbound egress denial. Verify actual VPS host/network
+  reachability and no production network attachment before initialization; any
+  firewall/egress change requires separate approval.
   800 MiB/1.5 CPU, no container restart policy, no application network.
   Exact tag 18.7-alpine is the fixture version; review and pin the approved
   image digest before actual host initialization.
@@ -230,3 +235,5 @@ on the VPS by CI. Do not use production credentials in these fixtures.
   exact-ID stop, retained volume and restart persistence. Full backup restore
   under final ownership, real production network/permissions and application
   regression remain D01-B-5 / joint acceptance requirements.
+
+B4 runner diagnostic: /opt on hosted CI was mode 0777; the strict preparation guard correctly rejected it. The fixture normalizes only the disposable runner parent after asserting refusal. Production parent ownership checks remain unchanged. The earlier pressure script used a transient Unix socket readiness check; authenticated TCP readiness now gates actual fixture execution.

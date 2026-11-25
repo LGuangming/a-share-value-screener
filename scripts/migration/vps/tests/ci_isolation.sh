@@ -52,7 +52,16 @@ sudo docker --host unix:///var/run/docker.sock compose -f "$root/compose.yml" up
 sudo /usr/bin/python3 "$root/bin/control.py" monitor
 export PGHOST=127.0.0.1 PGPORT=55432 PGDATABASE=ashare_migration PGSSLMODE=disable
 # Host loopback authentication as non-superuser, no production credentials.
-sudo -u ashare-migrate env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE=disable PGUSER=migration_owner PGPASSFILE="$root/config/client/owner.pgpass" "$(command -v psql)" -X -v ON_ERROR_STOP=1 -c "SELECT current_user, current_database();"
+ready=0
+for i in $(seq 1 30); do
+  if sudo -u ashare-migrate env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE=disable PGUSER=migration_owner PGPASSFILE="$root/config/client/owner.pgpass" "$(command -v psql)" -X -w -At -v ON_ERROR_STOP=1 -c "SELECT current_user||'|'||current_database();" 2>/dev/null | grep -Fxq 'migration_owner|ashare_migration'; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+[[ "$ready" == 1 ]] || { echo 'FAILED: authenticated host loopback readiness'; exit 1; }
+echo 'PASS: authenticated host loopback readiness'
 # Actual schema bootstrap as database owner, not superuser; role ACL tool tested separately.
 sudo env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE=disable PGUSER=migration_owner PGPASSFILE="$root/config/client/owner.pgpass" "$(command -v psql)" -X -v ON_ERROR_STOP=1 -f database/neon-schema.sql
 sudo env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE=disable PGUSER=migration_owner PGPASSFILE="$root/config/client/owner.pgpass" "$(command -v python)" scripts/migration/permissions.py apply --policy scripts/migration/tests/production-policy.json --root "$root/verification" --approved-isolated-acl
@@ -79,7 +88,7 @@ sudo /usr/bin/python3 "$root/bin/control.py" stop --approved-isolated-stop
 docker volume inspect ashare-migration-pgdata >/dev/null
 docker start "$cid" >/dev/null
 for i in $(seq 1 30); do
-  if docker exec "$cid" pg_isready -U postgres -d ashare_migration >/dev/null 2>&1; then break; fi
+  if docker exec "$cid" pg_isready -h 127.0.0.1 -U postgres -d ashare_migration >/dev/null 2>&1; then break; fi
   sleep 1
 done
 sudo env PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" PGSSLMODE=disable PGUSER=screener_reader PGPASSFILE="$root/config/private/db-secrets/reader.pgpass" "$(command -v psql)" -X -v ON_ERROR_STOP=1 -At -c "SELECT name FROM stocks WHERE ts_code='000001.SZ'" | grep -Fx fixture

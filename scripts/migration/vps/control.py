@@ -51,8 +51,11 @@ def inspect_container(root):
     identity(info,root)
     vol=json.loads(docker("volume","inspect",VOLUME))[0]
     net=json.loads(docker("network","inspect",NETWORK))[0]
-    if (vol.get("Labels") or {}).get("io.ashare.scope")!="migration-only" or (vol.get("Labels") or {}).get("com.docker.compose.project")!=PROJECT or not net["Internal"] or (net.get("Labels") or {}).get("com.docker.compose.project")!=PROJECT:
+    if (vol.get("Labels") or {}).get("io.ashare.scope")!="migration-only" or (vol.get("Labels") or {}).get("com.docker.compose.project")!=PROJECT or net["Internal"] or net["Driver"]!="bridge" or (net.get("Labels") or {}).get("com.docker.compose.project")!=PROJECT:
         raise ValueError("unexpected volume/network ownership")
+    options=net.get("Options") or {}
+    if options.get("com.docker.network.bridge.host_binding_ipv4")!="127.0.0.1" or options.get("com.docker.network.bridge.enable_icc")!="false" or not set(net.get("Containers") or {})<={info["Id"]}:
+        raise ValueError("unexpected network access")
     return info
 
 def monitor(root):

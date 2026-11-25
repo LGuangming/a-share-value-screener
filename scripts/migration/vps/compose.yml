@@ -37,7 +37,7 @@ services:
     labels:
       io.ashare.scope: migration-only
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "ashare_migration"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "ashare_migration"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -49,4 +49,8 @@ volumes:
 networks:
   migration:
     name: ashare-migration-private
-    internal: true
+    driver: bridge
+    internal: false
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+      com.docker.network.bridge.enable_icc: "false"

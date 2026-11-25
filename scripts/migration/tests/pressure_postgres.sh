@@ -39,11 +39,17 @@ for spec in "source 55441 ashare_source" "target 55442 ashare_migration"; do
     -e POSTGRES_PASSWORD=fixture-only-password -e "POSTGRES_DB=$db" postgres:18.7-alpine \
     -c shared_buffers=192MB -c work_mem=4MB -c max_connections=30 -c idle_in_transaction_session_timeout=60s \
     -c maintenance_work_mem=64MB -c max_parallel_maintenance_workers=1 >/dev/null
+  # The official image starts and stops a temporary Unix-socket-only server.
+  # Check authenticated TCP on the published loopback port, not that socket.
+  ready=0
   for i in $(seq 1 60); do
-    if docker exec "migration-pressure-$side" pg_isready -U postgres -d "$db" >/dev/null 2>&1; then break; fi
+    if PGPORT="$port" PGDATABASE="$db" psql -X -w -At -v ON_ERROR_STOP=1 -c 'SELECT 1' 2>/dev/null | grep -Fxq 1; then
+      ready=1
+      break
+    fi
     sleep 1
   done
-  docker exec "migration-pressure-$side" pg_isready -U postgres -d "$db"
+  [[ "$ready" == 1 ]] || { echo "FAILED: fixture PostgreSQL TCP readiness"; exit 1; }
 done
 # pg_dump can run for >60s while exporting a snapshot; backup transaction
 # remains idle during the child dump. The tool sets transaction-local timeout only.
