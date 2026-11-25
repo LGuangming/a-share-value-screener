@@ -1,28 +1,36 @@
-name: GHCR private package bootstrap (manual only)
+name: GHCR private package verification (manual read only)
 on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Enter BOOTSTRAP-PRIVATE-GHCR only after separate initialization approval'
+        description: 'Enter VERIFY-PRIVATE-GHCR after owner-local seed and UI permission review'
         required: true
         type: string
-      owner_confirmed_absent:
-        description: 'Owner has checked both exact package names are absent and no external writer is active'
+      owner_confirmed_access:
+        description: 'Both packages Private, independent access and expected Actions Write/Admin reviewed'
         required: true
         type: boolean
         default: false
+      web_digest:
+        description: 'Exact Web bootstrap marker sha256 digest from owner receipt'
+        required: true
+        type: string
+      worker_digest:
+        description: 'Exact Worker bootstrap marker sha256 digest from owner receipt'
+        required: true
+        type: string
 permissions: {}
 concurrency:
   group: ghcr-pr28-test-workflow_dispatch
   cancel-in-progress: false
 jobs:
-  bootstrap:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'LGuangming/a-share-value-screener' && github.actor == 'LGuangming' && github.triggering_actor == 'LGuangming' && inputs.confirm == 'BOOTSTRAP-PRIVATE-GHCR' && inputs.owner_confirmed_absent == true && github.run_attempt == '1'
+  verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'LGuangming/a-share-value-screener' && github.actor == 'LGuangming' && github.triggering_actor == 'LGuangming' && inputs.confirm == 'VERIFY-PRIVATE-GHCR' && inputs.owner_confirmed_access == true && github.run_attempt == '1'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
-      packages: write
+      packages: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -30,17 +38,19 @@ jobs:
           persist-credentials: false
       - name: Confirm exact main dispatch checkout
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-      - name: Initialize only owner-confirmed absent packages using scratch markers
+      - name: Verify both linked private bootstrap markers (no writes)
         env:
           GH_TOKEN: ${{ github.token }}
           CONFIRM: ${{ inputs.confirm }}
-          OWNER_CONFIRMED_ABSENT: ${{ inputs.owner_confirmed_absent }}
-        run: python3 tests/ghcr_private_bootstrap.py
-      - name: Preserve bootstrap or partial failure receipt
+          OWNER_CONFIRMED_ACCESS: ${{ inputs.owner_confirmed_access }}
+          WEB_DIGEST: ${{ inputs.web_digest }}
+          WORKER_DIGEST: ${{ inputs.worker_digest }}
+        run: python3 tests/ghcr_private_bootstrap.py verify
+      - name: Preserve sanitized verification receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: ghcr-bootstrap-${{ github.run_id }}-a${{ github.run_attempt }}
+          name: ghcr-bootstrap-verify-${{ github.run_id }}-a${{ github.run_attempt }}
           path: ${{ runner.temp }}/ghcr-bootstrap.json
           retention-days: 14
           if-no-files-found: error

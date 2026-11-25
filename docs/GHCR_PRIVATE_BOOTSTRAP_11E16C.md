@@ -1,51 +1,67 @@
-# 11E-16C — private GHCR bootstrap preparation only
+# 11E-16C-5 — private GHCR initialization recovery
 
-Independent manual-only workflow for the two existing test package names.
-No formal image publishing, no deployment, no production data changes.
-The existing publisher, fixed source 1a87f65 / run 45633909294, all security
-gates and existing private-package prerequisites remain byte-for-byte unchanged.
+Supersedes the initial Bootstrap instructions (run 45649612640 failed after
+the Web scratch push: package not confirmed private; Worker not pushed).
+The log did not record the actual visibility, so root cause is not proven.
+Owner reports deleting the Web package; recheck both targets in owner UI.
+No production images were uploaded by that run.
 
-Prerequisites for a separately authorized future run: account owner
-LGuangming verifies in authenticated Packages UI that both exact packages
-are absent (404 is NOT sufficient), no external writer is active, and
-reviews GitHub's first-publish private default. Only main workflow_dispatch
-with BOOTSTRAP-PRIVATE-GHCR and owner_confirmed_absent=true, actor and
-triggering actor both owner, first attempt only. Shared concurrency with
-existing explicit publisher, no fork/PR/push trigger. Only bootstrap job
-has contents:read and packages:write; tests have contents:read only.
+GitHub documents private first publication and separate visibility vs access.
+CLI push using a classic PAT without a source label is not linked by default.
+See https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
+and https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility.
+This does not guarantee the registry will return private; stop on any deviation.
 
-Preflight GET both metadata endpoints, require 404 plus owner attestation.
-Authenticated exact run-specific tag manifest check must conclusively
-report absence; auth/network/ambiguous failures block. If GHCR masks
-nonexistent tags as unauthorized, STOP: no workaround or first push
-without separate review. Refuse existing metadata even if private.
-Recheck each target immediately before push. These checks cannot
-eliminate an external race, hence owner must confirm no concurrent writer.
-Never overwrite, delete, change visibility or grant permission automatically.
+## Phase 1 — owner-local, unlinked seed (separate approval only)
 
-Build isolated local scratch marker, no repository files in build context,
-no application/config/secret, network none, linux/amd64. Verify one layer
-and actual Docker-save payload contains only exact BOOTSTRAP_ONLY marker.
-No runtime command or environment except the exact standard Docker PATH.
-Push only unique bootstrap-run-ID-a1,
-never latest or a production release tag. Immediately verify matching
-private package and expected repository association, remote manifest
-digest, authenticated pull config ID, anonymous denial and version read.
-Recheck both private metadata at end. If any step fails, do not continue
-to next push; retain partial receipt, no cleanup of remote packages.
-If first push succeeded but metadata not accessible, block and request
-owner review. No automatic rerun. Local credential directory is temporary.
+Requires Git, Python 3.10+ and a local Linux Docker engine / Docker Desktop
+with linux/amd64 build support, standard Docker buildx. Fetch approved main
+after merge, checkout a clean main identical to origin/main. Do NOT run on CI,
+do NOT add a personal PAT to GitHub Actions or send it in chat. Owner creates
+a short-lived classic PAT with write:packages only (avoid repo and delete).
+Confirm each absent target in authenticated owner Packages UI and no other
+writer or formal publisher is active; no global lock across local CLI and CI.
 
-A successful bootstrap receipt is NOT pair-release.json, does not
-authorize deployment or formal release, and is not a runtime image.
-Operator still checks private visibility, inherited access and Manage
-Actions access (Write/Admin for target repository) in package UI. A successful
-push establishes that specific run's write access, not permanent permission.
-Re-run independent read-only readiness diagnostic, then seek separate
-formal release approval. Remove or disable bootstrap entry after success
-under separate approval. Do not change the formal publish workflow.
+Example from freshly fetched main, on a machine with Docker:
+```
+python tests/ghcr_private_bootstrap.py owner-seed --web absent --worker absent --receipt ../ghcr-owner-receipt.json
+```
+Type BOOTSTRAP-UNLINKED-PRIVATE-GHCR and enter PAT via hidden prompt.
+Both exact names are fixed. New tag is UUID-based bootstrap-owner-*;
+no app source label, no provenance/SBOM attestation, scratch one-layer exact
+marker only. Both metadata checked before write; owner identity checked by
+GET /user; 404 plus owner attestation, explicit tag absence, prepush recheck.
+After each push require matching identity, private, unlinked, version digest,
+remote digest, pulled scratch payload/config and anonymous denial. If status
+public/internal/missing/unrecognized, save sanitized value and stop immediately.
+No automatic permission changes/deletion/retry. Revoke temporary PAT after use.
 
-Tests use mock registry and local-only Docker scratch build, inspect and
-save; no login, HTTP package calls, remote pull or push. CI on diagnostic
-branch/PR is read-only. This change is not authorized for main merge or
-actual initialization.
+If one side already exists privately, preserve it; provide its exact prior
+bootstrap digest instead of absent (e.g. --web sha256:<64 hex> --worker absent).
+Both existing private markers may be verified without writes; any existing
+public/unknown/wrong association, invalid marker or ambiguous state blocks
+before any new push. Existing marker must be in version list and pass
+immutable pull, exact marker archive and anonymous-denial checks; no tag
+overwrite. Receipt records partial state and exact pin, never secrets.
+If receipt lost, owner must inspect exact marker digest in package UI and
+independently confirm it is a bootstrap version. Do not use formal digests.
+Deleted-name reuse and actual visibility remain provider-dependent.
+ 
+## Phase 2 — link only after both private
+
+In each Package settings, check Private; Connect repository
+LGuangming/a-share-value-screener; disable inherited access and explicitly grant
+that repo Write/Admin via Manage Actions access. Reconfirm Private after
+linking. No automated visibility/permission change. Then manually dispatch
+ghcr-package-bootstrap.yml on main with VERIFY-PRIVATE-GHCR,
+owner_confirmed_access=true, and exact web_digest / worker_digest.
+This workflow now has packages:read only, no initial push path, shares the
+publisher concurrency lock. Actual read and anonymous-denial verified;
+owner's UI access-role attestation is not proof of write authorization.
+Run separate ghcr-package-readiness.yml as before. Do not run formal publisher
+until both pass and separate release approval. The existing formal publisher,
+fixed application revision/run, all scanning, private and dual digest gates
+are untouched. No deployment allowed.
+
+The test workflow uses fake registry and local scratch-only builds; no
+actual push, API token, remote pull or deployment in test CI. 
