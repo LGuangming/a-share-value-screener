@@ -2,7 +2,7 @@
 # CPython 3.13 x86_64 wheels; build and runtime use Debian 13/glibc.
 # CI resolves both base digests and a wheel hash lock before building.
 ARG PYTHON_BASE=docker.io/library/python:3.13-slim-trixie@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
-ARG MINIMAL_RUNTIME_BASE=gcr.io/distroless/cc-debian13:nonroot
+ARG MINIMAL_RUNTIME_BASE=gcr.io/distroless/cc-debian13:nonroot@sha256:532c7a94f9e96ba9db75eb9388f4227751131c7cb0a411d1a8521af4096135de
 ARG WORKER_RUNTIME_BASE=gcr.io/distroless/python3-debian13:nonroot@sha256:806765f9f0863a1f36ce5f796983fed4eced9ec367e67e2f62f57f3e325c60b6
 FROM ${PYTHON_BASE} AS zstd-patch
 COPY deploy/prepare-zstd-patch.sh /prepare-zstd-patch.sh
@@ -41,6 +41,7 @@ FROM deps AS minimal-assembly
 ARG PYTHON_BASE
 ENV PYTHON_BASE=$PYTHON_BASE
 COPY deploy/prepare-cp313-minimal.py /prepare-cp313-minimal.py
+COPY backend/value_screener /audit/value_screener
 RUN apt-get -o APT::Update::Error-Mode=any update && python /prepare-cp313-minimal.py
 
 FROM ${MINIMAL_RUNTIME_BASE} AS minimal-evaluation

@@ -2,6 +2,7 @@
 library packages. No scanner metadata deletion or fabricated package entries.
 Run only in the pinned CPython build image, never on VPS.
 """
+import ast
 import hashlib
 import json
 import pathlib
@@ -28,20 +29,58 @@ for library in pathlib.Path("/usr/local/lib").glob("libpython3.13.so*"):
         dest.symlink_to(os.readlink(library))
     else:
         shutil.copy2(library, dest)
-# Construct the stdlib without build/install-only modules; wheel site-packages
-# are copied separately from the existing hash-verified deps stage.
-shutil.copytree("/usr/local/lib/python3.13", python_root / "lib/python3.13",
-                symlinks=True, ignore=lambda path, names:
-                set(names) & {"site-packages", "ensurepip", "__pycache__"})
+# Explicitly exclude only reviewed optional GUI and installer components.
+# Record third-party references (including optional/test imports); direct GUI
+# imports in application code block the build. No dynamic reachability claim.
+stdlib = pathlib.Path("/usr/local/lib/python3.13")
+wheel_root = pathlib.Path("/opt/venv/lib/python3.13/site-packages")
+gui = {"tkinter", "_tkinter", "idlelib", "turtle", "turtledemo"}
+references = []
+for scope, directory in (("application", pathlib.Path("/audit/value_screener")), ("wheel", wheel_root)):
+    for source in sorted(directory.rglob("*.py")):
+        try:
+            tree = ast.parse(source.read_bytes(), filename=str(source))
+        except (SyntaxError, UnicodeError):
+            if scope == "application":
+                raise
+            references.append({"scope": scope, "path": str(source.relative_to(directory)), "parse": "unverified"})
+            continue
+        for node in ast.walk(tree):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            for name in names:
+                if name.split(".")[0] in gui:
+                    row = {"scope": scope, "path": str(source.relative_to(directory)), "line": node.lineno, "import": name}
+                    references.append(row)
+                    if scope == "application":
+                        raise RuntimeError(f"Application GUI dependency: {row}")
+excluded = []
+def omit(path, names):
+    path = pathlib.Path(path)
+    selected = set(names) & {"__pycache__"}
+    if path == stdlib:
+        selected |= set(names) & {"site-packages", "ensurepip", "tkinter", "idlelib", "turtle.py", "turtledemo"}
+    if path == stdlib / "lib-dynload":
+        selected |= {n for n in names if re.fullmatch(r"_tkinter(?:\\.[^.]+)*\\.so", n)}
+    excluded.extend(str((path / name).relative_to(stdlib)) for name in sorted(selected) if name != "__pycache__")
+    return selected
+shutil.copytree(stdlib, python_root / "lib/python3.13", symlinks=True, ignore=omit)
+assert not list((python_root / "lib/python3.13/lib-dynload").glob("_tkinter*.so"))
+print("Excluded stdlib entries:", sorted(excluded), flush=True)
+print("GUI import evidence:", json.dumps(references), flush=True)
 # Determine native dependencies from actual ELF files, including wheel-private
 # libraries. ldd runs only on hash-verified/official build artifacts.
 targets = [pathlib.Path("/usr/local/bin/python3.13")]
-for path in (pathlib.Path("/usr/local/lib/python3.13"), pathlib.Path("/opt/venv/lib/python3.13/site-packages")):
-    for item in path.rglob("*"):
+runtime_elf = ["/usr/local/bin/python3.13"]
+# Inspect exactly the retained stdlib files and the entire installed wheel set.
+for retained, original, destination in ((python_root / "lib/python3.13", stdlib, "/usr/local/lib/python3.13"), (wheel_root, wheel_root, "/opt/runtime-packages")):
+    for item in sorted(retained.rglob("*")):
         if item.is_file() and ".so" in item.name:
             with item.open("rb") as fd:
                 if fd.read(4) == b"\x7fELF":
-                    targets.append(item)
+                    rel = item.relative_to(retained)
+                    targets.append(original / rel)
+                    runtime_elf.append(str(pathlib.PurePosixPath(destination) / rel))
 packages = set()
 for target in targets:
     result = run("ldd", str(target))
@@ -72,6 +111,11 @@ metadata.mkdir(parents=True)
 records = []
 for package in sorted(packages - base_packages):
     version = run("dpkg-query", "-W", "-f=${Version}", package)
+    # Record the official signed-index hash and verify the downloaded bytes.
+    index = run("apt-cache", "show", f"{package}:amd64={version}")
+    hashes = set(re.findall(r"^SHA256: ([a-f0-9]{64})$", index, re.M))
+    if len(hashes) != 1:
+        raise RuntimeError(f"Missing or ambiguous signed-index SHA256: {package}")
     directory = pathlib.Path("/tmp/minimal-debs") / package
     directory.mkdir(parents=True)
     subprocess.run(["apt-get", "download", f"{package}:amd64={version}"], cwd=directory, check=True)
@@ -79,6 +123,10 @@ for package in sorted(packages - base_packages):
     if len(files) != 1:
         raise RuntimeError(f"Unexpected deb selection: {package}")
     deb = files[0]
+    with deb.open("rb") as fd:
+        actual_hash = hashlib.file_digest(fd, "sha256").hexdigest()
+    if actual_hash != next(iter(hashes)):
+        raise RuntimeError(f"Debian archive hash mismatch: {package}")
     assert run("dpkg-deb", "-f", str(deb), "Package") == package
     assert run("dpkg-deb", "-f", str(deb), "Version") == version
     assert run("dpkg-deb", "-f", str(deb), "Architecture") == "amd64"
@@ -87,10 +135,10 @@ for package in sorted(packages - base_packages):
     subprocess.run(["dpkg-deb", "-e", str(deb), str(control)], check=True)
     (metadata / package).write_text(run("dpkg-deb", "-f", str(deb)) + "\n")
     shutil.copy2(control / "md5sums", metadata / (package + ".md5sums"))
-    records.append({"package": package, "version": version, "sha256": hashlib.file_digest(deb.open("rb"), "sha256").hexdigest()})
+    records.append({"package": package, "version": version, "sha256": actual_hash})
 # Preserve upstream interpreter provenance explicitly; don't pretend this is
 # a Debian Python package. Scanner coverage of this component needs separate review.
 manifest = root / "opt/cp313-provenance.json"
 manifest.parent.mkdir(exist_ok=True)
-manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records}, indent=2)+"\n")
+manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references}, indent=2)+"\n")
 print(manifest.read_text())

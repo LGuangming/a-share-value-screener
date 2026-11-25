@@ -1,0 +1,6 @@
+# CI-only candidate overlay. Never use for VPS deployment.
+services:
+  worker:
+    image: ashare-worker:minimal-eval
+    entrypoint: ["/usr/local/bin/python3", "-m", "value_screener.test_worker_launch"]
+    command: ["--help"]

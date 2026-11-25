@@ -308,21 +308,27 @@ jobs:
   minimal-worker-evaluation:
     needs: resolve-base-images
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['postgres:17', 'postgres:18.7-alpine']
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Resolve evaluation-only Distroless cc manifest
+      - name: Verify pinned evaluation-only Distroless cc manifest
         id: base
         shell: bash
         run: |
           set -euo pipefail
-          image=gcr.io/distroless/cc-debian13:nonroot
-          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          echo "ref=$image@$digest" >> "$GITHUB_OUTPUT"
-          echo "$image@$digest" | tee "$RUNNER_TEMP/minimal-base.lock"
+          source deploy/minimal-base.lock
+          [[ "$MINIMAL_RUNTIME_BASE" =~ @sha256:[a-f0-9]{64}$ ]]
+          expected="${MINIMAL_RUNTIME_BASE##*@}"
+          actual="$(docker buildx imagetools inspect "$MINIMAL_RUNTIME_BASE" | awk '/^Digest:/ && !found {print $2; found=1}')"
+          test "$actual" = "$expected"
+          echo "ref=$MINIMAL_RUNTIME_BASE" >> "$GITHUB_OUTPUT"
+          cp deploy/minimal-base.lock "$RUNNER_TEMP/minimal-base.lock"
       - name: Build CPython 3.13.18 minimal glibc comparison
         id: minimal
         env:
@@ -354,6 +360,30 @@ jobs:
           print("PASS: minimal glibc native runtime")
           '
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges ashare-worker:minimal-eval --help
+      - name: Validate final image shared libraries, package metadata and exact wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p eval-reports
+          docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --mount "type=bind,src=$PWD/tests/verify-minimal-runtime.py,dst=/verify-minimal-runtime.py,readonly" --entrypoint /usr/local/bin/python3 ashare-worker:minimal-eval /verify-minimal-runtime.py < backend/requirements-worker.lock.txt | tee eval-reports/runtime-verification.txt
+      - name: Export actual final runtime provenance
+        if: always() && steps.minimal.outcome == 'success'
+        run: |
+          mkdir -p eval-reports
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/python3 ashare-worker:minimal-eval -c 'print(open("/opt/cp313-provenance.json").read())' > eval-reports/cp313-provenance.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      - name: Build same pinned Web image for candidate Compose
+        env:
+          NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
+          WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
+        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
+      - name: Full isolated Minimal Compose smoke and recreation
+        env:
+          TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
+          ASHARE_CI_WORKER_VARIANT: minimal
+        run: bash tests/docker-smoke.sh
       - name: Collect static reachability evidence (no exploitation)
         if: always()
         shell: bash
@@ -397,7 +427,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: minimal-cp313-evaluation
+          name: minimal-cp313-evaluation-${{ strategy.job-index }}
           path: eval-reports/
           retention-days: 14
           if-no-files-found: error
