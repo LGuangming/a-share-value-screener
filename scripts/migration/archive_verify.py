@@ -1,5 +1,6 @@
 """Offline archive validation; never contacts source or mutates archived files."""
 import argparse
+import base64
 import json
 import gzip
 import hashlib
@@ -8,7 +9,7 @@ from datetime import date, datetime
 import duckdb
 import pyarrow.parquet as pq
 from common import digest, load, main_guard, write_json
-from storage import safe_path, verify
+from storage import safe_key, safe_path, verify
 
 RAW="a-share-backtest/01_raw_data/"
 FIN_FIELDS={
@@ -17,6 +18,86 @@ FIN_FIELDS={
 "cashflow":"ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,n_cashflow_act",
 "fina_indicator":"ts_code,ann_date,end_date,roe,roe_dt,roa"}
 MAX_EXPANDED=256*1024*1024
+
+LEGACY_BACKUP=RAW+"_inventory/legacy_original_manifests.json.gz"
+LEGACY_PLAN=RAW+"_inventory/legacy_retirement_plan.json"
+LEGACY_DONE=RAW+"_inventory/legacy_retirement.json"
+LEGACY_SOURCE="a-share-backtest/v1/"
+
+
+def strict_json(raw):
+    def pairs(items):
+        result={}
+        for key,value in items:
+            if key in result:
+                raise ValueError("duplicate legacy JSON key")
+            result[key]=value
+        return result
+    def no_constant(value):
+        raise ValueError("nonfinite legacy JSON")
+    return json.loads(raw,object_pairs_hook=pairs,parse_constant=no_constant)
+
+
+def verify_legacy_backup(root,b,objects,state,json_docs):
+    """Validate the exact historical retirement backup, never a generic gzip dict."""
+    ident=(b,LEGACY_BACKUP)
+    plan=json_docs.get((b,LEGACY_PLAN))
+    done=json_docs.get((b,LEGACY_DONE))
+    catalog=json_docs.get((b,RAW+"dataset_catalog.json"))
+    if ident not in objects or not all(isinstance(x,dict) for x in (plan,done,catalog)):
+        raise ValueError("legacy retirement evidence missing")
+    if (plan.get("status")!="all_copies_verified_before_delete" or
+        done.get("status")!="retired_verified" or done.get("legacy_source_retained") is not False or
+        catalog.get("status")!="consolidated_verified" or catalog.get("raw_prefix")!=RAW or
+        plan.get("backup_key")!=LEGACY_BACKUP or done.get("original_manifest_backup")!=LEGACY_BACKUP):
+        raise ValueError("legacy retirement status or backup pointer mismatch")
+    size=objects[ident]["size"]
+    sha=state[b+"/"+LEGACY_BACKUP]["sha256"]
+    if (plan.get("backup_bytes")!=size or done.get("backup_bytes")!=size or
+        plan.get("backup_sha256")!=sha):
+        raise ValueError("legacy compressed backup integrity mismatch")
+    entries={}
+    for group in catalog["datasets"]:
+        receipt=json_docs.get((b,group["inventory"]))
+        if not isinstance(receipt,dict) or receipt.get("status")!="copied_and_verified" or receipt.get("dataset")!=group["dataset"]:
+            raise ValueError("legacy catalog receipt missing or wrong")
+        for entry in receipt["entries"]:
+            key=entry["source_key"]
+            if not isinstance(key,str) or not key.startswith(LEGACY_SOURCE) or key in entries:
+                raise ValueError("invalid or duplicate legacy source receipt")
+            safe_key(key)
+            entries[key]=entry
+    canonical=json.dumps(entries,sort_keys=True,separators=(",",":")).encode()
+    inventory_sha=hashlib.sha256(canonical).hexdigest()
+    total=sum(e["source_bytes"] for e in entries.values())
+    if (inventory_sha!=plan.get("inventory_sha256") or inventory_sha!=done.get("inventory_sha256") or
+        len(entries)!=plan.get("objects") or len(entries)!=done.get("deleted_objects") or
+        len(entries)!=catalog.get("objects") or total!=plan.get("source_bytes") or
+        total!=done.get("deleted_source_bytes") or total!=catalog.get("source_bytes")):
+        raise ValueError("legacy retirement inventory mismatch")
+    path=safe_path(root/"files",b,LEGACY_BACKUP)
+    with gzip.open(path,"rb") as stream:
+        raw=stream.read(MAX_EXPANDED+1)
+    if len(raw)>MAX_EXPANDED:
+        raise ValueError("gzip bounds")
+    originals=strict_json(raw)
+    if not isinstance(originals,dict):
+        raise ValueError("legacy backup must be dictionary")
+    expected={k for k,e in entries.items() if k.endswith(".json") and e["sha256"]!=e["source_sha256"]}
+    if set(originals)!=expected or len(originals)!=plan.get("original_manifests_preserved"):
+        raise ValueError("legacy original manifest coverage mismatch")
+    for key,encoded in originals.items():
+        if not isinstance(encoded,str):
+            raise ValueError("legacy original manifest encoding invalid")
+        content=base64.b64decode(encoded,validate=True)
+        entry=entries[key]
+        if len(content)!=entry["source_bytes"] or hashlib.sha256(content).hexdigest()!=entry["source_sha256"]:
+            raise ValueError("legacy original manifest integrity mismatch")
+        strict_json(content)
+    return {"bucket":b,"key":LEGACY_BACKUP,"original_manifests":len(originals),
+            "compressed_bytes":size,"expanded_bytes":len(raw),"sha256":sha,
+            "inventory_sha256":inventory_sha,"passed":True}
+
 
 def read_gzip(path,key):
     def no_constant(x):
@@ -76,7 +157,10 @@ def inspect(root,memory_limit="256MB"):
     gzfiles={}
     catalogs=[]
     json_docs={}
+    legacy_backups=[]
     for (b,k),obj in objects.items():
+        if k==LEGACY_BACKUP:
+            continue  # validated against retirement evidence below, not a row dataset
         if k.endswith((".jsonl.gz",".json.gz")):
             gzfiles[(b,k)]=read_gzip(safe_path(root/"files",b,k),k)
         elif k.endswith(".json"):
@@ -227,10 +311,14 @@ def inspect(root,memory_limit="256MB"):
         elif doc.get("dataset") in ("stock_basic","stock_basic_snapshot") and isinstance(doc.get("records"),list):
             if doc.get("rows")!=len(doc["records"]) or len({r["ts_code"] for r in doc["records"]})!=len(doc["records"]):
                 raise ValueError("stock universe count/uniqueness mismatch")
-    unreferenced=sorted(b+"/"+k for b,k in set(files)|set(gzfiles) if (b,k) not in references)
+    legacy_buckets={b for b,k in objects if k in (LEGACY_BACKUP,LEGACY_PLAN,LEGACY_DONE)}
+    for b in sorted(legacy_buckets):
+        legacy_backups.append(verify_legacy_backup(root,b,objects,state,json_docs))
+        references.update((b,k) for k in (LEGACY_BACKUP,LEGACY_PLAN,LEGACY_DONE))
+    unreferenced=sorted(b+"/"+k for b,k in set(files)|set(gzfiles)|{(b,k) for b,k in objects if k==LEGACY_BACKUP} if (b,k) not in references)
     report={"passed":not unclassified and not unreferenced and bool(files or gzfiles),"parquet_files":len(files),
             "parquet_rows":sum(x["rows"] for x in files.values()),"gzip_files":len(gzfiles),
-            "gzip_rows":sum(x["rows"] for x in gzfiles.values()),"catalogs":catalogs,"manifest_references":len(references),
+            "gzip_rows":sum(x["rows"] for x in gzfiles.values()),"legacy_manifest_backups":legacy_backups,"legacy_original_manifests":sum(x["original_manifests"] for x in legacy_backups),"catalogs":catalogs,"manifest_references":len(references),
             "unclassified_manifests":sorted(unclassified),"unreferenced_parquet":unreferenced,
             "files":[{"bucket":b,"key":k,**v} for (b,k),v in sorted(files.items())]}
     write_json(root/"verify-archive.json",report)

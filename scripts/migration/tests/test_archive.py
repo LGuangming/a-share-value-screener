@@ -95,3 +95,75 @@ class ArchiveTest(unittest.TestCase):
         path.write_bytes(gzip.compress(b'{"ts_code":"000001.SZ"}\n')[:-5])
         with self.assertRaises((EOFError,OSError)):
             read_gzip(path,path.name)
+
+
+    def legacy_fixture(self,case="valid"):
+        import base64
+        import gzip
+        import hashlib
+        from archive_verify import RAW,LEGACY_BACKUP,LEGACY_PLAN,LEGACY_DONE
+        sha=lambda value: hashlib.sha256(value).hexdigest()
+        source="a-share-backtest/v1/prices/day.manifest.json"
+        dest=RAW+"daily_prices/day.manifest.json"
+        original=json.dumps({"object_key":"a-share-backtest/v1/prices/data.parquet"}).encode()
+        current=json.dumps(self.doc).encode()
+        def put(key,value):
+            self.s3.put_object(Bucket=self.bucket,Key=key,Body=value)
+        def put_json(key,value):
+            put(key,json.dumps(value).encode())
+        put(dest,current)
+        entry={"source_key":source,"object_key":dest,"sha256":sha(current),"bytes":len(current),
+               "source_sha256":sha(original),"source_bytes":len(original)}
+        receipt=RAW+"_inventory/daily_prices.json"
+        totals={"objects":1,"bytes":len(current),"source_bytes":len(original)}
+        put_json(receipt,{"dataset":"daily_prices","status":"copied_and_verified","entries":[entry],**totals})
+        put_json(RAW+"dataset_catalog.json",{"status":"consolidated_verified","raw_prefix":RAW,**totals,
+                 "datasets":[{"dataset":"daily_prices","prefix":RAW+"daily_prices/","inventory":receipt,**totals}]})
+        payload={source:base64.b64encode(original).decode()}
+        if case=="coverage": payload={}
+        if case=="bad_base64": payload[source]="!!!"
+        if case=="original_hash": payload[source]=base64.b64encode(original.replace(b"prices",b"quotes")).decode()
+        raw=json.dumps(payload).encode()
+        if case=="duplicate": raw=b"{"+raw[1:-1]+b","+raw[1:]
+        if case=="array": raw=b"[]"
+        blob=gzip.compress(raw,mtime=0)
+        if case!="missing_backup": put(LEGACY_BACKUP,blob)
+        inventory_sha=sha(json.dumps({source:entry},sort_keys=True,separators=(",",":")).encode())
+        plan={"status":"all_copies_verified_before_delete","inventory_sha256":inventory_sha,
+              "objects":1,"source_bytes":len(original),"backup_key":LEGACY_BACKUP,
+              "backup_sha256":sha(blob),"backup_bytes":len(blob),"original_manifests_preserved":1}
+        done={"status":"retired_verified","legacy_source_retained":False,"inventory_sha256":inventory_sha,
+              "deleted_objects":1,"deleted_source_bytes":len(original),
+              "original_manifest_backup":LEGACY_BACKUP,"backup_bytes":len(blob)}
+        if case=="backup_hash": plan["backup_sha256"]="0"*64
+        if case=="retirement_digest": done["inventory_sha256"]="0"*64
+        if case=="status": done["status"]="pending"
+        if case=="count": plan["original_manifests_preserved"]=2
+        put_json(LEGACY_PLAN,plan)
+        if case!="missing_done": put_json(LEGACY_DONE,done)
+        return self.materialize(self.doc)
+
+    def test_legacy_original_manifest_backup(self):
+        report=inspect(self.legacy_fixture())
+        self.assertTrue(report["passed"])
+        self.assertEqual(report["legacy_original_manifests"],1)
+        self.assertEqual(report["legacy_manifest_backups"][0]["original_manifests"],1)
+        self.assertEqual(report["gzip_rows"],0)
+        self.assertEqual(report["unreferenced_parquet"],[])
+
+    def test_legacy_backup_rejects_invalid_evidence(self):
+        for case in ("coverage","bad_base64","original_hash","duplicate","array","missing_backup",
+                     "backup_hash","retirement_digest","status","count","missing_done"):
+            with self.subTest(case=case):
+                self.setUp()
+                root=self.legacy_fixture(case)
+                with self.assertRaises(ValueError):
+                    inspect(root)
+                self.assertFalse((root/"verify-archive.json").exists())
+
+    def test_other_gzip_dictionary_still_rejected(self):
+        import gzip
+        from archive_verify import RAW
+        self.s3.put_object(Bucket=self.bucket,Key=RAW+"unknown.json.gz",Body=gzip.compress(b"{}"))
+        with self.assertRaisesRegex(ValueError,"unsupported gzip array"):
+            inspect(self.materialize(self.doc))
