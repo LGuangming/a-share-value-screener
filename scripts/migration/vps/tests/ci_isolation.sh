@@ -9,6 +9,20 @@ root=/opt/ashare/migration
 ! getent passwd ashare-migrate >/dev/null
 sudo install -d -m 0755 /opt/ashare
 sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin ashare-migrate
+# Hosted images can grant write access on /opt to the runner. Record and test
+# the refusal first; normalize only this disposable runner's parent metadata.
+stat -c 'fixture-parent %n owner=%u group=%g mode=%a' / /opt /opt/ashare
+df -hP /opt/ashare
+getent passwd ashare-migrate | cut -d: -f1,3,4,7
+if ! sudo /usr/bin/python3 -c 'import sys;sys.path.insert(0,"scripts/migration/vps");from prepare import require_parent,ROOT;require_parent(ROOT)' 2>/dev/null; then
+  result=0
+  output=$(sudo /usr/bin/python3 scripts/migration/vps/prepare.py --approved-local-prepare 2>&1) || result=$?
+  [[ "$result" == 1 && "$output" == "FAILED: UNSAFE_PARENT" && ! -e "$root" ]]
+  echo "PASS: insecure fixture parent refused"
+  [[ "$(stat -c %u /)" == 0 && ! -L /opt && -d /opt ]]
+  sudo chown root:root /opt
+  sudo chmod go-w /opt
+fi
 sudo /usr/bin/python3 scripts/migration/vps/prepare.py --approved-local-prepare
 if sudo /usr/bin/python3 scripts/migration/vps/prepare.py --approved-local-prepare; then exit 1; fi
 sudo -u ashare-migrate test -w "$root/archive"
