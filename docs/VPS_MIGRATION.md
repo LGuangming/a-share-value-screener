@@ -124,3 +124,82 @@ archive-first financial import and NCAV calculation, repeatability, metadata
 and atomic failure tests. Production archive migration, actual data coverage,
 multi-strategy performance, throughput and real VPS authenticated maintenance
 remain separate acceptance steps.
+
+## Phase 08 — application Docker images and Compose
+
+Two Linux amd64 images are built separately: Node 22 Debian slim Next.js
+standalone web (UID 10001) and Python 3.11 Debian slim worker (UID 10002).
+Both use shared GID 10010. Existing Vercel builds do not enable standalone;
+the Docker build sets NEXT_STANDALONE=1 only during image build. npm ci uses
+the committed package-lock.json; Python dependencies retain declared ranges.
+No deployment credentials are built into either image. Build context uses
+an allowlist; data, env files, backups and Git metadata are excluded.
+
+The application compose file expects pre-existing 1Panel-managed database
+and proxy networks; does not install PostgreSQL or OpenResty. The database
+host alias in the environment examples is illustrative. The actual network
+names and host alias must be confirmed on the VPS in later phases. Worker
+also attaches to a dedicated bridge for Tushare network egress. By default
+no host port is published. For host-based OpenResty only, the optional
+compose.loopback.yaml binds web to 127.0.0.1:3000; never expose 3000 or 5432
+on the public interface. Retain the password gate and HTTPS. Rate limiting
+and public reverse proxy verification belong to the later OpenResty phase.
+
+Proposed host layout (not created in phase 08):
+```
+/opt/ashare/app/compose.yaml
+/opt/ashare/config/.env
+/opt/ashare/config/web.env
+/opt/ashare/config/worker.env
+/opt/ashare/archive
+/opt/ashare/cache/nextjs
+/opt/ashare/tmp/duckdb
+/opt/ashare/backup
+```
+Keep private env files mode 0600, not in the repository or image. Use distinct
+reader and writer database roles, and do not pass the signing secret to the
+worker. Pre-create bind directories; Compose refuses missing sources. Set
+archive owner 10002:10010, mode 2750; imported directories must be traversable
+by the shared group and files readable (e.g. 0640). The web bind is read-only.
+Set scratch owner 10002:10010 and web cache owner 10001:10010. Do not recursively
+chown any existing production data until explicitly authorized. Confirm no
+UID/GID conflict on the actual server. The archive mount must be the same
+filesystem for all local writer tasks and staging. Cache and scratch are
+disposable; archive/database are durable, outside the containers.
+
+Web is capped at 768 MiB / 1.5 CPU, Node heap at 512 MiB; worker at
+1024 MiB / 2 CPU, DuckDB managed memory 512 MB. These are initial limits,
+not measured capacity. No Docker socket or privileged access is mounted.
+Both run non-root, drop all capabilities, and have rotated JSON logs
+(10 MiB x 3 per container). Web restarts unless stopped; worker is
+profile-gated, one-shot, no restart. Schedule only after migration approval.
+
+The web image healthcheck is a liveness probe of /login (200 or
+unconfigured 503 indicates the server is responding). It is not readiness
+or a claim that the password is configured; authenticated /api/health,
+database read and archive coverage must be checked separately before cutover.
+The existing password protection is unchanged; no public health bypass.
+
+After later authorization and verified network/permissions, intended commands
+from /opt/ashare/app are:
+```
+docker compose --env-file ../config/.env config --quiet
+docker compose --env-file ../config/.env up -d web
+docker compose --env-file ../config/.env run --rm worker market
+docker compose --env-file ../config/.env run --rm worker financial --budget 40
+docker compose --env-file ../config/.env run --rm worker maintenance
+```
+Do not run these against production yet. No registry publication workflow,
+credentials, deployment, scheduler, database setup or automatic cleanup
+is included. Pin reviewed immutable SHA tags or image digests once published.
+Retain previous image versions for app rollback; schema/data rollback is separate.
+
+Docker CI builds local images only on an isolated runner. The test overlay
+starts disposable PostgreSQL 17 with separate fixture writer/reader roles.
+A real worker writes synthetic Parquet and SQL through the local storage
+adapter. Real standalone web must serve authenticated queries and static
+assets, reject unauthenticated access, fail writes to the read-only archive
+and database, and preserve SQL/archive state across web recreation. Test
+network and volumes are removed after each run. No actual providers or
+production credentials are used. Real image size and resource use are
+reported/verified by CI and later VPS load tests; no performance promise.

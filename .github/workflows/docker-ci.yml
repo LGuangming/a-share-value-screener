@@ -1,0 +1,38 @@
+name: Docker Images and Compose
+on:
+  pull_request:
+  push:
+    branches: [feature/vps-docker-compose]
+    paths:
+      - 'Dockerfile.*'
+      - 'compose*.yaml'
+      - '.dockerignore'
+      - 'package*.json'
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'backend/**'
+      - 'tests/**'
+      - 'next.config.ts'
+      - '.github/workflows/docker-ci.yml'
+permissions:
+  contents: read
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build local Web image (no push)
+        run: docker build --platform linux/amd64 -f Dockerfile.web -t ashare-web:ci .
+      - name: Build local Worker image (no push)
+        run: docker build --platform linux/amd64 -f Dockerfile.worker -t ashare-worker:ci .
+      - name: Check image size and runtime metadata
+        run: docker image inspect ashare-web:ci ashare-worker:ci --format '{{.RepoTags}} size={{.Size}} user={{.Config.User}}'
+      - name: Isolated Compose smoke and recreation
+        run: bash tests/docker-smoke.sh
