@@ -7,6 +7,13 @@ on:
 permissions:
   contents: read
 jobs:
+  # Explicit no-package-permission review of the GHCR workflow branch only.
+  ghcr-pr27-review:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/ghcr-test-publish'
+    uses: ./.github/workflows/ghcr-reviewed-pair.yml
+    permissions:
+      contents: read
+      actions: read
   python-tests:
     runs-on: ubuntu-latest
     steps:

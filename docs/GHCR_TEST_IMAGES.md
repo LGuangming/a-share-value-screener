@@ -71,3 +71,16 @@ Review CI must succeed on this PR #27 SHA before publication is considered.
 The dispatch-only artifact transfer, registry login/push/pull and private
 API visibility checks are unexecuted by design in review mode; no claim
 that GHCR permissions or package existence have been validated.
+
+## Read-only review trigger
+
+The first 11E-15 commit 6d6f79a only showed Tests and Build at inspection;
+the direct GHCR run was not yet observed. A reusable ghcr-reviewed-pair.yml
+workflow now holds the two read-only acceptance jobs. Tests and Build
+explicitly calls it on feature/ghcr-test-publish pushes. The normal PR and
+future manual main wrapper call the identical reusable workflow. Neither
+the reusable workflow nor the review caller has packages:write; only the
+manual wrapper's dispatch-only publish-test job has that permission. No
+secrets inherited. The wrapper and reusable workflow must retain identical
+REVIEWED_SHA and REVIEWED_RUN; mismatch also fails the accepted-pair receipt
+check before publication. No publish job exists in the push review path.
