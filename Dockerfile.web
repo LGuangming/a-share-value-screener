@@ -1,7 +1,11 @@
 # syntax=docker/dockerfile:1
 # CI resolves the candidate tag to one immutable manifest before both test matrices.
-ARG NODE_BASE=node:26-trixie-slim
-ARG WEB_RUNTIME_BASE=gcr.io/distroless/nodejs26-debian13:nonroot
+ARG NODE_BASE=docker.io/library/node:26-trixie-slim@sha256:abe7e5a82b61a8ef67b315b85497c9e65173387ccf2f4a029248184b8e020be5
+ARG WEB_RUNTIME_BASE=gcr.io/distroless/nodejs26-debian13:nonroot@sha256:ffa8a7545403036c94ec76674b5dbac2d425af2d679147cdf3e30180071487b7
+FROM ${NODE_BASE} AS zstd-patch
+COPY deploy/prepare-zstd-patch.sh /prepare-zstd-patch.sh
+RUN sh /prepare-zstd-patch.sh
+
 FROM ${NODE_BASE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -20,6 +24,7 @@ RUN npm run typecheck && npm run build && mkdir -p public /app/runtime-cache
 
 # Use a real minimal runtime, not a full distribution with scanner metadata removed.
 FROM ${WEB_RUNTIME_BASE} AS runner
+COPY --from=zstd-patch /patch/ /
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 NODE_OPTIONS=--max-old-space-size=512 PATH=/nodejs/bin:/usr/bin:/bin
 COPY --from=builder --chown=10001:10010 /app/.next/standalone ./

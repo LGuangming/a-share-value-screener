@@ -119,3 +119,40 @@ timezone, compression, SQLite, PostgreSQL and readiness compatibility.
 SBOM replaces dpkg-query inventory for shell-free image. Zero HIGH and
 CRITICAL, including unfixed, and secret scan remain mandatory.
 No registry push, merge, VPS deployment or production changes.
+
+## Phase 11E-4 — runtime diagnosis, verified zstd update and patch comparison
+
+11E-3 run 45579331976 built both images and passed all application
+tests; Worker failed the installer module assertion before imports
+and Compose smoke. Actual culprit not printed by that run. The
+new build-only script logs each module origin before removing only
+optional installer code from allowed paths, fails on ambiguous paths,
+and keeps all Debian and Python package metadata. Runtime checks
+still require no installers, exact distributions and native imports.
+No scanner exceptions. Debian venv metadata can still be flagged.
+
+Both final images receive the full libzstd1 1.5.7+dfsg-1+deb13u1
+amd64 .deb from signed Debian APT sources. The extracted payload and
+original control/md5sums are installed in Distroless's documented
+status.d format, not a fabricated version string. Verify payload
+checksums in both actual final images and native loader in Worker.
+APT download fails closed if fixed version is unavailable. Other
+system packages and metadata remain intact. Package version is
+pinned; repository access and package bytes still need actual CI
+verification, and archive SHA256 is printed at build time.
+
+Four actual prior manifest digests and 15 prior CP313 wheel hashes
+are now committed as candidate locks, not release approval. CI
+verifies manifest identity and independently downloads and hashes
+the exact wheels, compares the committed lock, and builds with
+--require-hashes. Application integration also uses the hash lock.
+Source default digests match the committed lock. No auto-refresh.
+
+Separate slim-evaluation stage/job tests the official CPython 3.13
+slim build image with APT upgrades and removed Python installers,
+compares actual patch version, native imports, size and strict
+Trivy findings; shell remains for this comparison. It is not the
+default target, does not run the complete Compose matrix and is
+not approved for deployment. Distroless remains the primary
+candidate. All full application and two primary DB matrices and
+strict secret/HIGH/CRITICAL scans retained. No publish or merge.

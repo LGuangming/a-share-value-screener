@@ -21,6 +21,8 @@
 !backend/requirements-worker.cp313.hashes.txt
 !backend/value_screener/
 !backend/value_screener/**
+!deploy/
+!deploy/prepare-zstd-patch.sh
 !database/
 !database/**
 # Defense in depth inside allowed paths.
