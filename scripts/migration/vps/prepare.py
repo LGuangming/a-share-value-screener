@@ -36,7 +36,9 @@ def mkdir(path, mode, uid=0, gid=0):
     os.chown(path,uid,gid)
     path.chmod(mode)
 
-def prepare(root,uid,gid):
+def prepare(root,uid,gid,mode="isolated"):
+    if mode not in ("isolated","shared"):
+        raise PreparationError("UNKNOWN_MODE")
     require_parent(root)
     if uid<=0 or gid<=0 or root.exists() or root.is_symlink():
         raise PreparationError("EXISTING_ROOT_OR_INVALID_IDENTITY")
@@ -53,22 +55,30 @@ def prepare(root,uid,gid):
     mkdir(root/"ops-public",0o755)
     for d in PRIVATE:
         mkdir(root/d,0o700,uid,gid)
-    for filename,dest,mode in (
+    files = (
         ("compose.yml","compose.yml",0o644),
         ("db-init/10-roles.sh","bin/db-init/10-roles.sh",0o755),
         ("prepare.py","bin/prepare.py",0o755),
         ("ops_dispatch.py","bin/ops_dispatch.py",0o755),
         ("control.py","bin/control.py",0o755),
         ("image_lock.py","bin/image_lock.py",0o644),
-    ):
-        write_new(root/dest,(SOURCE/filename).read_bytes(),mode)
+    ) if mode=="isolated" else (
+        ("shared_admin.py","bin/shared_admin.py",0o755),
+        ("../shared_target.py","bin/shared_target.py",0o644),
+        ("ops_dispatch.py","bin/ops_dispatch.py",0o755),
+        ("image_lock.py","bin/image_lock.py",0o644),
+    )
+    for filename,dest,file_mode in files:
+        write_new(root/dest,(SOURCE/filename).read_bytes(),file_mode)
     # Private parent prevents host access to 0444 files; PostgreSQL's unprivileged
     # entrypoint must be able to read the read-only bind mount inside its container.
-    for key,role in (("admin","postgres"),("owner","migration_owner"),("reader","screener_reader"),("writer","screener_writer")):
+    roles=(("admin","postgres"),("owner","migration_owner"),("reader","screener_reader"),("writer","screener_writer")) if mode=="isolated" else (("owner","ashare_mig_owner"),("reader","ashare_mig_reader"),("writer","ashare_mig_writer"))
+    port=55432 if mode=="isolated" else 5432
+    for key,role in roles:
         value=secrets.token_hex(32)
-        write_new(root/"config/private/db-secrets"/key,(value+"\n").encode(),0o444)
+        write_new(root/"config/private/db-secrets"/key,(value+"\n").encode(),0o444 if mode=="isolated" else 0o600)
         if key!="admin":
-            entry=f"127.0.0.1:55432:ashare_migration:{role}:{value}\n"
+            entry=f"127.0.0.1:{port}:ashare_migration:{role}:{value}\n"
             # Separate credential files, not one shared credential for all roles.
             # Only owner file is readable by the local migration identity.
             owner=(uid,gid) if key=="owner" else (0,0)
@@ -79,13 +89,14 @@ def prepare(root,uid,gid):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument("--approved-local-prepare",action="store_true")
+    p.add_argument("--mode",choices=("isolated","shared"),default="isolated")
     a=p.parse_args()
     if not a.approved_local_prepare or os.geteuid()!=0:
         raise PreparationError("LOCAL_ROOT_APPROVAL_REQUIRED")
     account=pwd.getpwnam("ashare-migrate")
     if account.pw_uid<100 or account.pw_shell not in ("/usr/sbin/nologin","/sbin/nologin","/bin/false"):
         raise PreparationError("NONINTERACTIVE_ACCOUNT_REQUIRED")
-    prepare(ROOT,account.pw_uid,account.pw_gid)
+    prepare(ROOT,account.pw_uid,account.pw_gid,a.mode)
 
 if __name__=="__main__":
     try: main()

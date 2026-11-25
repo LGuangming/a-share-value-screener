@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import psycopg
 from psycopg import sql
 from common import digest, load, main_guard, write_json
+from shared_target import shared, check_target_env, verify_target
 
 LOCAL = {"127.0.0.1", "::1", "localhost"}
 TARGET = "ashare_migration"
@@ -21,11 +22,17 @@ def check_env(live=False, target=False):
     db = os.environ.get("PGDATABASE", "")
     if not host or not db or "," in host or os.getenv("PGHOSTADDR") or os.getenv("PGSERVICE"):
         raise ValueError("explicit single PGHOST/PGDATABASE required")
+    if target and shared():
+        check_target_env()
+    elif target and os.getenv("PGPORT", "5432") not in ("55432", "55442"):
+        raise ValueError("isolated target port required; shared mode is explicit")
     if target and (host not in LOCAL or db != TARGET):
         raise ValueError("restore and verify restricted to isolated loopback database")
     if host not in LOCAL:
         if target or not live or "-pooler" in host or os.getenv("PGSSLMODE") != "verify-full":
             raise ValueError("remote source requires approved direct TLS connection")
+    if not target and shared() and host in LOCAL and db!="ashare_source":
+        raise ValueError("shared mode forbids protected local source databases")
     if not live and not target and (host not in LOCAL or db != "ashare_source"):
         raise ValueError("simulation source only")
     if os.getenv("PGPASSWORD"):
@@ -36,7 +43,14 @@ def check_env(live=False, target=False):
 
 def connect(live=False, target=False):
     check_env(live, target)
-    return psycopg.connect("", connect_timeout=10, autocommit=True)
+    c=psycopg.connect("", connect_timeout=10, autocommit=True)
+    if target and shared():
+        try:
+            verify_target(c,check_target_env())
+        except Exception:
+            c.close()
+            raise
+    return c
 
 def rows(c, query):
     return [list(r) for r in c.execute(query).fetchall()]
@@ -161,13 +175,17 @@ def restore(args):
     if not args.approved_isolated_restore:
         raise ValueError("isolated restore approval required")
     with connect(target=True) as c:
+        if shared():
+            c.execute("SELECT pg_advisory_lock(617392001)")
+            verify_target(c,check_target_env())
         if c.execute("SELECT current_database()").fetchone()[0]!=TARGET:
             raise ValueError("wrong database")
         if c.execute("SELECT count(*) FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE "+SYSTEM+" AND r.relkind IN ('r','p','v','m','S','f')").fetchone()[0]:
             raise ValueError("target is not empty")
         if c.execute("SELECT count(*) FROM pg_namespace n WHERE "+SYSTEM+" AND n.nspname <> 'public'").fetchone()[0]:
             raise ValueError("target contains custom schemas")
-    run(["pg_restore","--exit-on-error","--single-transaction","--no-owner","--no-acl","--dbname="+TARGET,str(dump)])
+        # Keep target session open to prevent concurrent DROP DATABASE; no --create/--clean.
+        run(["pg_restore","--exit-on-error","--single-transaction","--no-owner","--no-acl","--dbname="+TARGET,str(dump)])
     print("isolated restore complete; verify separately")
 
 def verify(args):

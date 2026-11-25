@@ -206,3 +206,27 @@ jobs:
           for script in scripts/migration/vps/db-init/10-roles.sh scripts/migration/vps/tests/ci_isolation.sh scripts/migration/vps/preflight.sh; do bash -n "$script"; done
       - name: Disposable runner filesystem and PostgreSQL isolation
         run: bash scripts/migration/vps/tests/ci_isolation.sh
+
+  shared-instance-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+          python -m pip install 'psycopg[binary]>=3.2,<4'
+      - name: Shared target guard tests
+        run: |
+          PYTHONPATH=scripts/migration python -m unittest discover -s scripts/migration/tests -p test_shared_guards.py -v
+          bash -n scripts/migration/vps/tests/ci_shared.sh
+      - name: Disposable shared instance restore, ACL and protected database fingerprints
+        run: bash scripts/migration/vps/tests/ci_shared.sh

@@ -5,8 +5,9 @@ from psycopg import sql
 from common import load, write_json, main_guard
 from postgres import connect, SYSTEM
 
-READER="screener_reader"
-WRITER="screener_writer"
+from shared_target import shared, ROLES as SHARED_ROLES
+
+READER,WRITER=SHARED_ROLES[1:] if shared() else ("screener_reader","screener_writer")
 ROLES=(READER,WRITER)
 TABLE_PRIVS=("SELECT","INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER")
 SEQ_PRIVS=("USAGE","SELECT","UPDATE")
@@ -120,6 +121,8 @@ def main():
     (Path(a.root)/"verify-acl.json").unlink(missing_ok=True)
     with connect(target=True) as c:
         with c.transaction():
+            if shared():
+                c.execute("SELECT pg_advisory_xact_lock(617392001)")
             plan=policy(c,a.policy)
             if a.action=="apply":
                 grant(c,plan)

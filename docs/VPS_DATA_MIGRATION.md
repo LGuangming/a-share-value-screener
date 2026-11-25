@@ -244,3 +244,72 @@ B4 runner diagnostic: /opt on hosted CI was mode 0777; the strict preparation gu
 Approved D01-B-4 CI pull evidence: postgres:18.7-alpine digest sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71. Compose and production-size pressure fixtures use postgres@that digest, with Compose linux/amd64 and pull_policy never. Existing 17/18 floating-tag compatibility matrix intentionally remains unchanged. Runtime control requires the exact digest reference, verified local RepoDigests, Linux amd64 and actual container image ID matching the local pinned image. An unrelated image, mutable tag, missing digest or different platform fails closed; stop uses the same checks. No image is pulled on the VPS by this PR.
 
 Run scripts/migration/vps/preflight.sh only as local root on the VPS, after reviewing its exact commit contents. It reads host resources, path ownership, Docker metadata, local image evidence, account membership and network baseline; no SQL, downloads, container execution, filesystem creation or firewall changes. A missing image is a review gate; no pull is attempted. At least 30 GiB free on each relevant filesystem is a conservative preflight rule, 1.5 GiB MemAvailable and cgroup v2 memory controller required. Separate filesystem budgets, inode headroom, actual sudo/SSH policies and outbound network reachability remain manual review. A completed preflight is not authorization for initialization. For sudo policy locally use sudo -l -U ashare-ops and, if present, sudo -l -U ashare-migrate; do not publish secret-bearing outputs. Existing VPS remote dispatcher is unchanged.
+
+
+## D01-B-5D revised: shared instance preferred, isolated instance optional
+
+The existing ashare-postgres is the preferred target at 127.0.0.1:5432.
+Keep ashare and ashare_test unchanged. Shared mode does not create a Docker
+container, volume, network, or expose port 55432. It requires the existing
+container ID, approved image digest, internal ashare-db network and tested
+800 MiB/1.5 CPU limits. No production VPS operations are performed by CI.
+Existing isolated mode, Compose, stop tool and regression tests remain available.
+
+IMPORTANT: PostgreSQL roles are cluster-wide; revoking individual CONNECT
+cannot deny privileges granted to PUBLIC. Do not revoke PUBLIC CONNECT from
+existing databases or alter existing roles. Shared mode deliberately refuses
+initialization unless the first four parsed pg_hba.conf rules are the exact
+scoped rules printed by shared_admin.py hba-plan, the config reload has been
+observed, and real rejected-authentication probes pass for all other connectable
+databases. Only the three new names ashare_mig_owner, ashare_mig_reader and
+ashare_mig_writer are affected. This requires separately approved local admin
+review of existing HBA rules, backup and controlled reload before real init;
+there is no automatic host HBA writer in the tools. Existing rules must be
+preserved byte-for-byte below the scoped block. Never weaken or replace them.
+Denied connection attempts against protected database names (must fail before
+login) require approval in the actual environment; CI only uses synthetic DBs.
+If HBA changes/reload are not approved or the existing configuration cannot
+satisfy these constraints, use independent-container mode instead.
+
+For future approved local preparation use prepare.py --mode shared
+--approved-local-prepare (new root only), retaining private migration directories
+and only dedicated credentials. No standalone Compose or stop tool is installed
+in shared mode. shared_admin.py init --container-id FULL_ID
+--approved-shared-init runs only local Docker exec admin SQL against postgres
+maintenance database and new ashare_migration. It refuses existing names,
+creates NOLOGIN roles and an initially inaccessible empty DB, sets target ACL,
+verifies HBA denial, writes a root-owned cluster/database/role-OID record, then
+enables the dedicated roles. Partial initialization requires manual review;
+no automatic DROP or retry. PostgreSQL superusers and trusted root operators
+are outside this security boundary. No concurrent administrative role/DB/HBA
+changes during a migration window.
+
+To execute shared target restore/verify/ACL use ASHARE_MIGRATION_MODE=shared,
+PGHOST=127.0.0.1, PGPORT=5432, PGDATABASE=ashare_migration,
+PGUSER=ashare_mig_owner and the dedicated owner pgpass in config/client.
+Run as ashare-migrate, with reviewed scripts and dependencies. The target
+guard validates root-owned identity evidence, live system_identifier, database
+OID, role OIDs, owner, login and privileges; default isolated mode rejects
+5432. The single-transaction restore holds a live connection/advisory lock,
+does not use --create or --clean, and requires an empty target. ACL applies
+only dedicated role names. Run local shared_admin monitor before each heavy
+step: whole-instance cgroup peak/events, connection counts, host resources.
+The existing 800 MiB cap is shared, NOT an independent quota; serial heavy
+work only. No automatic shared-container stop. Approved pause only changes
+the three bound migration roles to NOLOGIN, does not kill sessions, drop DB,
+delete data, restart or stop the shared container. If sessions remain, they
+must drain; resuming needs separate review. HBA must be rechecked before
+every migration session; a later privileged HBA change is not prevented by
+the database identity check.
+
+CI uses a disposable shared container with two protected synthetic databases,
+a source fixture and migration target. It checks schema/data dumps, database
+ACL/owner/flags, existing roles/membership and container metadata before and
+after, missing HBA/role collision refusal, real restore and ACL, cross-database
+rejection, monitor and NOLOGIN pause. On Docker engines where an internal bridge
+does not publish host loopback, the fixture uses nsenter into its own network
+namespace for TCP tests. This validates PostgreSQL isolation, not actual VPS
+host TCP reachability; verify VPS 127.0.0.1:5432 reachability separately before
+approving real shared init. Do not change firewall or production network to
+make the fixture work. Actual host Docker identity, HBA review, shared
+resource headroom and real application availability remain independent gates.
