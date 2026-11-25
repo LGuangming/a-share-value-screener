@@ -1,0 +1,91 @@
+name: Data migration preparation (isolated fixtures only)
+on:
+  pull_request:
+    paths:
+      - 'scripts/migration/**'
+      - 'docs/VPS_DATA_MIGRATION.md'
+      - '.github/workflows/data-migration-inventory.yml'
+  push:
+    branches:
+      - 'feature/vps-data-migration-preparation'
+    paths:
+      - 'scripts/migration/**'
+      - 'docs/VPS_DATA_MIGRATION.md'
+      - '.github/workflows/data-migration-inventory.yml'
+permissions:
+  contents: read
+jobs:
+  simulated-storage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install 'psycopg[binary]>=3.2,<4' 'boto3>=1.40,<2' 'moto[s3]>=5,<6'
+      - run: PYTHONPATH=scripts/migration python -m unittest discover -s scripts/migration/tests -v
+      - run: bash -n scripts/migration/inventory_vps.sh
+  postgres-restore:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ['17', '18']
+    services:
+      source:
+        image: postgres:${{ matrix.source }}-alpine
+        env:
+          POSTGRES_PASSWORD: fixture-only-password
+          POSTGRES_DB: ashare_source
+        ports:
+          - 55431:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ashare_source"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+      target:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: fixture-only-password
+          POSTGRES_DB: ashare_migration
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ashare_migration"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PostgreSQL 18 client and Python dependencies
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+          python -m pip install 'psycopg[binary]>=3.2,<4'
+      - name: Snapshot, restore and verify fixtures
+        env:
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGSSLMODE: disable
+        run: |
+          set -euo pipefail
+          umask 077
+          export PGPASSFILE="$RUNNER_TEMP/fixture.pgpass"
+          printf '127.0.0.1:55431:ashare_source:postgres:fixture-only-password\n127.0.0.1:55432:ashare_migration:postgres:fixture-only-password\n' > "$PGPASSFILE"
+          trap 'rm -f "$PGPASSFILE"' EXIT
+          export PGPORT=55431 PGDATABASE=ashare_source
+          psql -v ON_ERROR_STOP=1 -f scripts/migration/tests/fixture.sql
+          python scripts/migration/postgres.py backup --root "$RUNNER_TEMP/evidence"
+          export PGPORT=55432 PGDATABASE=ashare_migration
+          python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/evidence" --approved-isolated-restore
+          python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/evidence"
+          if python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/evidence" --approved-isolated-restore; then exit 1; fi
+          psql -v ON_ERROR_STOP=1 -c "UPDATE research.quotes SET close=99 WHERE stock_id=1"
+          if python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/evidence"; then exit 1; fi
+          echo 'PASS: restore guard and tamper detection'
