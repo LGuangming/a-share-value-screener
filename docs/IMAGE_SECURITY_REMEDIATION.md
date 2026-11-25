@@ -174,3 +174,7 @@ registry push, VPS, production modification or waiver.
 ## Phase 11E-7 — security closeout
 
 See [MINIMAL_SECURITY_CLOSEOUT.md](MINIMAL_SECURITY_CLOSEOUT.md). Lock all 12 observed Debian archives, independently report CPython/pyexpat provenance and the reviewed Expat version floor, preserve original candidate and primary gates, and add v0.76.2 strict comparison for Minimal and Web. The observed Expat 2.9.0 is a real outstanding blocker despite absent Debian-package finding. No merge, publish or deployment.
+
+## Phase 11E-8 — directed components
+
+See [MINIMAL_COMPONENT_REMEDIATION.md](MINIMAL_COMPONENT_REMEDIATION.md). Build coupled pyexpat and _elementtree from locked upstream CPython and Expat releases, verify regression and provenance; test removal of optional curses/readline/_uuid, with exact revised Debian closure. Keep existing default and full strict CI. SQLite/OpenSSL still blocked by signed stable-package availability. No merge/publish/deployment.

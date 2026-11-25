@@ -6,6 +6,8 @@ import hashlib
 import json
 from pathlib import Path
 import pyexpat
+import _elementtree
+import xml.etree.ElementTree as ET
 import re
 import sqlite3
 import ssl
@@ -33,6 +35,13 @@ for name, expected in manifest["upstream_component_sha256"].items():
         actual = hashlib.file_digest(fd, "sha256").hexdigest()
     if actual != expected:
         errors.append("Copied upstream component hash mismatch: " + name)
+if manifest["xml_rebuild"]["upstream_xml_regression"] != "passed" or ET.Element is not _elementtree.Element:
+    errors.append("Coupled XML extension regression evidence absent")
+for module in (pyexpat, _elementtree):
+    if manifest["upstream_component_sha256"].get(module.__file__) != manifest["xml_rebuild"]["rebuilt_extensions"][module.__name__]["rebuilt_sha256"]:
+        errors.append("Rebuilt XML component provenance mismatch: " + module.__name__)
+if ET.fromstring("<r><v>ok</v></r>")[0].text != "ok":
+    errors.append("ElementTree runtime parse failed")
 loader = "/lib64/ld-linux-x86-64.so.2"
 xml_links = subprocess.check_output([loader, "--list", pyexpat.__file__], text=True)
 # Capture dependency consumers in final image; useful for deciding whether
@@ -60,6 +69,7 @@ report = {
     "expat": pyexpat.EXPAT_VERSION,
     "pyexpat_file": pyexpat.__file__,
     "pyexpat_loader": xml_links,
+    "xml_rebuild": manifest["xml_rebuild"],
     "expat_review": expat_reviews,
     "sqlite": sqlite3.sqlite_version,
     "openssl": ssl.OPENSSL_VERSION,

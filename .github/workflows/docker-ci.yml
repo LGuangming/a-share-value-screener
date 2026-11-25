@@ -308,7 +308,7 @@ jobs:
   minimal-worker-evaluation:
     needs: resolve-base-images
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 65
     strategy:
       fail-fast: false
       matrix:
@@ -344,6 +344,7 @@ jobs:
           import os,sys,ssl,sqlite3,duckdb,numpy,pandas,psycopg,boto3,baostock,zoneinfo,zlib,ctypes,shutil,importlib.util,importlib.metadata,json,xml.parsers.expat
           print(sys.version,ssl.OPENSSL_VERSION,sqlite3.sqlite_version,xml.parsers.expat.EXPAT_VERSION)
           assert sys.version_info[:3]==(3,13,18)
+          assert xml.parsers.expat.EXPAT_VERSION=="expat_2.11.0"
           assert (os.getuid(),os.getgid())==(10002,10010)
           assert not os.path.exists("/bin/sh")
           assert all(shutil.which(x) is None for x in ("sh","bash","pip","pip3","apt","apt-get","dpkg"))

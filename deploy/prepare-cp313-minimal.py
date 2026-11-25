@@ -34,7 +34,8 @@ for library in pathlib.Path("/usr/local/lib").glob("libpython3.13.so*"):
 # imports in application code block the build. No dynamic reachability claim.
 stdlib = pathlib.Path("/usr/local/lib/python3.13")
 wheel_root = pathlib.Path("/opt/venv/lib/python3.13/site-packages")
-gui = {"tkinter", "_tkinter", "idlelib", "turtle", "turtledemo"}
+gui = {"tkinter", "_tkinter", "idlelib", "turtle", "turtledemo", "curses", "_curses", "_curses_panel", "readline", "_uuid"}
+optional_native = {"_tkinter", "_curses", "_curses_panel", "readline", "_uuid"}
 references = []
 for scope, directory in (("application", pathlib.Path("/audit/value_screener")), ("wheel", wheel_root)):
     for source in sorted(directory.rglob("*.py")):
@@ -59,13 +60,14 @@ def omit(path, names):
     path = pathlib.Path(path)
     selected = set(names) & {"__pycache__"}
     if path == stdlib:
-        selected |= set(names) & {"site-packages", "ensurepip", "tkinter", "idlelib", "turtle.py", "turtledemo"}
+        selected |= set(names) & {"site-packages", "ensurepip", "tkinter", "idlelib", "turtle.py", "turtledemo", "curses"}
     if path == stdlib / "lib-dynload":
-        selected |= {n for n in names if n.startswith("_tkinter.") and n.endswith(".so")}
+        selected |= {n for n in names if n.split(".", 1)[0] in optional_native and n.endswith(".so")}
     excluded.extend(str((path / name).relative_to(stdlib)) for name in sorted(selected) if name != "__pycache__")
     return selected
 shutil.copytree(stdlib, python_root / "lib/python3.13", symlinks=True, ignore=omit)
-assert not list((python_root / "lib/python3.13/lib-dynload").glob("_tkinter*.so"))
+for module in optional_native:
+    assert not list((python_root / "lib/python3.13/lib-dynload").glob(module + ".*.so")), module
 print("Excluded stdlib entries:", sorted(excluded), flush=True)
 print("GUI import evidence:", json.dumps(references), flush=True)
 # Determine native dependencies from actual ELF files, including wheel-private
@@ -112,7 +114,7 @@ records = []
 lock = json.loads(pathlib.Path("/minimal-debian-amd64.lock.json").read_text())
 assert lock["architecture"] == "amd64"
 locked = {entry["package"]: entry for entry in lock["packages"]}
-assert len(locked) == len(lock["packages"]) == 12
+assert len(locked) == len(lock["packages"]) == 8
 if set(locked) != packages - base_packages:
     raise RuntimeError(f"Native package closure changed: extra={sorted(packages - base_packages - set(locked))}, missing={sorted(set(locked) - packages)}")
 for package in sorted(packages - base_packages):
@@ -149,7 +151,17 @@ for package in sorted(packages - base_packages):
 # Record the bytes of the actual upstream interpreter and bundled XML extension.
 # No claim that the upstream interpreter is a Debian package.
 import pyexpat
-component_paths = [python_root / "bin/python3.13", *sorted((python_root / "lib").glob("libpython3.13.so*")), python_root / "lib/python3.13/lib-dynload" / pathlib.Path(pyexpat.__file__).name]
+import _elementtree
+component_paths = [python_root / "bin/python3.13", *sorted((python_root / "lib").glob("libpython3.13.so*")), python_root / "lib/python3.13/lib-dynload" / pathlib.Path(pyexpat.__file__).name, python_root / "lib/python3.13/lib-dynload" / pathlib.Path(_elementtree.__file__).name]
+assert pyexpat.EXPAT_VERSION == "expat_2.11.0"
+xml_provenance = json.loads(pathlib.Path("/minimal-xml-build-provenance.json").read_text())
+for module in (pyexpat, _elementtree):
+    file = pathlib.Path(module.__file__)
+    with file.open("rb") as fd:
+        assert hashlib.file_digest(fd, "sha256").hexdigest() == xml_provenance["rebuilt_extensions"][module.__name__]["rebuilt_sha256"]
+license_dir = root / "usr/local/share/licenses/minimal-xml"
+shutil.copytree("/minimal-xml-licenses", license_dir)
+
 component_files = {}
 for component in component_paths:
     if component.is_file() and not component.is_symlink():
@@ -158,5 +170,5 @@ for component in component_paths:
 assert any("pyexpat" in name for name in component_files)
 manifest = root / "opt/cp313-provenance.json"
 manifest.parent.mkdir(exist_ok=True)
-manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION}, indent=2)+"\n")
+manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION, "xml_rebuild": xml_provenance}, indent=2)+"\n")
 print(manifest.read_text())
