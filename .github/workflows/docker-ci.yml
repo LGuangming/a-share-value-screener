@@ -18,9 +18,40 @@ on:
 permissions:
   contents: read
 jobs:
-  docker-smoke:
+  resolve-base-images:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.resolve.outputs.node }}
+      python: ${{ steps.resolve.outputs.python }}
+    steps:
+      - name: Resolve Trixie candidates to immutable manifests (read only)
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolve() {
+            local image="$1" digest
+            digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            printf '%s@%s\n' "$image" "$digest"
+          }
+          node="$(resolve docker.io/library/node:22-trixie-slim)"
+          python="$(resolve docker.io/library/python:3.11-slim-trixie)"
+          printf 'node=%s\npython=%s\n' "$node" "$python" >> "$GITHUB_OUTPUT"
+          printf 'NODE_BASE=%s\nPYTHON_BASE=%s\n' "$node" "$python" | tee "$RUNNER_TEMP/base-images.lock"
+          cat "$RUNNER_TEMP/base-images.lock" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve resolved base image references
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: reviewed-base-candidates
+          path: ${{ runner.temp }}/base-images.lock
+          retention-days: 14
+          if-no-files-found: error
+  docker-smoke:
+    needs: resolve-base-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -33,12 +64,106 @@ jobs:
         with:
           node-version: '22'
       - name: Build local Web image (no push)
-        run: docker build --platform linux/amd64 -f Dockerfile.web -t ashare-web:ci .
+        id: build_web
+        env:
+          NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
+        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" -f Dockerfile.web -t ashare-web:ci .
       - name: Build local Worker image (no push)
-        run: docker build --platform linux/amd64 -f Dockerfile.worker -t ashare-worker:ci .
+        id: build_worker
+        env:
+          PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
+        run: docker build --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" -f Dockerfile.worker -t ashare-worker:ci .
       - name: Check image size and runtime metadata
         run: docker image inspect ashare-web:ci ashare-worker:ci --format '{{.RepoTags}} size={{.Size}} user={{.Config.User}}'
+      - name: Verify stripped runtime and locked Worker versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-web:ci -ec 'test "$(id -u):$(id -g)" = 10001:10010; node --version; ! command -v npm; ! command -v npx; ! command -v yarn; ! command -v corepack'
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-worker:ci -ec 'test "$(id -u):$(id -g)" = 10002:10010; ! command -v pip; ! command -v pip3; python -c "import importlib.util as u; assert all(u.find_spec(x) is None for x in (\"pip\",\"setuptools\",\"wheel\",\"ensurepip\")); import psycopg, duckdb, boto3, baostock, pandas, numpy, tzdata; print(\"Runtime imports PASS\")"'
+          docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint python ashare-worker:ci -c '
+          import importlib.metadata as m, sys
+          expected = {line.split("==")[0]: line.split("==")[1] for line in sys.stdin.read().splitlines() if "==" in line and not line.startswith("#")}
+          actual = {d.metadata["Name"].lower().replace("_", "-"): d.version for d in m.distributions()}
+          assert actual == expected, "Runtime dependency set differs from lock"
+          print("PASS: all %d runtime distributions match lock" % len(expected))
+          ' < backend/requirements-worker.lock.txt
       - name: Isolated Compose smoke and recreation
         env:
           TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
         run: bash tests/docker-smoke.sh
+      - name: Prepare SBOM directory
+        if: always() && (steps.build_web.outcome == 'success' || steps.build_worker.outcome == 'success')
+        run: mkdir -p reports
+      - name: web SBOM (inventory only)
+        if: always() && steps.build_web.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-web:ci
+          format: cyclonedx
+          output: reports/web.cdx.json
+          cache: 'false'
+      - name: web secret gate
+        if: always() && steps.build_web.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-web:ci
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: web HIGH and CRITICAL vulnerability gate
+        if: always() && steps.build_web.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-web:ci
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: worker SBOM (inventory only)
+        if: always() && steps.build_worker.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-worker:ci
+          format: cyclonedx
+          output: reports/worker.cdx.json
+          cache: 'false'
+      - name: worker secret gate
+        if: always() && steps.build_worker.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-worker:ci
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: worker HIGH and CRITICAL vulnerability gate
+        if: always() && steps.build_worker.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ashare-worker:ci
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: Preserve SBOMs without publishing images
+        if: always() && (steps.build_web.outcome == 'success' || steps.build_worker.outcome == 'success')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ strategy.job-index }}
+          path: reports/*.cdx.json
+          retention-days: 14
+          if-no-files-found: error

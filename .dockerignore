@@ -17,6 +17,7 @@
 !backend/
 !backend/requirements.txt
 !backend/requirements-worker.txt
+!backend/requirements-worker.lock.txt
 !backend/value_screener/
 !backend/value_screener/**
 !database/
