@@ -1,0 +1,6 @@
+# CI-only comparison overlay. Never use for VPS deployment.
+# Preserve the test guard while using the Debian Python interpreter.
+services:
+  worker:
+    entrypoint: ["/usr/bin/python3", "-m", "value_screener.test_worker_launch"]
+    command: ["--help"]

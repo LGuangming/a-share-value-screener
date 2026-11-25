@@ -252,3 +252,28 @@ Rollback: stop only this test Compose project (no -v, no network or data
 deletion), retain isolated test directories and revert to the previous
 reviewed image digest if applicable. Never operate on ashare-postgres or
 the existing production Vercel/Neon environment.
+
+## Phase 11E-12 — selected Minimal Worker runtime (not release approval)
+
+The default Dockerfile.worker target is now runner, inheriting the reviewed
+minimal-evaluation image. The production Compose inherits its normal
+/usr/local/bin/python3 -m value_screener.local_pipeline entrypoint. VPS-test
+Compose uses the same interpreter with value_screener.test_worker_launch.
+All existing guard, UID/GID, mount, internal egress, memory/CPU and loopback
+settings remain unchanged. The CI-only Distroless overlay is never used on
+VPS. The old Minimal CI overlay remains for compatibility, but default CI
+exercises the actual VPS-test overlay directly and verifies the resolved
+launch contract. Use only the separately approved immutable image digest;
+existing sample tags are placeholders, not published images.
+
+The release candidate matrix builds the default target without --target,
+verifies its entrypoint/command/identity, and retains full dual-PostgreSQL
+functional, native, source, SBOM, secret and two-version strict vulnerability
+checks. A separately named candidate acceptance job requires both matrices
+and base verification to succeed. Distroless and Slim remain named comparison
+jobs with unchanged strict scans; they may still make overall workflow red.
+No vulnerability waiver, continue-on-error, publication or deployment.
+OpenSSL remediation is deferred, not passed; current four candidate HIGH
+findings remain release blockers. Do not change PR #27 publishing workflow
+or any other PR as part of this phase. Publication and actual VPS setup
+require separate approval.

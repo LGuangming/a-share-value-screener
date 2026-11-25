@@ -1,4 +1,6 @@
 # Production application only; PostgreSQL and OpenResty are managed by 1Panel.
+# WORKER_IMAGE must be the reviewed default Minimal runner image; entrypoint
+# comes from that immutable image. Never use a comparison image for deployment.
 name: ashare
 x-runtime: &runtime
   init: true

@@ -21,7 +21,7 @@ services:
   worker:
     env_file: !override
       - /opt/ashare/test/config/worker.env
-    entrypoint: ["/usr/bin/python3", "-m", "value_screener.test_worker_launch"]
+    entrypoint: ["/usr/local/bin/python3", "-m", "value_screener.test_worker_launch"]
     command: ["--help"]
     environment:
       ARCHIVE_LOCAL_ALLOW_MAINTENANCE_APPLY: "false"

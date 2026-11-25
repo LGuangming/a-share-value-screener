@@ -76,6 +76,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
   docker-smoke:
+    name: Distroless comparison (${{ matrix.postgres }})
     needs: resolve-base-images
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -96,12 +97,12 @@ jobs:
           NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
           WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
         run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
-      - name: Build local Worker image (no push)
+      - name: Build Distroless comparison Worker image (no push)
         id: build_worker
         env:
           PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
           WORKER_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.worker_runtime }}
-        run: docker build --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg WORKER_RUNTIME_BASE="$WORKER_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:ci .
+        run: docker build --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" --target distroless-evaluation --build-arg WORKER_RUNTIME_BASE="$WORKER_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:ci .
       - name: Check image size and runtime metadata
         run: docker image inspect ashare-web:ci ashare-worker:ci --format '{{.RepoTags}} size={{.Size}} user={{.Config.User}}'
       - name: Verify installed zstd payload and metadata in both final images
@@ -176,6 +177,7 @@ jobs:
       - name: Isolated Compose smoke and recreation
         env:
           TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
+          ASHARE_CI_WORKER_VARIANT: distroless
         run: bash tests/docker-smoke.sh
       - name: Prepare SBOM directory
         if: always() && (steps.build_web.outcome == 'success' || steps.build_worker.outcome == 'success')
@@ -256,6 +258,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
   slim-worker-evaluation:
+    name: Slim comparison (not a deployment candidate)
     needs: resolve-base-images
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -306,6 +309,7 @@ jobs:
           exit-code: '1'
           cache: 'false'
   minimal-worker-evaluation:
+    name: Release candidate Web + Minimal (${{ matrix.postgres }})
     needs: resolve-base-images
     runs-on: ubuntu-latest
     timeout-minutes: 65
@@ -317,7 +321,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Verify pinned evaluation-only Distroless cc manifest
+      - name: Verify pinned Minimal runtime Distroless cc manifest
         id: base
         shell: bash
         run: |
@@ -331,7 +335,7 @@ jobs:
           cp deploy/minimal-base.lock "$RUNNER_TEMP/minimal-base.lock"
       - name: Test SQLite source ZIP extraction and permission restoration
         run: python3 -m unittest discover -s tests -p test_sqlite_source_zip.py -v
-      - name: Build CPython 3.13.18 minimal glibc comparison
+      - name: Build default Minimal Worker release candidate (no push)
         id: minimal
         env:
           PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
@@ -340,7 +344,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p eval-reports
-          docker build --progress=plain --pull --platform linux/amd64 --target minimal-evaluation --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:minimal-eval . 2>&1 | tee eval-reports/minimal-build.log
+          docker build --progress=plain --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:minimal-eval . 2>&1 | tee eval-reports/minimal-build.log
+      - name: Verify default Worker entrypoint and identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect ashare-worker:minimal-eval | python3 -c '
+          import json, sys
+          cfg = json.load(sys.stdin)[0]["Config"]
+          assert cfg["Entrypoint"] == ["/usr/local/bin/python3", "-m", "value_screener.local_pipeline"]
+          assert cfg["Cmd"] == ["--help"]
+          assert cfg["User"] == "10002:10010"
+          print("PASS: default Minimal image entrypoint, command and identity")
+          '
       - name: Record actual runtime and test native wheels
         shell: bash
         run: |
@@ -387,7 +403,7 @@ jobs:
           NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
           WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
         run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
-      - name: Full isolated Minimal Compose smoke and recreation
+      - name: Full isolated Minimal Compose smoke and recreation (actual VPS test overlay)
         env:
           TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
           ASHARE_CI_WORKER_VARIANT: minimal
@@ -572,3 +588,24 @@ jobs:
           path: eval-reports/
           retention-days: 14
           if-no-files-found: error
+
+  release-candidate-gate:
+    name: Release candidate acceptance (no publication)
+    needs: [resolve-base-images, minimal-worker-evaluation]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all candidate functional and strict security jobs to pass
+        env:
+          BASE_RESULT: ${{ needs.resolve-base-images.result }}
+          CANDIDATE_RESULT: ${{ needs.minimal-worker-evaluation.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'Base and wheel verification: %s\nCandidate matrix: %s\n' "$BASE_RESULT" "$CANDIDATE_RESULT"
+          if [[ "$BASE_RESULT" != success || "$CANDIDATE_RESULT" != success ]]; then
+            echo "Release candidate remains blocked. No publication or deployment."
+            exit 1
+          fi
+          echo "Candidate CI passed; separate authorization is required for publication or deployment."

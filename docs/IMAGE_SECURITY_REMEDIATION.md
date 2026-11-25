@@ -186,3 +186,17 @@ See [MINIMAL_SQLITE_REMEDIATION.md](MINIMAL_SQLITE_REMEDIATION.md). Preserve SQL
 ## Phase 11E-10 — final evidence and remaining OpenSSL blocker
 
 See [MINIMAL_FINAL_SECURITY_REVIEW.md](MINIMAL_FINAL_SECURITY_REVIEW.md). Existing strict gates remain unchanged; no unreleased OpenSSL replacement. Lock 38 observed build-only package versions, verify signed-index archive hashes and capture proposed permanent hash lock; record skip reasons, review SQLite view ROWID semantics and supplement upstream SBOM. No merge/publish/deploy.
+
+## Phase 11E-12 — select Minimal default target
+
+11E-10A run 45592214425 verified 38 permanent build archive hashes,
+network-isolated install (87 base + 38 new packages), ROWID behavior,
+18 documented upstream skips, 159 ELF graphs and 15 wheels in both
+PostgreSQL matrices. Web and Minimal each had two HIGH and zero CRITICAL.
+Minimal is selected as the default Worker target, not authorized for release.
+OpenSSL remediation deferred; no changes to vulnerability severity, ignores,
+exit codes, component locks or scanner versions. Preserve both comparison
+images and all existing gates. Default candidate uses actual VPS test
+Compose; Distroless gets a CI-only interpreter override. Separate candidate
+acceptance job is fail-closed and does not publish. Overall workflow can
+still fail due to comparison scans. See VPS_MIGRATION.md for launch contract.

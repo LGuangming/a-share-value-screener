@@ -35,8 +35,8 @@ USER 10002:10010
 ENTRYPOINT ["/usr/local/bin/python3","-m","value_screener.local_pipeline"]
 CMD ["--help"]
 
-# 11E-5 comparison: upstream CPython patch with a genuinely smaller OS base.
-# This stage is not the default or an approved deployment target.
+# 11E-12 selected runtime: reviewed upstream CPython on a minimal glibc base.
+# Selection is not release approval; all vulnerability gates still apply.
 FROM deps AS minimal-assembly
 ARG PYTHON_BASE
 ENV PYTHON_BASE=$PYTHON_BASE
@@ -70,7 +70,7 @@ USER 10002:10010
 ENTRYPOINT ["/usr/local/bin/python3","-m","value_screener.local_pipeline"]
 CMD ["--help"]
 
-FROM ${WORKER_RUNTIME_BASE} AS runner
+FROM ${WORKER_RUNTIME_BASE} AS distroless-evaluation
 COPY --from=zstd-patch /patch/ /
 USER 0:0
 COPY backend/value_screener/strip_runtime_installers.py /opt/strip_runtime_installers.py
@@ -84,3 +84,7 @@ COPY database /app/database
 USER 10002:10010
 ENTRYPOINT ["/usr/bin/python3","-m","value_screener.local_pipeline"]
 CMD ["--help"]
+
+# Default target for future reviewed Worker images. Retain named evaluation
+# stages for comparison and backward-compatible CI invocation.
+FROM minimal-evaluation AS runner

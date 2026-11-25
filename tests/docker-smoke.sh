@@ -7,11 +7,11 @@ root="/opt/ashare/test"
 sudo install -d -m 0750 -o "$(id -u)" -g "$(id -g)" "$root"
 mkdir -p "$root/config"
 export COMPOSE_PROJECT_NAME=ashare-ci
-export WEB_IMAGE=ashare-web:ci WORKER_IMAGE=ashare-worker:ci
-worker_python=/usr/bin/python3
-case "${ASHARE_CI_WORKER_VARIANT:-distroless}" in
-  distroless) ;;
-  minimal) WORKER_IMAGE=ashare-worker:minimal-eval; worker_python=/usr/local/bin/python3 ;;
+export WEB_IMAGE=ashare-web:ci WORKER_IMAGE=ashare-worker:minimal-eval
+worker_python=/usr/local/bin/python3
+case "${ASHARE_CI_WORKER_VARIANT:-minimal}" in
+  minimal) ;;
+  distroless) WORKER_IMAGE=ashare-worker:ci; worker_python=/usr/bin/python3 ;;
   *) echo "Invalid CI worker variant"; exit 2 ;;
 esac
 export DATABASE_NETWORK=ashare-ci-database ASHARE_LOOPBACK_PORT=3198
@@ -31,8 +31,8 @@ printf 'DATABASE_READ_URL=postgresql://screener_reader:fixture_only@postgres:543
 printf 'DATABASE_URL=postgresql://screener_writer:fixture_only@postgres:5432/ashare_test\nARCHIVE_LOCAL_ALLOW_MAINTENANCE_APPLY=false\n' >"$WORKER_ENV_FILE"
 unset secret
 dc=(docker compose -p ashare-ci -f compose.yaml -f compose.loopback.yaml -f compose.vps-test.yaml -f compose.test.yaml)
-if [[ "${ASHARE_CI_WORKER_VARIANT:-distroless}" == minimal ]]; then
-  dc+=(-f compose.minimal-ci.yaml)
+if [[ "${ASHARE_CI_WORKER_VARIANT:-minimal}" == distroless ]]; then
+  dc+=(-f compose.distroless-ci.yaml)
 fi
 cleanup() {
   "${dc[@]}" down -v --remove-orphans || true
@@ -42,6 +42,21 @@ cleanup() {
 trap cleanup EXIT
 docker network create --internal "$DATABASE_NETWORK"
 "${dc[@]}" --profile worker config --quiet
+# Assert the resolved VPS-test launch contract without printing credentials.
+"${dc[@]}" --profile worker config --format json | python3 -c '
+import json, os, sys
+cfg = json.load(sys.stdin)
+worker = cfg["services"]["worker"]
+assert worker["image"] == os.environ["WORKER_IMAGE"]
+assert worker["entrypoint"] == [sys.argv[1], "-m", "value_screener.test_worker_launch"]
+assert worker["user"] == "10002:10010"
+assert worker["environment"]["ARCHIVE_LOCAL_ALLOW_MAINTENANCE_APPLY"] == "false"
+assert cfg["networks"]["worker_egress"]["internal"] is True
+assert cfg["networks"]["database"]["external"] is True
+assert cfg["services"]["web"]["user"] == "10001:10010"
+assert any(v["target"] == "/data/archive" and v.get("read_only") is True for v in cfg["services"]["web"]["volumes"])
+print("PASS: resolved VPS-test image, guarded interpreter, identity, archive and egress contract")
+' "$worker_python"
 "${dc[@]}" up -d --wait postgres
 "${dc[@]}" exec -T postgres psql -U fixture_admin -d ashare_test -v ON_ERROR_STOP=1 < database/schema.sql
 "${dc[@]}" exec -T postgres psql -U fixture_admin -d ashare_test -v ON_ERROR_STOP=1 <<'SQL'

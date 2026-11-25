@@ -1,4 +1,5 @@
-# CI-only candidate overlay. Never use for VPS deployment.
+# Legacy CI-only compatibility overlay. Default Minimal CI now exercises
+# compose.vps-test.yaml directly. Never use this overlay for VPS deployment.
 services:
   worker:
     image: ashare-worker:minimal-eval
