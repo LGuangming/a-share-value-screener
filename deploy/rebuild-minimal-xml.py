@@ -69,7 +69,7 @@ assert parser.Parse('<root/>', True) == 1
 print('PASS: rebuilt pyexpat and C ElementTree with Expat', pyexpat.EXPAT_VERSION)
 """)
 # Run matching upstream CPython regression tests against actual rebuilt modules.
-run(sys.executable, "-B", "-m", "test", "-j2", "test_pyexpat", "test_xml_etree", "test_xml_etree_c",
+run(sys.executable, "-B", "-m", "test", "-v", "-j2", "test_pyexpat", "test_xml_etree", "test_xml_etree_c",
     env=dict(os.environ, PYTHONPATH=str(src / "Lib")))
 report = {"sources": lock, "rebuilt_extensions": outputs,
           "compiler": subprocess.check_output(["gcc", "--version"], text=True).splitlines()[0],

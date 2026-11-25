@@ -25,6 +25,8 @@
 !deploy/prepare-zstd-patch.sh
 !deploy/prepare-cp313-minimal.py
 !deploy/minimal-debian-amd64.lock.json
+!deploy/install-minimal-build-toolchain.py
+!deploy/minimal-build-toolchain.lock.json
 !deploy/rebuild-minimal-xml.py
 !deploy/minimal-xml-sources.lock.json
 !deploy/rebuild-minimal-sqlite.py

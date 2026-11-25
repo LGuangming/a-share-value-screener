@@ -51,6 +51,15 @@ with sqlite3.connect(":memory:") as db:
     assert db.execute("select count(*) from fts where fts match 'financial'").fetchone() == (1,)
     assert db.execute("pragma integrity_check").fetchone() == ("ok",)
     assert db.execute("select json_extract(?, '$.a')", ('{"a":1}',)).fetchone() == (1,)
+    db.executescript("create table rowid_test(x); insert into rowid_test values(7); create view rowid_v as select x from rowid_test; create view rowid_e as select rowid as rid,x from rowid_test")
+    try:
+        db.execute("select rowid from rowid_v").fetchall()
+    except sqlite3.OperationalError as exc:
+        assert "rowid" in str(exc).lower()
+    else:
+        raise AssertionError("Unexpected implicit view ROWID support")
+    assert db.execute("select rid,x from rowid_e").fetchall() == [(1,7)]
+print("PASS: explicit view ROWID alias; implicit view ROWID disabled")
 print("PASS: SQLite 3.54.1, source identity, pandas SQL, FTS5, JSON, integrity")
 for record in manifest["debian_packages"]:
     package = record["package"]

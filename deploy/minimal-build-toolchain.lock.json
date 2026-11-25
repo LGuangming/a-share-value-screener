@@ -1,0 +1,201 @@
+{
+  "source_run": 45589738213,
+  "source_jobs": [
+    139120721756,
+    139120721669
+  ],
+  "base": "docker.io/library/python:3.13-slim-trixie@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50",
+  "hash_status": "version-locked; signed archive hashes to be captured and reviewed",
+  "packages": [
+    {
+      "package": "binutils",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "binutils-common",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "binutils-x86-64-linux-gnu",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "cpp",
+      "architecture": "amd64",
+      "version": "4:14.2.0-1"
+    },
+    {
+      "package": "cpp-14",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "cpp-14-x86-64-linux-gnu",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "cpp-x86-64-linux-gnu",
+      "architecture": "amd64",
+      "version": "4:14.2.0-1"
+    },
+    {
+      "package": "gcc",
+      "architecture": "amd64",
+      "version": "4:14.2.0-1"
+    },
+    {
+      "package": "gcc-14",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "gcc-14-x86-64-linux-gnu",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "gcc-x86-64-linux-gnu",
+      "architecture": "amd64",
+      "version": "4:14.2.0-1"
+    },
+    {
+      "package": "libasan8",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libatomic1",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libbinutils",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "libc-dev-bin",
+      "architecture": "amd64",
+      "version": "2.41-12+deb13u5"
+    },
+    {
+      "package": "libc6-dev",
+      "architecture": "amd64",
+      "version": "2.41-12+deb13u5"
+    },
+    {
+      "package": "libcc1-0",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libcrypt-dev",
+      "architecture": "amd64",
+      "version": "1:4.4.38-1"
+    },
+    {
+      "package": "libctf-nobfd0",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "libctf0",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "libgcc-14-dev",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libgomp1",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libgprofng0",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "libhwasan0",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libisl23",
+      "architecture": "amd64",
+      "version": "0.27-1"
+    },
+    {
+      "package": "libitm1",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libjansson4",
+      "architecture": "amd64",
+      "version": "2.14-2+b3"
+    },
+    {
+      "package": "liblsan0",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libmpc3",
+      "architecture": "amd64",
+      "version": "1.3.1-1+b3"
+    },
+    {
+      "package": "libmpfr6",
+      "architecture": "amd64",
+      "version": "4.2.2-1"
+    },
+    {
+      "package": "libquadmath0",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libsframe1",
+      "architecture": "amd64",
+      "version": "2.44-3"
+    },
+    {
+      "package": "libtsan2",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "libubsan1",
+      "architecture": "amd64",
+      "version": "14.2.0-19"
+    },
+    {
+      "package": "linux-libc-dev",
+      "architecture": "all",
+      "version": "6.12.118-1"
+    },
+    {
+      "package": "make",
+      "architecture": "amd64",
+      "version": "4.4.1-2"
+    },
+    {
+      "package": "rpcsvc-proto",
+      "architecture": "amd64",
+      "version": "1.4.3-1"
+    },
+    {
+      "package": "xz-utils",
+      "architecture": "amd64",
+      "version": "5.8.1-1+deb13u2"
+    }
+  ]
+}

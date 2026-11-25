@@ -546,6 +546,24 @@ jobs:
                                      {"name":"installed:path","value":"/usr/local/lib/libsqlite3.so.0"}]}
           Path("eval-reports/upstream-sqlite.cdx.json").write_text(json.dumps({"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[component]},indent=2)+"\n")
           PY
+      - name: Record Web and Worker actual OpenSSL identity (no network)
+        if: always() && steps.minimal.outcome == 'success' && steps.candidate_web.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /nodejs/bin/node ashare-web:ci -e '
+          const fs=require("node:fs"), crypto=require("node:crypto"), tls=require("node:tls");
+          const meta="/var/lib/dpkg/status.d/libssl3t64";
+          const libs=process.report.getReport().sharedObjects.filter(x=>/libssl|libcrypto/.test(x));
+          console.log(JSON.stringify({node:process.version,openssl:process.versions.openssl,quic:process.versions.ngtcp2||null,sharedObjects:libs,packageMetadata:fs.readFileSync(meta,"utf8"),sha256:crypto.createHash("sha256").update("fixture").digest("hex"),rootCertificates:tls.rootCertificates.length},null,2));
+          ' | tee eval-reports/web-openssl-runtime.json
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/python3 ashare-worker:minimal-eval -c '
+          import ssl, _ssl, hashlib, json, subprocess
+          print(json.dumps({"openssl":ssl.OPENSSL_VERSION,"links":subprocess.check_output(["/lib64/ld-linux-x86-64.so.2","--list",_ssl.__file__],text=True),"packageMetadata":open("/var/lib/dpkg/status.d/libssl3t64").read(),"caCertificates":len(ssl.create_default_context().get_ca_certs()),"sha256":hashlib.sha256(b"fixture").hexdigest()},indent=2))
+          ' | tee eval-reports/worker-openssl-runtime.json
+      - name: Export and validate supplemental upstream component inventory
+        if: always() && steps.minimal.outcome == 'success'
+        run: python3 tests/export-upstream-components.py eval-reports
       - name: Preserve evaluation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

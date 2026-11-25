@@ -182,3 +182,7 @@ See [MINIMAL_COMPONENT_REMEDIATION.md](MINIMAL_COMPONENT_REMEDIATION.md). Build 
 ## Phase 11E-9 — SQLite candidate
 
 See [MINIMAL_SQLITE_REMEDIATION.md](MINIMAL_SQLITE_REMEDIATION.md). Preserve SQLite interface, build verified upstream 3.54.1 shared library, retain true source provenance and separate CycloneDX component inventory, validate feature flags and actual loading, run upstream and pandas tests. Preserve all previous CI/security gates and the main runner. No merge/publish/deploy.
+
+## Phase 11E-10 — final evidence and remaining OpenSSL blocker
+
+See [MINIMAL_FINAL_SECURITY_REVIEW.md](MINIMAL_FINAL_SECURITY_REVIEW.md). Existing strict gates remain unchanged; no unreleased OpenSSL replacement. Lock 38 observed build-only package versions, verify signed-index archive hashes and capture proposed permanent hash lock; record skip reasons, review SQLite view ROWID semantics and supplement upstream SBOM. No merge/publish/deploy.

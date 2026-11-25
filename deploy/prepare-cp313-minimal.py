@@ -181,5 +181,5 @@ for component in component_paths:
 assert any("pyexpat" in name for name in component_files)
 manifest = root / "opt/cp313-provenance.json"
 manifest.parent.mkdir(exist_ok=True)
-manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION, "xml_rebuild": xml_provenance, "sqlite_rebuild": sqlite_report}, indent=2)+"\n")
+manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION, "xml_rebuild": xml_provenance, "sqlite_rebuild": sqlite_report, "build_toolchain": json.loads(pathlib.Path("/minimal-build-toolchain-provenance.json").read_text())}, indent=2)+"\n")
 print(manifest.read_text())

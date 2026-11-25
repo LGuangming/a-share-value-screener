@@ -50,6 +50,19 @@ print("SQLite dependency references:", json.dumps(references), flush=True)
 with sqlite3.connect(":memory:") as db:
     original = sorted(row[0] for row in db.execute("PRAGMA compile_options"))
     original_id = db.execute("select sqlite_source_id()").fetchone()[0]
+# Evaluate legacy implicit view ROWID separately from an explicit alias.
+rowid_probe = """
+import sqlite3, json
+with sqlite3.connect(':memory:') as db:
+    db.executescript('create table t(x); insert into t values(7); create view v as select x from t; create view e as select rowid as rid,x from t')
+    try:
+        implicit = {'value':db.execute('select rowid from v').fetchall()}
+    except sqlite3.OperationalError as exc:
+        implicit = {'error':str(exc)}
+    print(json.dumps({'implicit':implicit,'explicit':db.execute('select rid,x from e').fetchall()}))
+"""
+old_rowid = json.loads(subprocess.check_output([sys.executable,"-B","-c",rowid_probe],text=True))
+print("SQLite original view ROWID behavior:",json.dumps(old_rowid),flush=True)
 print("SQLite original runtime:", json.dumps({"version": sqlite3.sqlite_version, "source_id": original_id, "compile_options": original}), flush=True)
 archive = work / "sqlite.tar.gz"
 with urllib.request.urlopen(lock["url"], timeout=120) as response, archive.open("wb") as out:
@@ -117,6 +130,10 @@ actual = json.loads(subprocess.check_output([sys.executable, "-B", "-c", probe],
 print("SQLite actual runtime:", json.dumps(actual), flush=True)
 print("SQLite compile options added:", json.dumps(sorted(set(actual["compile_options"])-set(original))), flush=True)
 print("SQLite compile options removed:", json.dumps(sorted(set(original)-set(actual["compile_options"]))), flush=True)
+new_rowid = json.loads(subprocess.check_output([sys.executable,"-B","-c",rowid_probe],env=env,text=True))
+print("SQLite new view ROWID behavior:",json.dumps(new_rowid),flush=True)
+assert "error" in new_rowid["implicit"] and new_rowid["explicit"] == old_rowid["explicit"] == [[1,7]], new_rowid
+assert "ALLOW_ROWID_IN_VIEW" not in actual["compile_options"]
 assert actual["version"] == lock["version"], actual
 assert actual["source_id"] == lock["source_id"], actual
 assert set(feature_flags) <= set(actual["compile_options"]), (feature_flags, actual)
@@ -125,7 +142,7 @@ if "ENABLE_UPDATE_DELETE_LIMIT" in feature_flags:
 # Upstream CPython tests run against the actually loaded new SQLite library.
 # The matching CPython release source was verified/extracted by XML build.
 testlib = "/tmp/minimal-xml-build/Python-3.13.18/Lib"
-subprocess.run([sys.executable, "-B", "-m", "test", "-j2", "test_sqlite3"],
+subprocess.run([sys.executable, "-B", "-m", "test", "-v", "-j2", "test_sqlite3"],
                env=dict(env, PYTHONPATH=testlib), check=True)
 report = {"source":lock,"original_version":sqlite3.sqlite_version,
           "original_source_id":original_id,"original_compile_options":original,
@@ -136,6 +153,7 @@ report = {"source":lock,"original_version":sqlite3.sqlite_version,
           "compile_options_removed":sorted(set(original)-set(actual["compile_options"])),
           "library_sha256":digest(lib,"sha256"),"upstream_sqlite_regression":"passed",
           "references":references, "dependency_source_counts":source_counts,
+          "view_rowid_review":{"original":old_rowid,"candidate":new_rowid,"decision":"upstream-recommended implicit view ROWID disabled; explicit alias preserved"},
           "restored_executable_paths":restored_executables}
 (out / "provenance.json").write_text(json.dumps(report, indent=2)+"\n")
 print("PASS: actual SQLite", actual["version"], actual["source_id"], report["library_sha256"], flush=True)

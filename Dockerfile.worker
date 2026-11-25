@@ -40,6 +40,8 @@ CMD ["--help"]
 FROM deps AS minimal-assembly
 ARG PYTHON_BASE
 ENV PYTHON_BASE=$PYTHON_BASE
+COPY deploy/install-minimal-build-toolchain.py /install-minimal-build-toolchain.py
+COPY deploy/minimal-build-toolchain.lock.json /minimal-build-toolchain.lock.json
 COPY deploy/rebuild-minimal-xml.py /rebuild-minimal-xml.py
 COPY deploy/minimal-xml-sources.lock.json /minimal-xml-sources.lock.json
 COPY deploy/rebuild-minimal-sqlite.py /rebuild-minimal-sqlite.py
@@ -49,7 +51,7 @@ COPY deploy/prepare-cp313-minimal.py /prepare-cp313-minimal.py
 COPY deploy/minimal-debian-amd64.lock.json /minimal-debian-amd64.lock.json
 COPY backend/value_screener /audit/value_screener
 RUN apt-get -o APT::Update::Error-Mode=any update \
-    && apt-get install -y --no-install-recommends gcc make libc6-dev xz-utils \
+    && python /install-minimal-build-toolchain.py \
     && python /rebuild-minimal-xml.py \
     && python /rebuild-minimal-sqlite.py \
     && python /prepare-cp313-minimal.py
