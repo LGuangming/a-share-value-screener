@@ -134,7 +134,9 @@ remain separate acceptance steps.
 ## Phase 08 — application Docker images and Compose
 
 Two Linux amd64 images are built separately: Node 22 Debian slim Next.js
-standalone web (UID 10001) and Python 3.11 Debian slim worker (UID 10002).
+standalone web (UID 10001) and the historical Python 3.11 Debian slim worker (UID 10002).
+The current deployment candidate is the CPython 3.13 Minimal Worker; Python
+3.11 is no longer an active CI or release acceptance target.
 Both use shared GID 10010. Existing Vercel builds do not enable standalone;
 the Docker build sets NEXT_STANDALONE=1 only during image build. npm ci uses
 the committed package-lock.json; Python dependencies retain declared ranges.

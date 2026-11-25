@@ -76,11 +76,21 @@ PG17 is retired from current CI and release acceptance, not a supported
 fallback target. The four PostgreSQL matrices (Python pipeline, Web build,
 Distroless comparison and Minimal candidate) each contain exactly one entry:
 postgres:18.7-alpine. The disposable Compose fixture uses that exact tag
-without a PG17 default or database-image override. Python 3.11/3.13 tests,
+without a PG17 default or database-image override. Python 3.13 tests,
 base resolution, strict Slim comparison, all existing candidate security
 and functional checks and the independent candidate gate are unchanged.
-Expected combined push caller job count: nine rather than thirteen.
+Expected combined push caller job count: eight rather than thirteen (PG17 and Python 3.11 retired).
 Previous dual-version results remain historical evidence only. No source
 schema, production Compose, live database, archive, PR #27 or main changes.
 No change to exception expiry, scope, raw evidence, secret or vulnerability
 thresholds. New SHA must independently pass before publication consideration.
+
+### Python 3.13-only acceptance (operator decision)
+
+Python 3.11 is retired from current PR #28 CI and release acceptance.
+Run the entire Python unit suite under 3.13; existing PostgreSQL 18.7
+integration and the locked CPython 3.13.18 Minimal candidate stay unchanged.
+Historical Python 3.11 evidence is not a release dependency. Existing cloud
+collection/maintenance workflows remain untouched pending separate scheduling
+and cutover approval; no claim of continued 3.11 compatibility or migration
+of those workflows. All scoped security, ACL and isolation gates remain.

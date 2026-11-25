@@ -263,3 +263,7 @@ This runbook adds no workflow trigger or release permission. Its command
 examples have not been executed on the VPS; actual preflight evidence and
 security clearance remain mandatory. Do not use this document as a green
 release certificate.
+
+Current acceptance supersedes the historical dual-version baseline: Python
+3.13 and PostgreSQL 18.7 only, with CPython 3.13.18 Minimal runtime and all
+11E-14A scoped security gates. No separate Python 3.11 acceptance requirement.

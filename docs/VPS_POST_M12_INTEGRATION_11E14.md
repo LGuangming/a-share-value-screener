@@ -111,3 +111,7 @@ gate pending rather than use the migrated DB. CI remains disposable.
 
 No changes to PR #29, PR #27, main, production data, deployment, release or
 security scanning. This is not a release certificate.
+
+Current CI acceptance is Python 3.13 and PostgreSQL 18.7 only. Retain all
+business, ACL, archive, isolation and candidate security checks. Historical
+cloud scheduling workflows remain unchanged until separate cutover approval.
