@@ -84,12 +84,12 @@ sudo chmod 600 "$root/config/private/source.pgpass"
 sudo nsenter -t "$pid" -n -- env -i PATH="$PATH" PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=ashare_source PGUSER=postgres PGSSLMODE=disable PGPASSFILE="$root/config/private/source.pgpass" "$py" scripts/migration/postgres.py backup --root "$root/postgres/fixture"
 sudo chown -R ashare-migrate:ashare-migrate "$root/postgres/fixture"
 target(){
-  sudo nsenter -t "$pid" -n -- runuser -u ashare-migrate -- env -i PATH="$PATH" PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=ashare_migration PGUSER=ashare_mig_owner PGSSLMODE=disable PGPASSFILE="$root/config/client/owner.pgpass" ASHARE_MIGRATION_MODE=shared "$py" "$@"
+  (cd "$root/bin" && sudo nsenter -t "$pid" -n -- runuser -u ashare-migrate -- env -i PATH="$PATH" PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=ashare_migration PGUSER=ashare_mig_owner PGSSLMODE=disable PGPASSFILE="$root/config/client/owner.pgpass" ASHARE_MIGRATION_MODE=shared "$py" "$@")
 }
-target scripts/migration/postgres.py restore --root "$root/postgres/fixture" --approved-isolated-restore
-target scripts/migration/postgres.py verify --root "$root/postgres/fixture"
-target scripts/migration/permissions.py apply --root "$root/postgres/fixture" --policy scripts/migration/tests/acl-policy.json --approved-isolated-acl
-if target scripts/migration/postgres.py restore --root "$root/postgres/fixture" --approved-isolated-restore; then exit 1; fi
+target "$root/bin/postgres.py" restore --root "$root/postgres/fixture" --approved-isolated-restore
+target "$root/bin/postgres.py" verify --root "$root/postgres/fixture"
+target "$root/bin/permissions.py" apply --root "$root/postgres/fixture" --policy "$root/bin/fixture-acl-policy.json" --approved-isolated-acl
+if target "$root/bin/postgres.py" restore --root "$root/postgres/fixture" --approved-isolated-restore; then exit 1; fi
 echo 'PASS: shared owner restore, logical verification and ACL; non-empty restore rejected'
 # Real authenticated target role SQL (TCP inside the fixture).
 role_psql(){

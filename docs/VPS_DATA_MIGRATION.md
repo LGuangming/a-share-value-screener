@@ -313,3 +313,5 @@ host TCP reachability; verify VPS 127.0.0.1:5432 reachability separately before
 approving real shared init. Do not change firewall or production network to
 make the fixture work. Actual host Docker identity, HBA review, shared
 resource headroom and real application availability remain independent gates.
+
+Shared mode installs the approved PostgreSQL restore, verification and ACL modules and policy files into the root-owned bin directory. The noninteractive account need not traverse the administrator's private checkout. CI initially detected checkout traversal denial; the correction preserves the checkout permissions rather than widening access.

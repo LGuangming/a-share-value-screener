@@ -65,6 +65,11 @@ def prepare(root,uid,gid,mode="isolated"):
     ) if mode=="isolated" else (
         ("shared_admin.py","bin/shared_admin.py",0o755),
         ("../shared_target.py","bin/shared_target.py",0o644),
+        ("../common.py","bin/common.py",0o644),
+        ("../postgres.py","bin/postgres.py",0o644),
+        ("../permissions.py","bin/permissions.py",0o644),
+        ("../tests/production-policy.json","bin/production-policy.json",0o644),
+        ("../tests/acl-policy.json","bin/fixture-acl-policy.json",0o644),
         ("ops_dispatch.py","bin/ops_dispatch.py",0o755),
         ("image_lock.py","bin/image_lock.py",0o644),
     )
