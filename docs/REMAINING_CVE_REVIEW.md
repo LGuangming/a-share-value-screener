@@ -11,11 +11,11 @@ https://security-tracker.debian.org/tracker/CVE-<ID>.
 |---|---|---|---|
 | CVE-2026-107494 | 1/1 | OpenSSL code fix announced, 3.5.10 scheduled Dec 1; Trixie unfixed | QUIC peer path; loopback HTTP/TCP and ordinary HTTPS/PG clients do not establish QUIC usage |
 | CVE-2026-124709 | 1/1 | Same release schedule; Trixie unfixed | QUIC server stream handling; no application QUIC listener demonstrated |
-| CVE-2026-15308 | 0/4 | Debian Python vulnerable; upstream CPython changelog/advisory review required for exact patch | HTMLParser input; no direct use established; transitive parsing unknown |
+| CVE-2026-15308 | 0/4 | Upstream CPython 3.13.15 fix confirmed; Trixie vulnerable | HTMLParser input; no direct use established; transitive parsing unknown |
 | CVE-2026-19445 | 0/4 | CPython 3.13.16 release documents repair | Server-side SSL SNI callback; Worker is a client, no TLS server demonstrated |
 | CVE-2026-19553 | 0/4 | CPython 3.13.16 release documents repair | TLS wrap_bio hostname validation; inspect dependency paths; do not waive |
-| CVE-2026-7210 | 0/4 | Debian Python vulnerable; upstream Python/Expat fixes need build-specific verification | XML parse of untrusted input; boto3/botocore can process XML responses in S3 driver |
-| CVE-2026-82049 | 0/4 | CPython 3.13 changelog documents repair | tar extraction with crafted links; direct business use not demonstrated |
+| CVE-2026-7210 | 0/4 | CPython 3.13.14 patch AND Expat >=2.8.0 required; Trixie vulnerable | XML parse of untrusted input; boto3/botocore can process XML responses in S3 driver |
+| CVE-2026-82049 | 0/4 | CPython 3.13.18 Debian unstable fixed; 3.13 changelog documents repair | tar extraction with crafted links; direct business use not demonstrated |
 | CVE-2026-113351 | 0/1 | Expat fixed in newer Debian suites, Trixie vulnerable | XML input, possible SDK path |
 | CVE-2026-115506 | 0/1 | Same | XML input, possible SDK path |
 | CVE-2026-117610 | 0/1 | Same | XML input, possible SDK path |
@@ -35,7 +35,7 @@ https://security-tracker.debian.org/tracker/source-package/expat
 https://security-tracker.debian.org/tracker/source-package/sqlite3
 https://security-tracker.debian.org/tracker/source-package/util-linux
 https://security-tracker.debian.org/tracker/source-package/ncurses
-https://openssl-library.org/news/secadv/20261110.txt
+https://openssl-library.org/news/secadv/20261124.txt
 https://openssl-library.org/news/secadv/20261117.txt
 https://www.python.org/downloads/release/python-31316/
 https://docs.python.org/3.13/whatsnew/changelog.html
