@@ -20,6 +20,20 @@ jobs:
         run: python -m unittest discover -s backend/tests -v
   next-build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: fixture_admin
+          POSTGRES_PASSWORD: fixture_only
+          POSTGRES_DB: ashare_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixture_admin -d ashare_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,6 +49,11 @@ jobs:
         run: npm run test:strategies
       - name: General company research tests
         run: node --test tests/company-research.test.cjs
+      - name: Database driver unit and PostgreSQL integration tests
+        env:
+          TEST_POSTGRES_URL: postgresql://fixture_admin:fixture_only@127.0.0.1:5432/ashare_test
+          TZ: Asia/Shanghai
+        run: npm run test:db
       - name: Typecheck
         run: npm run typecheck
       - name: Build
