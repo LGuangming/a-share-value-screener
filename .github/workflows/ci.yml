@@ -7,6 +7,13 @@ on:
 permissions:
   contents: read
 jobs:
+  # Explicit same-revision Docker CI entry for the stacked PR #28 branch.
+  # No inherited secrets, registry permissions, publication or deployment.
+  docker-pr28:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/vps-image-security'
+    uses: ./.github/workflows/docker-ci.yml
+    permissions:
+      contents: read
   python-tests:
     runs-on: ubuntu-latest
     strategy:

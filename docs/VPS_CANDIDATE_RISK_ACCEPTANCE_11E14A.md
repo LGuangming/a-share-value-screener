@@ -51,3 +51,19 @@ This acceptance is for candidate CI only. PR #27 remains unchanged;
 future publication must independently enforce the same or stricter rule,
 re-evaluate expiry and scan the exact reviewed immutable pair. No merge,
 registry push, deployment, data changes or release authorization.
+
+## Explicit stacked-branch trigger fallback
+
+The first 11E-14A commit (457c0da) added the PR #28 branch to the direct
+Docker push filter. At inspection only Tests and Build push/PR runs were
+observed, so direct-trigger repair was not yet demonstrated. The follow-up
+adds workflow_call to the same Docker workflow and a push-only reusable
+caller in Tests and Build on refs/heads/feature/vps-image-security.
+This uses the same committed revision and full matrix, not a copied or
+reduced smoke test. No secrets inherited; contents read only. The direct
+push filter returns to its original branch to avoid duplicate push builds;
+normal standalone pull_request triggers are retained. A separate PR run
+may still occur and must be reported distinctly. On the push caller run,
+comparison failures can make the combined Tests and Build red even when
+the independent candidate acceptance succeeds; inspect individual jobs.
+No automatic rerun of old SHAs and no dispatch of PR #27.

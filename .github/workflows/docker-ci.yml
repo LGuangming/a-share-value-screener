@@ -1,8 +1,9 @@
 name: Docker Images and Compose
 on:
+  workflow_call:
   pull_request:
   push:
-    branches: [feature/vps-docker-compose, feature/vps-image-security]
+    branches: [feature/vps-docker-compose]
     paths:
       - 'Dockerfile.*'
       - 'compose*.yaml'
