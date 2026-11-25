@@ -5,8 +5,10 @@ set -euo pipefail
 unset DOCKER_HOST DOCKER_CONTEXT PGSERVICE PGSERVICEFILE PGOPTIONS PGHOSTADDR PGPASSWORD ASHARE_MIGRATION_MODE
 export DOCKER_HOST=unix:///var/run/docker.sock
 image=postgres@sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71
+root=$(sudo mktemp -d /root/ashare-direct.XXXXXX)
+docker pull --platform linux/amd64 "$image"
 docker network create --internal ashare-db >/dev/null
-docker run -d --name ashare-postgres --network ashare-db --cpus=1.5 --memory=800m --memory-swap=800m \
+docker run -d --pull never --platform linux/amd64 --mount "type=bind,src=$root,dst=$root" --name ashare-postgres --network ashare-db --cpus=1.5 --memory=800m --memory-swap=800m \
   -p 127.0.0.1:5432:5432 --health-cmd 'pg_isready -h 127.0.0.1 -U postgres -d postgres' \
   --health-interval 2s --health-retries 30 -e POSTGRES_PASSWORD=fixture-only-password \
   -e POSTGRES_INITDB_ARGS='--auth-local=peer --auth-host=scram-sha-256' "$image" >/dev/null
@@ -26,13 +28,37 @@ admin ashare_source < database/neon-schema.sql
 printf '%s\n' "INSERT INTO stocks(ts_code,name) VALUES('000001.SZ','fixture');" | admin ashare_source
 fingerprint(){ docker exec --user postgres "$cid" pg_dump -U postgres -d ashare_test --restrict-key=FixtureStableKey | sha256sum; }
 before=$(fingerprint)
-root=$(sudo mktemp -d /root/ashare-direct.XXXXXX)
+# Mount only the disposable, root-private evidence directory at the same path.
+# Execute the exact pinned server image's clients through fixed-ID wrappers.
+sudo install -d -m 0700 "$root/client-bin"
+for tool in pg_dump pg_restore psql; do
+  {
+    printf '%s\n' '#!/bin/bash' 'set -euo pipefail'
+    printf 'cid=%q\nroot=%q\ntool=%q\n' "$cid" "$root" "$tool"
+    cat <<'CLIENT'
+[[ "$PGHOST" == 127.0.0.1 && "$PGPORT" == 5432 && "$PGPASSFILE" == "$root/pgpass" ]]
+case "$PGDATABASE:$PGUSER" in
+  ashare_source:postgres|ashare:ashare_owner) ;;
+  *) exit 64 ;;
+esac
+exec /usr/bin/docker --host unix:///var/run/docker.sock exec --user 0 \
+  --env PGHOST --env PGPORT --env PGDATABASE --env PGUSER --env PGPASSFILE \
+  --env PGSSLMODE=disable --env PGCONNECT_TIMEOUT=10 --env LC_ALL=C \
+  "$cid" "/usr/local/bin/$tool" "$@"
+CLIENT
+  } | sudo tee "$root/client-bin/$tool" >/dev/null
+  sudo chmod 0700 "$root/client-bin/$tool"
+  version=$(docker exec --user 0 "$cid" "/usr/local/bin/$tool" --version)
+  [[ "$version" == *"18.7"* ]]
+  printf 'PINNED_CLIENT %s: %s\n' "$tool" "$version"
+done
+echo 'PASS: PostgreSQL clients from fixed-image container; no APT client installation'
 printf '%s\n' '127.0.0.1:5432:ashare_source:postgres:fixture-only-password' '127.0.0.1:5432:ashare:ashare_owner:fixture-only-password' | sudo tee "$root/pgpass" >/dev/null
 sudo chmod 600 "$root/pgpass"
 pid=$(docker inspect --format '{{.State.Pid}}' "$cid")
 py=$(command -v python)
 # The fixture uses its own network namespace, not a production Docker network.
-run(){ local db=$1 user=$2; shift 2; sudo nsenter -t "$pid" -n -- env -i PATH="$PATH" PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE="$db" PGUSER="$user" PGSSLMODE=disable PGPASSFILE="$root/pgpass" "$py" "$@"; }
+run(){ local db=$1 user=$2; shift 2; sudo nsenter -t "$pid" -n -- env -i PATH="$root/client-bin:$PATH" PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE="$db" PGUSER="$user" PGSSLMODE=disable PGPASSFILE="$root/pgpass" "$py" "$@"; }
 direct(){ run ashare ashare_owner scripts/migration/direct_restore.py "$@" --root "$root" --container-id "$cid"; }
 if direct check; then exit 1; fi
 if run ashare_test ashare_owner scripts/migration/direct_restore.py check --root "$root" --container-id "$cid" --approved-target-read; then exit 1; fi
