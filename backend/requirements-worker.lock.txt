@@ -1,0 +1,18 @@
+# linux/amd64, CPython 3.13 candidate; unchanged versions from successful PR #26
+# python-local-integration (job 139063903327) and PR #27 Worker build.
+# Exact version constraints; CPython 3.13 wheel availability and hashes are validated by CI.
+baostock==0.9.4
+boto3==1.44.11
+botocore==1.44.11
+duckdb==1.5.6
+jmespath==1.1.0
+numpy==2.4.6
+pandas==3.1.1
+psycopg==3.3.9
+psycopg-binary==3.3.9
+python-dateutil==2.9.0.post0
+s3transfer==0.19.3
+six==1.17.0
+typing-extensions==4.16.0
+tzdata==2026.6
+urllib3==2.8.0

@@ -36,7 +36,9 @@ test("chart uses merged closes and directly reads verified monthly archives", ()
   assert.match(chart, /createSeriesMarkers/);
   assert.match(archive, /parquetReadObjects/);
   assert.match(archive, /createHash\("sha256"\)/);
-  assert.match(archive, /NEON_STORAGE_READ_ACCESS_KEY_ID/);
+  const neonReader=fs.readFileSync(path.join(__dirname,"../lib/archive-neon.ts"),"utf8");
+  assert.match(neonReader, /NEON_STORAGE_READ_ACCESS_KEY_ID/);
+  assert.doesNotMatch(neonReader, /PutObjectCommand|DeleteObjectCommand/);
   assert.doesNotMatch(archive, /PutObjectCommand|DeleteObjectCommand/);
 });
 

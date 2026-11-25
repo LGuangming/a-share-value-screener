@@ -7,26 +7,89 @@ on:
 permissions:
   contents: read
 jobs:
+  # Explicit same-revision Docker CI entry for PR #28 and isolated integration.
+  # No inherited secrets, registry permissions, publication or deployment.
+  docker-pr28:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/feature/vps-image-security' || github.ref == 'refs/heads/integration/vps-11e15a')
+    uses: ./.github/workflows/docker-ci.yml
+    permissions:
+      contents: read
   python-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
       - name: Screening, multi-strategy and backtest kernel tests (no credentials)
         env:
           PYTHONPATH: backend
         run: python -m unittest discover -s backend/tests -v
+  python-local-integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['postgres:18.7-alpine']
+    services:
+      postgres:
+        image: ${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: fixture_admin
+          POSTGRES_PASSWORD: fixture_only
+          POSTGRES_DB: ashare_pipeline_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixture_admin -d ashare_pipeline_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install isolated worker dependencies
+        run: |
+          python -m pip install --only-binary=:all: --require-hashes -r backend/requirements-worker.cp313.hashes.txt
+          python -m pip check
+      - name: Actual PostgreSQL and Parquet local pipeline integration
+        env:
+          PYTHONPATH: backend
+          TEST_PIPELINE_DATABASE_URL: postgresql://fixture_admin:fixture_only@127.0.0.1:5432/ashare_pipeline_test
+        run: python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
   next-build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['postgres:18.7-alpine']
+    services:
+      postgres:
+        image: ${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: fixture_admin
+          POSTGRES_PASSWORD: fixture_only
+          POSTGRES_DB: ashare_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixture_admin -d ashare_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Fundamental review classification tests
         run: npm run test:review
       - name: Stock detail chart and history integration regression tests
@@ -35,6 +98,21 @@ jobs:
         run: npm run test:strategies
       - name: General company research tests
         run: node --test tests/company-research.test.cjs
+      - name: Database driver unit and PostgreSQL integration tests
+        env:
+          TEST_POSTGRES_URL: postgresql://fixture_admin:fixture_only@127.0.0.1:5432/ashare_test
+          TZ: Asia/Shanghai
+        run: npm run test:db
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install fixture-only Parquet generator
+        run: |
+          python -m pip install --only-binary=:all: 'duckdb==1.5.6'
+      - name: Archive storage and real Parquet compatibility tests
+        env:
+          ARCHIVE_TEST_FIXTURES: '1'
+        run: npm run test:archive
       - name: Typecheck
         run: npm run typecheck
       - name: Build

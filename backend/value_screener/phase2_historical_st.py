@@ -5,6 +5,7 @@ today's name, a missing observation, or price limits. Conflicts are NULL.
 Raw per-symbol evidence is checkpointed in verified batches.
 """
 from __future__ import annotations
+from .archive_storage import duckdb_connection
 
 import argparse
 import csv
@@ -372,7 +373,7 @@ def run_archive(args,s3,bucket,client,bs):
         for year in years:
             dest=root/"baseline"
             baselines[year]=verify_archive(s3,bucket,year,dest)
-        con=duckdb.connect()
+        con=duckdb_connection()
         try:
             files=[str(root/"baseline"/p["path"]) for m in baselines.values() for p in m["partition_files"]]
             codes=[r[0] for r in con.execute("SELECT DISTINCT ts_code FROM read_parquet(?) ORDER BY ts_code",[files]).fetchall()]

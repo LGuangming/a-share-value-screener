@@ -1,0 +1,12 @@
+{
+  "cpython": {
+    "version": "3.13.18",
+    "url": "https://www.python.org/ftp/python/3.13.18/Python-3.13.18.tar.xz",
+    "sha256": "abb0102e6d4ae027509bcb82327d9dd85515b44a3ba8ad538cfc5e9847029f68"
+  },
+  "expat": {
+    "version": "2.11.0",
+    "url": "https://github.com/libexpat/libexpat/releases/download/R_2_11_0/expat-2.11.0.tar.xz",
+    "sha256": "61e7614b602201c28a189dafee78f5bceaee192bbde46a930752ff09cf5542fa"
+  }
+}

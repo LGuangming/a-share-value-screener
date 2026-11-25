@@ -1,0 +1,9 @@
+# Phase 11E-15A — isolated application integration
+
+This branch integrates main `477ab29676740f42f429033b1d293c1ad7a2e654` and accepted application chain PR #20, #21, #22, #23, #26, #28 at `cf928feb8463abf240356dbb381a6348fc716902` (merge base `e2fd90647134569e6726facce52478aa10189dda`). No source PR is closed or changed. The two-parent commit preserves both histories. Main is not advanced.
+
+Three-way blob/mode comparison: application side 95 changed paths, main side 11 (10 removals, one addition). The single overlapping modify/delete conflict is backend/value_screener/raw_legacy_retirement.py: retain main's removal. The other nine main removals remain removed, including one-shot markers, obsolete workflows, tests and migration documentation. Retain the main-added .github/workflows/vps-operations.yml byte-for-byte (manual main-only read-only operation; do not dispatch). All other application files remain as at cf928fe except this document and the CI branch condition. No production source, data, migration or environment operations invoked. vercel.json retains git.deploymentEnabled=false.
+
+## Integration acceptance
+
+Run the six core jobs on this exact integration SHA: Python 3.13, PostgreSQL 18.7 pipeline, PostgreSQL 18.7 Web, base/wheel verification, formal Web + Minimal candidate, independent candidate gate. Same reviewed checks, scoped OpenSSL policy and Secret/SBOM requirements. Only read permissions in the caller. Existing cloud workflows remain unchanged; production push triggers are main-only, scheduled and workflow_run operations use the default branch, no manual dispatch. Do not reintroduce removed migration tools. Review any remaining references during acceptance. Existing PR #27 is not included: after integration passes, update its lock only after separate approval, then retest. No merge to main, publication, or deployment authorization.

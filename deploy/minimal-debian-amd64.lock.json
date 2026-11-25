@@ -1,0 +1,74 @@
+{
+  "architecture": "amd64",
+  "source_run": 45584825846,
+  "source_jobs": [
+    139103906688,
+    139103906767
+  ],
+  "packages": [
+    {
+      "package": "libbz2-1.0",
+      "version": "1.0.8-6",
+      "sha256": "cba4cda04244b5e481bb15524bc3c983a7d1b6f330013b9b381706a2fcb65310"
+    },
+    {
+      "package": "libdb5.3t64",
+      "version": "5.3.28+dfsg2-9",
+      "sha256": "18d02510ee78b67e4504ba050176797a200ff24214a7cd318082ab60ad7bf3fc"
+    },
+    {
+      "package": "libffi8",
+      "version": "3.4.8-2",
+      "sha256": "0ebdc340de33333639c3c63874cd4b15ac2e83dfa1ef3053b7eefaf4919f4f68"
+    },
+    {
+      "package": "libgdbm6t64",
+      "version": "1.24-2",
+      "sha256": "e7b42c68c391e278733adb3c1efdacd24d660862bd7bac0efbc10a91e5696dfc"
+    },
+    {
+      "package": "liblzma5",
+      "version": "5.8.1-1+deb13u2",
+      "sha256": "b38acab30f295bf1066a6632e31cbd0a1980f2924b38040cda131d5dea5384ec"
+    },
+    {
+      "package": "libssl3t64",
+      "version": "3.5.9-1~deb13u1",
+      "sha256": "ffefb9af363e0e4592251b2533eb06453c8e470f7772e40263c4b2129251a6d5"
+    },
+    {
+      "package": "zlib1g",
+      "version": "1:1.3.dfsg+really1.3.1-1+deb13u1",
+      "sha256": "8c27c342230503b73dfde629642c3b352e87b554e06d60cf58772f236a305ceb"
+    }
+  ],
+  "excluded_after_11E8": [
+    {
+      "package": "libncursesw6",
+      "version": "6.5+20250216-2",
+      "sha256": "47baa2e11579583654583a066b69bd5a5d2f22423081f707ed6c0c3ba6d538b7"
+    },
+    {
+      "package": "libreadline8t64",
+      "version": "8.2-6",
+      "sha256": "eeadf2b5e755c9f183883feea2d9b5b28560284275d5f54d3e55d0923b1d0967"
+    },
+    {
+      "package": "libtinfo6",
+      "version": "6.5+20250216-2",
+      "sha256": "8b9f6a7983e9418564e48a627518de4c03917b56efe68d7f3e93bd8fffa1cc10"
+    },
+    {
+      "package": "libuuid1",
+      "version": "2.41.5-0+deb13u1",
+      "sha256": "c1bf4c4c3ff48c57fabf93307dfb56996b60cfa33927afc4158b5db36fb2721e"
+    }
+  ],
+  "replaced_after_11E9": [
+    {
+      "package": "libsqlite3-0",
+      "version": "3.46.1-7+deb13u2",
+      "sha256": "0a459adaffd901109f7811ab65f58e7a957b4907d05539cf3d1184efdcde0468"
+    }
+  ]
+}

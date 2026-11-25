@@ -91,15 +91,15 @@ test("route and strategy change animations respect reduced-motion",()=>{
   assert.match(css,/prefers-reduced-motion/);
 });
 
-test("Vercel read-only results use the Neon HTTPS driver, never raw PostgreSQL TCP",()=>{
-  const data=read("lib/data.ts");
+test("Vercel keeps Neon HTTPS by default; VPS TCP uses only the reader credential",()=>{
+  const data=read("lib/data.ts"),db=read("lib/db.ts");
   const pkg=JSON.parse(read("package.json"));
   assert.equal(typeof pkg.dependencies["@neondatabase/serverless"],"string");
-  assert.equal(pkg.dependencies.postgres,undefined);
-  assert.match(data,/import \{ neon \} from "@neondatabase\/serverless"/);
-  assert.match(data,/neon\(url, \{ arrayMode: false, fullResults: false \}\)/);
-  assert.match(data,/process\.env\.DATABASE_READ_URL/);
-  assert.doesNotMatch(data,/postgres\(url|process\.env\.DATABASE_URL\b/);
+  assert.equal(typeof pkg.dependencies.pg,"string");
+  assert.match(data,/import \{ connection \} from "\.\/db"/);
+  assert.match(db,/neon\(url, \{ arrayMode: false, fullResults: false \}\)/);
+  assert.match(db,/process\.env\.DATABASE_READ_URL/);
+  assert.doesNotMatch(db,/process\.env\.DATABASE_URL\b/);
 });
 
 test("Value Radar branding uses text only on desktop and mobile", () => {
