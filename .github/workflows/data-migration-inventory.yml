@@ -217,8 +217,10 @@ jobs:
           python-version: '3.13'
       - name: Install PostgreSQL 18 client
         run: |
-          sudo install -d /usr/share/postgresql-common/pgdg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          curl --retry 3 -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o "$RUNNER_TEMP/pgdg-direct.asc"
+          gpg --batch --show-keys --with-colons "$RUNNER_TEMP/pgdg-direct.asc" | grep -q 'B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8'
+          sudo install -m 0644 "$RUNNER_TEMP/pgdg-direct.asc" /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt/postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y postgresql-client-18
