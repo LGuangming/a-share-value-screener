@@ -33,8 +33,9 @@ Keep PR #27 and all other PRs unchanged during this phase.
    acceptance success on the same reviewed source. Preserve old/new Trivy
    scans (including unfixed HIGH/CRITICAL and secret gates), upstream component
    inventory, SBOM, actual runtime versions, logs and base/wheel locks.
-   Distroless/Slim comparisons remain non-release artifacts; never substitute
-   them for candidates. Their independent findings may keep overall CI red.
+   Historical Distroless Worker/Slim comparison artifacts are non-release
+   evidence. Their jobs are retired from routine CI; never substitute these
+   optional targets for candidates. Formal Web zstd and shell-free checks remain.
    Do not infer release approval from functional test success.
 3. Obtain explicit authorization to update/review PR #27. It is currently
    pinned to PR #26 d5f1ed82ea4360cfc0619aeb6e6fa13752177aac, with PR26

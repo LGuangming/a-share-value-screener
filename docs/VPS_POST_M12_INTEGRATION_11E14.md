@@ -115,3 +115,8 @@ security scanning. This is not a release certificate.
 Current CI acceptance is Python 3.13 and PostgreSQL 18.7 only. Retain all
 business, ACL, archive, isolation and candidate security checks. Historical
 cloud scheduling workflows remain unchanged until separate cutover approval.
+
+Routine Slim and Distroless Worker comparison jobs are retired. Only the
+formal Web + Minimal candidate pair is built for release acceptance; retain
+actual pinned Web/Minimal runtime bases, all candidate checks and independent
+gate. The optional comparison build targets do not constitute release support.

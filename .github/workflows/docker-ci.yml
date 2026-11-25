@@ -28,7 +28,6 @@ jobs:
       node: ${{ steps.resolve.outputs.node }}
       python: ${{ steps.resolve.outputs.python }}
       web_runtime: ${{ steps.resolve.outputs.web_runtime }}
-      worker_runtime: ${{ steps.resolve.outputs.worker_runtime }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -41,19 +40,19 @@ jobs:
           set -a
           source deploy/base-images.lock
           set +a
-          for ref in "$NODE_BASE" "$PYTHON_BASE" "$WEB_RUNTIME_BASE" "$WORKER_RUNTIME_BASE"; do
+          for ref in "$NODE_BASE" "$PYTHON_BASE" "$WEB_RUNTIME_BASE"; do
             [[ "$ref" =~ @sha256:[a-f0-9]{64}$ ]]
             expected="${ref##*@}"
             actual="$(docker buildx imagetools inspect "$ref" | awk '/^Digest:/ && !found {print $2; found=1}')"
             test "$actual" = "$expected"
           done
-          printf 'node=%s\npython=%s\nweb_runtime=%s\nworker_runtime=%s\n' "$NODE_BASE" "$PYTHON_BASE" "$WEB_RUNTIME_BASE" "$WORKER_RUNTIME_BASE" >> "$GITHUB_OUTPUT"
-          cp deploy/base-images.lock "$RUNNER_TEMP/base-images.lock"
+          printf 'node=%s\npython=%s\nweb_runtime=%s\n' "$NODE_BASE" "$PYTHON_BASE" "$WEB_RUNTIME_BASE" >> "$GITHUB_OUTPUT"
+          # Preserve only the verified production build inputs in this receipt.
+          grep -E '^(NODE_BASE|PYTHON_BASE|WEB_RUNTIME_BASE)=' deploy/base-images.lock > "$RUNNER_TEMP/base-images.lock"
           cat "$RUNNER_TEMP/base-images.lock" >> "$GITHUB_STEP_SUMMARY"
       - name: Resolve and hash exact CPython 3.13 wheels
         env:
           PYTHON_BASE: ${{ steps.resolve.outputs.python }}
-          WORKER_RUNTIME_BASE: ${{ steps.resolve.outputs.worker_runtime }}
         shell: bash
         run: |
           set -euo pipefail
@@ -63,7 +62,6 @@ jobs:
           diff -u <(grep -v '^#' backend/requirements-worker.cp313.hashes.txt) <(grep -v '^#' "$RUNNER_TEMP/requirements-worker.cp313.hashes.txt")
           cat "$RUNNER_TEMP/requirements-worker.cp313.hashes.txt"
           docker run --rm --platform linux/amd64 --entrypoint /usr/local/bin/python "$PYTHON_BASE" --version
-          docker run --rm --platform linux/amd64 --entrypoint /usr/bin/python3 "$WORKER_RUNTIME_BASE" --version
       - name: Preserve CPython 3.13 hash lock
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -78,238 +76,6 @@ jobs:
           path: ${{ runner.temp }}/base-images.lock
           retention-days: 14
           if-no-files-found: error
-  docker-smoke:
-    name: Distroless comparison (${{ matrix.postgres }})
-    needs: resolve-base-images
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        postgres: ['postgres:18.7-alpine']
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '26'
-      - name: Build local Web image (no push)
-        id: build_web
-        env:
-          NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
-          WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
-        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
-      - name: Build Distroless comparison Worker image (no push)
-        id: build_worker
-        env:
-          PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
-          WORKER_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.worker_runtime }}
-        run: docker build --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" --target distroless-evaluation --build-arg WORKER_RUNTIME_BASE="$WORKER_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:ci .
-      - name: Check image size and runtime metadata
-        run: docker image inspect ashare-web:ci ashare-worker:ci --format '{{.RepoTags}} size={{.Size}} user={{.Config.User}}'
-      - name: Verify installed zstd payload and metadata in both final images
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /nodejs/bin/node ashare-web:ci -e '
-          const fs=require("node:fs"), crypto=require("node:crypto"), a=require("node:assert/strict");
-          const base="/var/lib/dpkg/status.d/libzstd1";
-          a.match(fs.readFileSync(base,"utf8"),/^Version: 1\.5\.7\+dfsg-1\+deb13u1$/m);
-          for(const line of fs.readFileSync(base+".md5sums","utf8").trim().split("\n")){
-            const [hash,...parts]=line.trim().split(/\s+/);const path="/"+parts.join(" ");
-            a.equal(crypto.createHash("md5").update(fs.readFileSync(path)).digest("hex"),hash,path);
-          }
-          console.log("PASS: Web fixed zstd payload and package metadata");
-          '
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/bin/python3 ashare-worker:ci -c '
-          import pathlib, hashlib, ctypes
-          base=pathlib.Path("/var/lib/dpkg/status.d/libzstd1")
-          assert "Version: 1.5.7+dfsg-1+deb13u1" in base.read_text().splitlines()
-          for line in pathlib.Path(str(base)+".md5sums").read_text().splitlines():
-              digest,path=line.split(maxsplit=1)
-              assert hashlib.md5(pathlib.Path("/"+path).read_bytes()).hexdigest()==digest,path
-          assert ctypes.CDLL("libzstd.so.1").ZSTD_versionNumber()==10507
-          print("PASS: Worker fixed zstd payload, metadata and loader")
-          '
-      - name: Verify stripped runtime and locked Worker versions
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /nodejs/bin/node ashare-web:ci -e '
-          const a=require("node:assert/strict"), fs=require("node:fs"), path=require("node:path");
-          a.equal(process.getuid(),10001); a.equal(process.getgid(),10010); a.match(process.version,/^v26\./);
-          for(const dir of process.env.PATH.split(":")) for(const tool of ["sh","bash","npm","npx","yarn","yarnpkg","corepack","apt","apt-get","dpkg"]) a.equal(fs.existsSync(path.join(dir,tool)),false,"Unexpected runtime tool: "+tool);
-          a.equal(fs.existsSync("/bin/sh"),false);
-          a.ok(fs.existsSync("/app/test-web-launch.cjs"));
-          console.log("PASS: shell-free Node 26 runtime");
-          '
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/bin/python3 ashare-worker:ci -c '
-          import os, sys, shutil, importlib.util as u
-          assert (os.getuid(), os.getgid()) == (10002,10010)
-          assert sys.version_info[:2] == (3,13)
-          assert not os.path.exists("/bin/sh")
-          assert all(shutil.which(x) is None for x in ("sh","bash","pip","pip3","pip3.13","apt","apt-get","dpkg"))
-          remaining = {x: u.find_spec(x).origin for x in ("pip","setuptools","wheel","ensurepip") if u.find_spec(x) is not None}
-          assert not remaining, f"Unexpected runtime installers: {remaining}"
-          import psycopg, duckdb, boto3, baostock, pandas, numpy, tzdata
-          print("PASS: shell-free Python 3.13 runtime")
-          '
-          docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/bin/python3 ashare-worker:ci -c '
-          import importlib.metadata as m, sys
-          expected = {line.split("==")[0]: line.split("==")[1] for line in sys.stdin.read().splitlines() if "==" in line and not line.startswith("#")}
-          actual = {d.metadata["Name"].lower().replace("_", "-"): d.version for d in m.distributions()}
-          assert actual == expected, "Runtime dependency set differs from lock"
-          print("PASS: all %d runtime distributions match lock" % len(expected))
-          ' < backend/requirements-worker.lock.txt
-      - name: Verify Worker TLS and native runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/bin/python3 ashare-worker:ci -c '
-          import sys, ssl, sqlite3, zlib, zoneinfo, duckdb, numpy, pandas, psycopg, boto3, baostock
-          assert sys.version_info[:2] == (3,13)
-          assert ssl.create_default_context().get_ca_certs()
-          assert sqlite3.connect(":memory:").execute("select 1").fetchone() == (1,)
-          assert zlib.decompress(zlib.compress(b"fixture")) == b"fixture"
-          assert duckdb.connect(":memory:").execute("select 1").fetchone() == (1,)
-          assert numpy.array([1,2]).sum() == 3 and pandas.Series([1,2]).sum() == 3
-          assert zoneinfo.ZoneInfo("Asia/Shanghai")
-          print("PASS: TLS trust store, SQLite, zlib, DuckDB, NumPy/Pandas, time zone")
-          '
-      - name: Isolated Compose smoke and recreation
-        env:
-          ASHARE_CI_WORKER_VARIANT: distroless
-        run: bash tests/docker-smoke.sh
-      - name: Prepare SBOM directory
-        if: always() && (steps.build_web.outcome == 'success' || steps.build_worker.outcome == 'success')
-        run: mkdir -p reports
-      - name: Preserve resolved Python wheel lock with scan artifacts
-        if: always() && steps.build_worker.outcome == 'success'
-        run: cp backend/requirements-worker.cp313.hashes.txt reports/
-      - name: web SBOM (inventory only)
-        if: always() && steps.build_web.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ashare-web:ci
-          format: cyclonedx
-          output: reports/web.cdx.json
-          cache: 'false'
-      - name: web secret gate
-        if: always() && steps.build_web.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ashare-web:ci
-          scanners: secret
-          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
-          format: table
-          exit-code: '1'
-          cache: 'false'
-      - name: web HIGH and CRITICAL vulnerability gate
-        if: always() && steps.build_web.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ashare-web:ci
-          scanners: vuln
-          severity: 'HIGH,CRITICAL'
-          ignore-unfixed: 'false'
-          format: table
-          exit-code: '1'
-          cache: 'false'
-      - name: worker SBOM (inventory only)
-        if: always() && steps.build_worker.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ashare-worker:ci
-          format: cyclonedx
-          output: reports/worker.cdx.json
-          cache: 'false'
-      - name: worker secret gate
-        if: always() && steps.build_worker.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ashare-worker:ci
-          scanners: secret
-          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
-          format: table
-          exit-code: '1'
-          cache: 'false'
-      - name: worker HIGH and CRITICAL vulnerability gate
-        if: always() && steps.build_worker.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ashare-worker:ci
-          scanners: vuln
-          severity: 'HIGH,CRITICAL'
-          ignore-unfixed: 'false'
-          format: table
-          exit-code: '1'
-          cache: 'false'
-      - name: Preserve SBOMs without publishing images
-        if: always() && (steps.build_web.outcome == 'success' || steps.build_worker.outcome == 'success')
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: sbom-${{ strategy.job-index }}
-          path: reports/
-          retention-days: 14
-          if-no-files-found: error
-  slim-worker-evaluation:
-    name: Slim comparison (not a deployment candidate)
-    needs: resolve-base-images
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Build newer CPython slim comparison (not a release candidate)
-        id: slim
-        env:
-          PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
-        run: docker build --pull --platform linux/amd64 --target slim-evaluation --build-arg PYTHON_BASE="$PYTHON_BASE" -f Dockerfile.worker -t ashare-worker:slim-eval .
-      - name: Report patch version and smoke test native wheels
-        run: |
-          docker image inspect ashare-worker:slim-eval --format '{{.Size}} {{.Config.User}}'
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/python3 ashare-worker:slim-eval -c '
-          import sys, ssl, sqlite3, duckdb, numpy, pandas, psycopg, boto3, baostock, zoneinfo, zlib
-          print(sys.version, ssl.OPENSSL_VERSION)
-          assert sys.version_info[:2]==(3,13)
-          assert ssl.create_default_context().get_ca_certs()
-          assert sqlite3.connect(":memory:").execute("select 1").fetchone()==(1,)
-          assert duckdb.connect(":memory:").execute("select 1").fetchone()==(1,)
-          assert numpy.array([1,2]).sum()==3 and pandas.Series([1,2]).sum()==3
-          assert zlib.decompress(zlib.compress(b"fixture"))==b"fixture"
-          assert zoneinfo.ZoneInfo("Asia/Shanghai")
-          '
-      - name: Comparison secret gate
-        if: always() && steps.slim.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
-        with:
-          scan-type: image
-          image-ref: ashare-worker:slim-eval
-          scanners: secret
-          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
-          format: table
-          exit-code: '1'
-          cache: 'false'
-      - name: Comparison HIGH and CRITICAL gate
-        if: always() && steps.slim.outcome == 'success'
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
-        with:
-          scan-type: image
-          image-ref: ashare-worker:slim-eval
-          scanners: vuln
-          severity: 'HIGH,CRITICAL'
-          ignore-unfixed: 'false'
-          format: table
-          exit-code: '1'
-          cache: 'false'
   minimal-worker-evaluation:
     name: Release candidate Web + Minimal (${{ matrix.postgres }})
     needs: resolve-base-images
@@ -407,6 +173,28 @@ jobs:
           NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
           WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
         run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
+      - name: Verify final Web zstd payload, shell-free runtime and identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /nodejs/bin/node ashare-web:ci -e '
+          const fs=require("node:fs"), crypto=require("node:crypto"), a=require("node:assert/strict");
+          const base="/var/lib/dpkg/status.d/libzstd1";
+          a.match(fs.readFileSync(base,"utf8"),/^Version: 1\.5\.7\+dfsg-1\+deb13u1$/m);
+          for(const line of fs.readFileSync(base+".md5sums","utf8").trim().split("\n")){
+            const [hash,...parts]=line.trim().split(/\s+/);const path="/"+parts.join(" ");
+            a.equal(crypto.createHash("md5").update(fs.readFileSync(path)).digest("hex"),hash,path);
+          }
+          console.log("PASS: Web fixed zstd payload and package metadata");
+          '
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /nodejs/bin/node ashare-web:ci -e '
+          const a=require("node:assert/strict"), fs=require("node:fs"), path=require("node:path");
+          a.equal(process.getuid(),10001); a.equal(process.getgid(),10010); a.match(process.version,/^v26\./);
+          for(const dir of process.env.PATH.split(":")) for(const tool of ["sh","bash","npm","npx","yarn","yarnpkg","corepack","apt","apt-get","dpkg"]) a.equal(fs.existsSync(path.join(dir,tool)),false,"Unexpected runtime tool: "+tool);
+          a.equal(fs.existsSync("/bin/sh"),false);
+          a.ok(fs.existsSync("/app/test-web-launch.cjs"));
+          console.log("PASS: shell-free Node 26 runtime");
+          '
       - name: Full isolated Minimal Compose smoke and recreation (actual VPS test overlay)
         env:
           ASHARE_CI_WORKER_VARIANT: minimal
@@ -418,7 +206,7 @@ jobs:
           mkdir -p eval-reports
           git grep -nEi 'quic|http3|wrap_bio|sni_callback|HTMLParser|html\.parser|xml\.etree|xml\.parsers|tarfile|extractall|sqlite3|FTS5|nsenter|infocmp|libuuid|uuid4|urllib\.request|boto3|baostock' -- app lib backend/value_screener compose.yaml compose.vps-test.yaml compose.loopback.yaml > eval-reports/source-usage.txt || test "$?" = 1
           cp "$RUNNER_TEMP/minimal-base.lock" eval-reports/
-      - name: Minimal comparison SBOM
+      - name: Minimal candidate SBOM
         if: always() && steps.minimal.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
@@ -427,7 +215,7 @@ jobs:
           format: cyclonedx
           output: eval-reports/minimal.cdx.json
           cache: 'false'
-      - name: Minimal comparison secret gate
+      - name: Minimal candidate secret gate
         if: always() && steps.minimal.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
@@ -556,7 +344,7 @@ jobs:
                   raise SystemExit("BLOCK: absent or failed candidate decision: " + name)
           print("PASS: all three scoped vulnerability decisions")
           PY
-      - name: Report comparison scan results
+      - name: Report candidate raw scan results
         if: always() && steps.minimal.outcome == 'success'
         shell: bash
         run: |

@@ -279,9 +279,10 @@ The release candidate builds the default target without --target, verifies
 its entrypoint/command/identity, and retains full PostgreSQL 18.7 functional,
 native, source, SBOM, secret and two-Trivy-version vulnerability checks. A
 separately named candidate acceptance job requires the PG18.7 candidate and
-base verification to succeed. Distroless (PG18.7) and Slim remain named
-comparison jobs with unchanged strict scans; they may still make overall
-workflow red. The historical 11E-12 OpenSSL block is superseded only by the
+base verification to succeed. Routine Distroless Worker and Slim comparison
+jobs are retired; their optional targets and historical evidence remain.
+Formal Web runtime checks formerly in the comparison job now run in the
+candidate job. The actual Web and Minimal Distroless base images remain pinned. The historical 11E-12 OpenSSL block is superseded only by the
 [11E-14A scoped, expiring candidate acceptance](VPS_CANDIDATE_RISK_ACCEPTANCE_11E14A.md).
 No other vulnerability waiver, continue-on-error, publication or deployment.
 Do not change PR #27 or any other PR as part of this phase. Publication and

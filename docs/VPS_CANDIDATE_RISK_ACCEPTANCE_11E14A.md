@@ -32,9 +32,9 @@ HIGH/CRITICAL finding, including the same CVE in another component,
 different version, CRITICAL severity, or newly available fix. Missing or
 invalid reports and missing decision receipts fail closed. Original raw
 JSON, decision JSON, SBOMs, secret scans and runtime identity evidence are
-retained as artifacts. Secret gates remain unmodified. Distroless and Slim
-comparison jobs remain strict, non-release candidates and cannot satisfy
-the independent release candidate gate. Tests cover expiry, exact match,
+retained as artifacts. Secret gates remain unmodified. Distroless Worker and
+Slim Worker comparison jobs are now retired from routine CI; their optional
+build targets remain non-release candidates. Tests cover expiry, exact match,
 scope, fixed version, critical escalation and malformed evidence.
 
 CI trigger: add feature/vps-image-security to the push branch filter and
@@ -45,8 +45,8 @@ The original 11E-14A revision required PostgreSQL 17 and 18.7. Following
 the operator's single-version decision, only the full PostgreSQL 18.7
 candidate and independent acceptance gate must pass on the reviewed SHA. Additional container fixture assertions
 verify the 56 M12 table permissions with the actual non-owner worker.
-Comparison job failures remain visible; do not misrepresent whole workflow
-as green if they fail. No live VPS tests in this phase.
+Historical comparison job failures remain recorded in earlier runs. No live
+VPS tests in this phase.
 
 This acceptance is for candidate CI only. PR #27 remains unchanged;
 future publication must independently enforce the same or stricter rule,
@@ -64,22 +64,24 @@ This uses the same committed revision and full matrix, not a copied or
 reduced smoke test. No secrets inherited; contents read only. The direct
 push filter returns to its original branch to avoid duplicate push builds;
 normal standalone pull_request triggers are retained. A separate PR run
-may still occur and must be reported distinctly. On the push caller run,
-comparison failures can make the combined Tests and Build red even when
-the independent candidate acceptance succeeds; inspect individual jobs.
+may still occur and must be reported distinctly. On previous push caller runs,
+comparison failures could make the combined Tests and Build red even when
+the independent candidate acceptance succeeded. These comparisons are now
+retired from routine CI; inspect individual jobs and the independent gate.
 No automatic rerun of old SHAs and no dispatch of PR #27.
 
 ## PostgreSQL 18.7-only acceptance (operator-approved 2026-11-25)
 
 The live VPS database was already migrated to PostgreSQL 18.7 in M12.
 PG17 is retired from current CI and release acceptance, not a supported
-fallback target. The four PostgreSQL matrices (Python pipeline, Web build,
-Distroless comparison and Minimal candidate) each contain exactly one entry:
+fallback target. The three active PostgreSQL matrices (Python pipeline,
+Web build and Minimal candidate) each contain exactly one entry:
 postgres:18.7-alpine. The disposable Compose fixture uses that exact tag
 without a PG17 default or database-image override. Python 3.13 tests,
-base resolution, strict Slim comparison, all existing candidate security
+base resolution, all existing candidate security
 and functional checks and the independent candidate gate are unchanged.
-Expected combined push caller job count: eight rather than thirteen (PG17 and Python 3.11 retired).
+Expected combined push caller job count: six rather than thirteen (PG17,
+Python 3.11, Slim and Distroless Worker comparisons retired).
 Previous dual-version results remain historical evidence only. No source
 schema, production Compose, live database, archive, PR #27 or main changes.
 No change to exception expiry, scope, raw evidence, secret or vulnerability
@@ -94,3 +96,17 @@ Historical Python 3.11 evidence is not a release dependency. Existing cloud
 collection/maintenance workflows remain untouched pending separate scheduling
 and cutover approval; no claim of continued 3.11 compatibility or migration
 of those workflows. All scoped security, ACL and isolation gates remain.
+
+### Retire comparison jobs (operator decision)
+
+Remove routine Distroless Worker and Slim Worker jobs and the comparison-only
+Distroless Python runtime manifest/pull dependency. Keep their Dockerfile
+build targets, locks and CI overlays as historical/optional diagnostics; no
+claim of ongoing comparison support. The actual Web Distroless Node base and
+Minimal Distroless cc base remain required and digest-verified. Migrate the
+previous comparison-only Web zstd payload/metadata, Node shell-free and
+UID/GID checks into the formal candidate job before Compose. All existing
+Minimal runtime, M12 ACL, fixture isolation, raw Trivy scans, scoped decisions,
+secret, SBOM and independent acceptance steps remain. Earlier run logs and
+artifacts are not deleted (normal artifact retention still applies). No
+publication, deployment or changes to PR #27 or production data.
