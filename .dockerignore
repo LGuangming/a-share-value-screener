@@ -27,6 +27,8 @@
 !deploy/minimal-debian-amd64.lock.json
 !deploy/rebuild-minimal-xml.py
 !deploy/minimal-xml-sources.lock.json
+!deploy/rebuild-minimal-sqlite.py
+!deploy/minimal-sqlite-source.lock.json
 !database/
 !database/**
 # Defense in depth inside allowed paths.

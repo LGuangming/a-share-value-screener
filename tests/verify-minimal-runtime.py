@@ -32,7 +32,26 @@ print("PASS: pure Python UUID and rebuilt Expat/ElementTree")
 status = Path("/var/lib/dpkg/status.d")
 for package in ("libncursesw6", "libreadline8t64", "libtinfo6", "libuuid1"):
     assert not (status / package).exists(), package
-assert len(manifest["debian_packages"]) == 8
+assert len(manifest["debian_packages"]) == 7
+assert not (status / "libsqlite3-0").exists()
+import sqlite3
+import _sqlite3
+import pandas as pd
+sqlite = manifest["sqlite_rebuild"]
+assert sqlite3.sqlite_version == "3.54.1"
+with Path("/usr/local/lib/libsqlite3.so.0").open("rb") as fd:
+    assert hashlib.file_digest(fd, "sha256").hexdigest() == sqlite["library_sha256"]
+with sqlite3.connect(":memory:") as db:
+    assert db.execute("select sqlite_source_id()").fetchone()[0] == sqlite["source"]["source_id"]
+    assert sorted(x[0] for x in db.execute("pragma compile_options")) == sqlite["actual"]["compile_options"]
+    pd.DataFrame({"id": [1, 2], "amount": [3.5, 4.5]}).to_sql("sample", db, index=False)
+    assert pd.read_sql_query("select sum(amount) as total from sample", db).iloc[0,0] == 8
+    db.execute("create virtual table fts using fts5(body)")
+    db.execute("insert into fts values ('sample financial archive')")
+    assert db.execute("select count(*) from fts where fts match 'financial'").fetchone() == (1,)
+    assert db.execute("pragma integrity_check").fetchone() == ("ok",)
+    assert db.execute("select json_extract(?, '$.a')", ('{"a":1}',)).fetchone() == (1,)
+print("PASS: SQLite 3.54.1, source identity, pandas SQL, FTS5, JSON, integrity")
 for record in manifest["debian_packages"]:
     package = record["package"]
     meta = (status / package).read_text()

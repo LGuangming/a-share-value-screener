@@ -61,7 +61,35 @@ for fixed, cves in expat_cves.items():
         expat_reviews.append({"cve": cve, "first_fixed_release": fixed, "state": state})
         if state == "version-below-fix":
             errors.append(f"{cve}: Expat {pyexpat.EXPAT_VERSION} below {fixed}; fix/provenance required")
+# Explicitly audit the source-built SQLite independently of Debian metadata.
+import _sqlite3
+sqlite = manifest["sqlite_rebuild"]
+sqlite_library = Path("/usr/local/lib/libsqlite3.so.0")
+with sqlite_library.open("rb") as fd:
+    if hashlib.file_digest(fd, "sha256").hexdigest() != sqlite["library_sha256"]:
+        errors.append("SQLite shared library SHA256 mismatch")
+with sqlite3.connect(":memory:") as db:
+    sqlite_source_id = db.execute("select sqlite_source_id()").fetchone()[0]
+    sqlite_options = sorted(x[0] for x in db.execute("pragma compile_options"))
+sqlite_link = subprocess.check_output([loader, "--list", _sqlite3.__file__], text=True)
+if (sqlite3.sqlite_version != sqlite["source"]["version"] or
+        sqlite_source_id != sqlite["source"]["source_id"] or
+        sqlite_options != sqlite["actual"]["compile_options"] or
+        "/usr/local/lib/libsqlite3.so.0" not in sqlite_link or
+        sqlite["upstream_sqlite_regression"] != "passed"):
+    errors.append("SQLite version/source/options/link/regression mismatch")
+if Path("/var/lib/dpkg/status.d/libsqlite3-0").exists():
+    errors.append("Old SQLite Debian package still present")
+sqlite_reviews = []
+for cve in ("CVE-2026-119373", "CVE-2026-119374", "CVE-2026-119379"):
+    fixed = version(sqlite3.sqlite_version) >= (3, 54, 0)
+    sqlite_reviews.append({"cve":cve,"first_fixed_release":"3.54.0","state":"version-meets-reviewed-floor" if fixed else "version-below-fix"})
+    if not fixed:
+        errors.append(cve + ": SQLite below 3.54.0")
 report = {
+    "sqlite_review": sqlite_reviews,
+    "sqlite_rebuild": sqlite,
+    "sqlite_loader": sqlite_link,
     "python": sys.version,
     "python_release_review_cves": python_cves,
     "python_source_image": manifest["source_image"],
@@ -75,7 +103,7 @@ report = {
     "openssl": ssl.OPENSSL_VERSION,
     "elf_consumers": consumers,
     "utility_paths": {str(p): p.exists() for directory in ("/usr/bin", "/bin", "/usr/sbin", "/sbin") for cmd in ("xmlwf", "infocmp", "mount", "nsenter") for p in (Path(directory) / cmd,)},
-    "sources": ["https://docs.python.org/3.13/whatsnew/changelog.html", "https://github.com/libexpat/libexpat/blob/master/expat/Changes", "https://security-tracker.debian.org/tracker/source-package/expat"],
+    "sources": ["https://docs.python.org/3.13/whatsnew/changelog.html", "https://github.com/libexpat/libexpat/blob/master/expat/Changes", "https://security-tracker.debian.org/tracker/source-package/expat", "https://www.sqlite.org/releaselog/3_54_1.html", "https://security-tracker.debian.org/tracker/source-package/sqlite3"],
     "limitations": "Finite release-version review; no exhaustive source-level patch verification; ELF consumer inspection is not exploitability proof. No severity waiver.",
     "blocking_findings": errors
 }

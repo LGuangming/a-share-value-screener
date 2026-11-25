@@ -72,8 +72,17 @@ print("Excluded stdlib entries:", sorted(excluded), flush=True)
 print("GUI import evidence:", json.dumps(references), flush=True)
 # Determine native dependencies from actual ELF files, including wheel-private
 # libraries. ldd runs only on hash-verified/official build artifacts.
-targets = [pathlib.Path("/usr/local/bin/python3.13")]
-runtime_elf = ["/usr/local/bin/python3.13"]
+# Select verified, independently built SQLite in the builder for dependency
+# discovery; copy its actual bytes, not the old Debian package.
+sqlite_dir = pathlib.Path("/opt/minimal-sqlite")
+sqlite_report = json.loads((sqlite_dir / "provenance.json").read_text())
+sqlite_library = sqlite_dir / "libsqlite3.so.0"
+with sqlite_library.open("rb") as fd:
+    assert hashlib.file_digest(fd, "sha256").hexdigest() == sqlite_report["library_sha256"]
+shutil.copy2(sqlite_library, python_root / "lib/libsqlite3.so.0")
+os.environ["LD_LIBRARY_PATH"] = str(sqlite_dir) + ":/usr/local/lib"
+targets = [pathlib.Path("/usr/local/bin/python3.13"), sqlite_library]
+runtime_elf = ["/usr/local/bin/python3.13", "/usr/local/lib/libsqlite3.so.0"]
 # Inspect exactly the retained stdlib files and the entire installed wheel set.
 for retained, original, destination in ((python_root / "lib/python3.13", stdlib, "/usr/local/lib/python3.13"), (wheel_root, wheel_root, "/opt/runtime-packages")):
     for item in sorted(retained.rglob("*")):
@@ -93,6 +102,8 @@ for target in targets:
         if not match:
             continue
         lib = pathlib.Path(match[1]).resolve()
+        if lib == sqlite_library:
+            continue
         if str(lib).startswith(("/usr/local/", "/opt/venv/")):
             continue
         owner = None
@@ -114,7 +125,7 @@ records = []
 lock = json.loads(pathlib.Path("/minimal-debian-amd64.lock.json").read_text())
 assert lock["architecture"] == "amd64"
 locked = {entry["package"]: entry for entry in lock["packages"]}
-assert len(locked) == len(lock["packages"]) == 8
+assert len(locked) == len(lock["packages"]) == 7
 if set(locked) != packages - base_packages:
     raise RuntimeError(f"Native package closure changed: extra={sorted(packages - base_packages - set(locked))}, missing={sorted(set(locked) - packages)}")
 for package in sorted(packages - base_packages):
@@ -170,5 +181,5 @@ for component in component_paths:
 assert any("pyexpat" in name for name in component_files)
 manifest = root / "opt/cp313-provenance.json"
 manifest.parent.mkdir(exist_ok=True)
-manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION, "xml_rebuild": xml_provenance}, indent=2)+"\n")
+manifest.write_text(json.dumps({"python": sys.version, "source_image": os.environ["PYTHON_BASE"], "runtime_base_supplied": sorted(packages & base_packages), "debian_packages": records, "runtime_elf": sorted(set(runtime_elf)), "excluded_stdlib": sorted(excluded), "gui_import_references": references, "upstream_component_sha256": component_files, "builder_expat_version": pyexpat.EXPAT_VERSION, "xml_rebuild": xml_provenance, "sqlite_rebuild": sqlite_report}, indent=2)+"\n")
 print(manifest.read_text())

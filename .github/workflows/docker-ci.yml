@@ -521,6 +521,25 @@ jobs:
               counts = collections.Counter(v["Severity"] for r in (data.get("Results") or []) for v in (r.get("Vulnerabilities") or []))
               print(p.name, {"HIGH": counts["HIGH"], "CRITICAL": counts["CRITICAL"]})
           PY
+      - name: Generate explicit upstream SQLite CycloneDX component inventory
+        if: always() && steps.minimal.outcome == 'success'
+        run: |
+          mkdir -p eval-reports
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path("eval-reports/cp313-provenance.json").read_text())
+          s = data["sqlite_rebuild"]
+          component = {"type":"library","bom-ref":"upstream-sqlite-"+s["source"]["version"],"name":"sqlite",
+                       "version":s["source"]["version"],"purl":"pkg:generic/sqlite@"+s["source"]["version"],
+                       "cpe":"cpe:2.3:a:sqlite:sqlite:"+s["source"]["version"]+":*:*:*:*:*:*:*",
+                       "hashes":[{"alg":"SHA-256","content":s["library_sha256"]}],
+                       "externalReferences":[{"type":"distribution","url":s["source"]["url"]}],
+                       "properties":[{"name":"source:sha256","value":s["source"]["sha256"]},
+                                     {"name":"source:id","value":s["source"]["source_id"]},
+                                     {"name":"installed:path","value":"/usr/local/lib/libsqlite3.so.0"}]}
+          Path("eval-reports/upstream-sqlite.cdx.json").write_text(json.dumps({"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[component]},indent=2)+"\n")
+          PY
       - name: Preserve evaluation evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -178,3 +178,7 @@ See [MINIMAL_SECURITY_CLOSEOUT.md](MINIMAL_SECURITY_CLOSEOUT.md). Lock all 12 ob
 ## Phase 11E-8 — directed components
 
 See [MINIMAL_COMPONENT_REMEDIATION.md](MINIMAL_COMPONENT_REMEDIATION.md). Build coupled pyexpat and _elementtree from locked upstream CPython and Expat releases, verify regression and provenance; test removal of optional curses/readline/_uuid, with exact revised Debian closure. Keep existing default and full strict CI. SQLite/OpenSSL still blocked by signed stable-package availability. No merge/publish/deployment.
+
+## Phase 11E-9 — SQLite candidate
+
+See [MINIMAL_SQLITE_REMEDIATION.md](MINIMAL_SQLITE_REMEDIATION.md). Preserve SQLite interface, build verified upstream 3.54.1 shared library, retain true source provenance and separate CycloneDX component inventory, validate feature flags and actual loading, run upstream and pandas tests. Preserve all previous CI/security gates and the main runner. No merge/publish/deploy.
