@@ -1,0 +1,102 @@
+name: VPS operations (read-only)
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: vps-production-operations
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment: vps-production
+    timeout-minutes: 5
+    steps:
+      - name: Verify restricted SSH operations
+        shell: bash
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          for var in VPS_HOST VPS_PORT VPS_USER VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS; do
+            if [[ -z "${!var}" ]]; then
+              echo "::error::Required environment secret is missing: $var"
+              exit 1
+            fi
+          done
+          # Only the dedicated account and configured SSH port are permitted.
+          if [[ ! "$VPS_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ||
+                "$VPS_PORT" != 6801 || "$VPS_USER" != ashare-ops ]]; then
+            echo "::error::Invalid VPS connection configuration"
+            exit 1
+          fi
+          workdir="$(mktemp -d)"
+          trap 'rm -rf -- "$workdir"' EXIT
+          printf '%s\n' "$VPS_SSH_PRIVATE_KEY" | tr -d '\r' > "$workdir/key"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > "$workdir/known_hosts"
+          chmod 600 "$workdir/key" "$workdir/known_hosts"
+          unset VPS_SSH_PRIVATE_KEY VPS_KNOWN_HOSTS
+          # Use the host key obtained out of band from the VPS, never ssh-keyscan.
+          if ! awk -v host="[$VPS_HOST]:$VPS_PORT" '
+            NF { if (NF != 3 || $1 != host || $2 != "ssh-ed25519") bad=1; n++ }
+            END { exit !(n == 1 && !bad) }
+          ' "$workdir/known_hosts" ||
+            ! ssh-keygen -lf "$workdir/known_hosts" >/dev/null 2>&1 ||
+            ! ssh-keygen -y -P '' -f "$workdir/key" >/dev/null 2>&1; then
+            echo "::error::Invalid host key record or SSH private key"
+            exit 1
+          fi
+          ssh_opts=(
+            -F /dev/null -n -T
+            -i "$workdir/key"
+            -p "$VPS_PORT" -l "$VPS_USER"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o IdentityAgent=none
+            -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$workdir/known_hosts"
+            -o GlobalKnownHostsFile=/dev/null
+            -o HostKeyAlgorithms=ssh-ed25519
+            -o PasswordAuthentication=no
+            -o KbdInteractiveAuthentication=no
+            -o ClearAllForwardings=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=10
+            -o ServerAliveCountMax=2
+          )
+          remote() {
+            ssh "${ssh_opts[@]}" -- "$VPS_HOST" "$1" 2>"$workdir/ssh.stderr"
+          }
+          # Avoid logging raw SSH diagnostics or connection details in this public repository.
+          if output="$(remote ping)" && [[ "$output" == ASHARE_OPS_OK ]]; then
+            echo "PASS: restricted SSH ping"
+          else
+            echo "::error::SSH ping failed (check reachability, pinned host key and key authorization)"
+            exit 1
+          fi
+          if output="$(remote status)"; then
+            echo "PASS: restricted status command"
+            # The server-owned status script prints only approved resource metrics.
+            printf '%s\n' "$output"
+          else
+            echo "::error::Restricted status command failed"
+            exit 1
+          fi
+          rc=0
+          output="$(remote whoami)" || rc=$?
+          if [[ "$rc" -eq 64 && "$output" == "ERROR: Operation not permitted" ]]; then
+            echo "PASS: unauthorized command denied"
+          else
+            echo "::error::Unauthorized command rejection did not match policy"
+            exit 1
+          fi
+          echo "PASS: VPS read-only operations channel"
