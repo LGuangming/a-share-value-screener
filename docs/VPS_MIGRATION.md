@@ -124,7 +124,7 @@ The writer adapter only permits healthcheck deletion or explicitly enabled
 obsolete monthly-reader deletion; original daily data cannot be deleted by it.
 No production cleanup, provider calls or schedule changes in this PR.
 
-CI uses temporary directories, isolated PostgreSQL 17 and synthetic provider
+Historical phase 07 used temporary directories, isolated PostgreSQL 17 and synthetic provider
 data. It verifies market ingestion, real Parquet daily/month publication,
 archive-first financial import and NCAV calculation, repeatability, metadata
 and atomic failure tests. Production archive migration, actual data coverage,
@@ -201,7 +201,7 @@ is included. Pin reviewed immutable SHA tags or image digests once published.
 Retain previous image versions for app rollback; schema/data rollback is separate.
 
 Docker CI builds local images only on an isolated runner. The test overlay
-starts disposable PostgreSQL 17 with separate fixture writer/reader roles.
+originally started disposable PostgreSQL 17 with separate fixture writer/reader roles; the current CI-only overlay uses PostgreSQL 18.7 Alpine.
 A real worker writes synthetic Parquet and SQL through the local storage
 adapter. Real standalone web must serve authenticated queries and static
 assets, reject unauthenticated access, fail writes to the read-only archive
@@ -247,8 +247,9 @@ ASHARE_READINESS_YEAR for known test data. It verifies auth, Secure Cookie,
 SQL search, bars/factors and authenticated snapshot freshness. Empty test
 DB/archive cannot pass full readiness. CI alone may allow a stale synthetic
 snapshot on 127.0.0.1 using ASHARE_TEST_ALLOW_STALE=1.
-CI matrices retain PostgreSQL 17 and add postgres:18.7-alpine for Node,
-Python and Docker. CI uses disposable networks, fixture data and local
+The original phase 11B matrices covered PostgreSQL 17 and 18.7; following
+M12 and the 11E-14A single-version decision, current Node, Python and Docker
+CI use only postgres:18.7-alpine. CI uses disposable networks, fixture data and local
 images only. It exercises the same VPS test overlay, including guard
 rejection of production DB URLs, then container recreation. Actual 1Panel
 TLS forwarding, public port reachability, resource pressure and production
@@ -272,14 +273,14 @@ exercises the actual VPS-test overlay directly and verifies the resolved
 launch contract. Use only the separately approved immutable image digest;
 existing sample tags are placeholders, not published images.
 
-The release candidate matrix builds the default target without --target,
-verifies its entrypoint/command/identity, and retains full dual-PostgreSQL
-functional, native, source, SBOM, secret and two-version strict vulnerability
-checks. A separately named candidate acceptance job requires both matrices
-and base verification to succeed. Distroless and Slim remain named comparison
-jobs with unchanged strict scans; they may still make overall workflow red.
-No vulnerability waiver, continue-on-error, publication or deployment.
-OpenSSL remediation is deferred, not passed; current four candidate HIGH
-findings remain release blockers. Do not change PR #27 publishing workflow
-or any other PR as part of this phase. Publication and actual VPS setup
-require separate approval.
+The release candidate builds the default target without --target, verifies
+its entrypoint/command/identity, and retains full PostgreSQL 18.7 functional,
+native, source, SBOM, secret and two-Trivy-version vulnerability checks. A
+separately named candidate acceptance job requires the PG18.7 candidate and
+base verification to succeed. Distroless (PG18.7) and Slim remain named
+comparison jobs with unchanged strict scans; they may still make overall
+workflow red. The historical 11E-12 OpenSSL block is superseded only by the
+[11E-14A scoped, expiring candidate acceptance](VPS_CANDIDATE_RISK_ACCEPTANCE_11E14A.md).
+No other vulnerability waiver, continue-on-error, publication or deployment.
+Do not change PR #27 or any other PR as part of this phase. Publication and
+actual VPS setup require separate approval.

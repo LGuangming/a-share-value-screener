@@ -1,7 +1,7 @@
 # CI-only overlay; never use with real data, credentials or network names.
 services:
   postgres:
-    image: ${TEST_POSTGRES_IMAGE:-postgres:17}
+    image: postgres:18.7-alpine
     environment:
       POSTGRES_USER: fixture_admin
       POSTGRES_PASSWORD: fixture_only

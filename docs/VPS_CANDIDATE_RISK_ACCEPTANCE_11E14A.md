@@ -41,8 +41,9 @@ CI trigger: add feature/vps-image-security to the push branch filter and
 cover deploy/docs paths as well as existing Docker/code/test paths. The
 previous SHA 5202373 had two successful Tests and Build runs but no Docker
 run; exact reason PR event did not generate Docker CI is not established.
-Both PostgreSQL 17 and 18.7 candidate jobs and the independent acceptance
-gate must pass on this revision. Additional container fixture assertions
+The original 11E-14A revision required PostgreSQL 17 and 18.7. Following
+the operator's single-version decision, only the full PostgreSQL 18.7
+candidate and independent acceptance gate must pass on the reviewed SHA. Additional container fixture assertions
 verify the 56 M12 table permissions with the actual non-owner worker.
 Comparison job failures remain visible; do not misrepresent whole workflow
 as green if they fail. No live VPS tests in this phase.
@@ -67,3 +68,19 @@ may still occur and must be reported distinctly. On the push caller run,
 comparison failures can make the combined Tests and Build red even when
 the independent candidate acceptance succeeds; inspect individual jobs.
 No automatic rerun of old SHAs and no dispatch of PR #27.
+
+## PostgreSQL 18.7-only acceptance (operator-approved 2026-11-25)
+
+The live VPS database was already migrated to PostgreSQL 18.7 in M12.
+PG17 is retired from current CI and release acceptance, not a supported
+fallback target. The four PostgreSQL matrices (Python pipeline, Web build,
+Distroless comparison and Minimal candidate) each contain exactly one entry:
+postgres:18.7-alpine. The disposable Compose fixture uses that exact tag
+without a PG17 default or database-image override. Python 3.11/3.13 tests,
+base resolution, strict Slim comparison, all existing candidate security
+and functional checks and the independent candidate gate are unchanged.
+Expected combined push caller job count: nine rather than thirteen.
+Previous dual-version results remain historical evidence only. No source
+schema, production Compose, live database, archive, PR #27 or main changes.
+No change to exception expiry, scope, raw evidence, secret or vulnerability
+thresholds. New SHA must independently pass before publication consideration.

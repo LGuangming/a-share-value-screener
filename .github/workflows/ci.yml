@@ -34,7 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ['postgres:17', 'postgres:18.7-alpine']
+        postgres: ['postgres:18.7-alpine']
     services:
       postgres:
         image: ${{ matrix.postgres }}
@@ -68,7 +68,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ['postgres:17', 'postgres:18.7-alpine']
+        postgres: ['postgres:18.7-alpine']
     services:
       postgres:
         image: ${{ matrix.postgres }}

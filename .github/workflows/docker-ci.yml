@@ -86,7 +86,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ['postgres:17', 'postgres:18.7-alpine']
+        postgres: ['postgres:18.7-alpine']
     steps:
       - uses: actions/checkout@v4
         with:
@@ -179,7 +179,6 @@ jobs:
           '
       - name: Isolated Compose smoke and recreation
         env:
-          TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
           ASHARE_CI_WORKER_VARIANT: distroless
         run: bash tests/docker-smoke.sh
       - name: Prepare SBOM directory
@@ -319,7 +318,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ['postgres:17', 'postgres:18.7-alpine']
+        postgres: ['postgres:18.7-alpine']
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -410,7 +409,6 @@ jobs:
         run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
       - name: Full isolated Minimal Compose smoke and recreation (actual VPS test overlay)
         env:
-          TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
           ASHARE_CI_WORKER_VARIANT: minimal
         run: bash tests/docker-smoke.sh
       - name: Collect static reachability evidence (no exploitation)

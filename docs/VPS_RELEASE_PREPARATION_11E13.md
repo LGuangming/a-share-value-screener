@@ -23,13 +23,13 @@ Keep PR #27 and all other PRs unchanged during this phase.
 
 ## 1. Release gate and approval sequence
 
-1. Resolve the deferred OpenSSL remediation; separately verify Node's
-   embedded OpenSSL and the Debian libssl3t64 shared libraries used by Web
-   and Worker. Lock official source/base/package/wheel identities; do not
-   change metadata to hide actual contents.
+1. Apply the current 11E-14A scoped and expiring OpenSSL risk acceptance,
+   independently verify Node's embedded OpenSSL and Debian libssl3t64,
+   and require every other security gate to pass. Lock official source/base/
+   package/wheel identities; do not change metadata to hide actual contents.
 2. Review the final immutable application SHA (not this historical baseline).
-   Require Tests and Build success, both default Minimal candidate matrices
-   success, base/wheel verification success and independent release-candidate
+   Require PostgreSQL 18.7 Tests and Build business jobs and the default
+   Minimal candidate to pass, base/wheel verification success and independent release-candidate
    acceptance success on the same reviewed source. Preserve old/new Trivy
    scans (including unfixed HIGH/CRITICAL and secret gates), upstream component
    inventory, SBOM, actual runtime versions, logs and base/wheel locks.

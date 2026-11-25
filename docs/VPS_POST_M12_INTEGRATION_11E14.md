@@ -58,7 +58,8 @@ retention requires DELETE on the three retention tables and remains disabled.
 No broader grant is needed by the reviewed statements. CI fixture ACL
 matches the M12 table privilege allowlist and removes PUBLIC schema and
 database access; the full local market/archive/financial/NCAV integration
-runs as restricted writer on PG17 and PG18.7. Docker smoke checks the
+previously ran as restricted writer on PG17 and PG18.7; current CI targets
+only PG18.7. Docker smoke checks the
 restricted writer and existing schema in both variants. These are fixture
 checks, not live ACL acceptance or a full production schema fingerprint.
 Actual compatibility remains pending CI and separately authorized live
@@ -88,7 +89,7 @@ gate pending rather than use the migrated DB. CI remains disposable.
 
 ## Next gates
 
-1. Verify this exact PR SHA: PG17/PG18.7 restricted ACL regressions and
+1. Verify the exact reviewed PR SHA: PostgreSQL 18.7 restricted ACL regressions and
    default Minimal Compose smoke. 11E-14A supersedes the OpenSSL remediation
    block only for the two approved exact Debian package findings until
    2026-12-26 00:00 UTC; see [scoped risk acceptance](VPS_CANDIDATE_RISK_ACCEPTANCE_11E14A.md).
