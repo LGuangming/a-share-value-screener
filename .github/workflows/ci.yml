@@ -44,7 +44,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install isolated worker dependencies
-        run: python -m pip install --only-binary=:all: -r backend/requirements-worker.lock.txt && python -m pip check
+        run: |
+          python -m pip install --only-binary=:all: -r backend/requirements-worker.lock.txt
+          python -m pip check
       - name: Actual PostgreSQL and Parquet local pipeline integration
         env:
           PYTHONPATH: backend
@@ -94,7 +96,8 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install fixture-only Parquet generator
-        run: python -m pip install --only-binary=:all: 'duckdb==1.5.6'
+        run: |
+          python -m pip install --only-binary=:all: 'duckdb==1.5.6'
       - name: Archive storage and real Parquet compatibility tests
         env:
           ARCHIVE_TEST_FIXTURES: '1'
