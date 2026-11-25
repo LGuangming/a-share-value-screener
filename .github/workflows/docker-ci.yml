@@ -24,6 +24,7 @@ jobs:
     outputs:
       node: ${{ steps.resolve.outputs.node }}
       python: ${{ steps.resolve.outputs.python }}
+      web_runtime: ${{ steps.resolve.outputs.web_runtime }}
     steps:
       - name: Resolve Trixie candidates to immutable manifests (read only)
         id: resolve
@@ -38,8 +39,9 @@ jobs:
           }
           node="$(resolve docker.io/library/node:22-trixie-slim)"
           python="$(resolve docker.io/library/python:3.11-slim-trixie)"
-          printf 'node=%s\npython=%s\n' "$node" "$python" >> "$GITHUB_OUTPUT"
-          printf 'NODE_BASE=%s\nPYTHON_BASE=%s\n' "$node" "$python" | tee "$RUNNER_TEMP/base-images.lock"
+          web_runtime="$(resolve gcr.io/distroless/nodejs22-debian13:nonroot)"
+          printf 'node=%s\npython=%s\nweb_runtime=%s\n' "$node" "$python" "$web_runtime" >> "$GITHUB_OUTPUT"
+          printf 'NODE_BASE=%s\nPYTHON_BASE=%s\nWEB_RUNTIME_BASE=%s\n' "$node" "$python" "$web_runtime" | tee "$RUNNER_TEMP/base-images.lock"
           cat "$RUNNER_TEMP/base-images.lock" >> "$GITHUB_STEP_SUMMARY"
       - name: Preserve resolved base image references
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -67,7 +69,8 @@ jobs:
         id: build_web
         env:
           NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
-        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" -f Dockerfile.web -t ashare-web:ci .
+          WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
+        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
       - name: Build local Worker image (no push)
         id: build_worker
         env:
@@ -79,7 +82,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-web:ci -ec 'test "$(id -u):$(id -g)" = 10001:10010; node --version; for tool in npm npx yarn yarnpkg corepack; do if command -v "$tool"; then echo "Unexpected Web package manager: $tool"; exit 1; fi; done'
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /nodejs/bin/node ashare-web:ci -e '
+          const a=require("node:assert/strict"), fs=require("node:fs"), path=require("node:path");
+          a.equal(process.getuid(),10001); a.equal(process.getgid(),10010); a.match(process.version,/^v22\./);
+          for(const dir of process.env.PATH.split(":")) for(const tool of ["sh","bash","npm","npx","yarn","yarnpkg","corepack","apt","apt-get","dpkg"]) a.equal(fs.existsSync(path.join(dir,tool)),false,"Unexpected runtime tool: "+tool);
+          a.equal(fs.existsSync("/bin/sh"),false);
+          a.ok(fs.existsSync("/app/test-web-launch.cjs"));
+          console.log("PASS: shell-free Node 22 runtime");
+          '
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-worker:ci -ec 'test "$(id -u):$(id -g)" = 10002:10010; for tool in pip pip3 pip3.11; do if command -v "$tool"; then echo "Unexpected Worker package manager: $tool"; exit 1; fi; done; python -c "import importlib.util as u; assert all(u.find_spec(x) is None for x in (\"pip\",\"setuptools\",\"wheel\",\"ensurepip\")); import psycopg, duckdb, boto3, baostock, pandas, numpy, tzdata; print(\"Runtime imports PASS\")"'
           docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint python ashare-worker:ci -c '
           import importlib.metadata as m, sys
@@ -88,6 +98,21 @@ jobs:
           assert actual == expected, "Runtime dependency set differs from lock"
           print("PASS: all %d runtime distributions match lock" % len(expected))
           ' < backend/requirements-worker.lock.txt
+      - name: Verify Worker TLS and native runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint python ashare-worker:ci -c '
+          import sys, ssl, sqlite3, zlib, zoneinfo, duckdb, numpy, pandas, psycopg, boto3, baostock
+          assert sys.version_info[:2] == (3,11)
+          assert ssl.create_default_context().get_ca_certs()
+          assert sqlite3.connect(":memory:").execute("select 1").fetchone() == (1,)
+          assert zlib.decompress(zlib.compress(b"fixture")) == b"fixture"
+          assert duckdb.connect(":memory:").execute("select 1").fetchone() == (1,)
+          assert numpy.array([1,2]).sum() == 3 and pandas.Series([1,2]).sum() == 3
+          assert zoneinfo.ZoneInfo("Asia/Shanghai")
+          print("PASS: TLS trust store, SQLite, zlib, DuckDB, NumPy/Pandas, time zone")
+          '
       - name: Isolated Compose smoke and recreation
         env:
           TEST_POSTGRES_IMAGE: ${{ matrix.postgres }}
@@ -95,6 +120,9 @@ jobs:
       - name: Prepare SBOM directory
         if: always() && (steps.build_web.outcome == 'success' || steps.build_worker.outcome == 'success')
         run: mkdir -p reports
+      - name: Record installed Worker Debian package versions
+        if: always() && steps.build_worker.outcome == 'success'
+        run: docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint dpkg-query ashare-worker:ci -W > reports/worker-debian-packages.txt
       - name: web SBOM (inventory only)
         if: always() && steps.build_web.outcome == 'success'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -164,6 +192,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sbom-${{ strategy.job-index }}
-          path: reports/*.cdx.json
+          path: reports/
           retention-days: 14
           if-no-files-found: error

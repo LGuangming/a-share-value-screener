@@ -48,3 +48,38 @@ After security acceptance, pin the actual reviewed base digests in source,
 rerun all checks, then separately revise the publication workflow to use
 the new reviewed commit. No images may be published using PR #27's old
 source pin. No merge or deployment in this phase.
+
+## Phase 11E-2 — shell-free Web and patched glibc Worker candidate
+
+Prior 11E-1 actual CI (run 45577928914): Web 51 HIGH/0 CRITICAL,
+Worker 54 HIGH/0 CRITICAL; both database matrices and all runtime tests
+passed; remaining findings were Debian system packages. No exceptions
+were accepted.
+
+Web now uses official gcr.io/distroless/nodejs22-debian13:nonroot for
+the final runtime, with Node 22 Trixie for build. CI resolves three
+base manifests once, not just two. Distroless includes Node, TLS roots
+and required libraries, without a shell/package manager. Numeric user
+10001:10010 and cache/standalone paths remain unchanged. The test overlay
+starts a JS launcher directly, awaits the same database/credential
+guard, then starts Next.js in the same process. Healthcheck is exec-form
+with the absolute Node binary. Compose smoke still tests wrong database
+rejection, fixture login, SQL/archive, read-only archive, recreation
+and readiness. No weakened assertion or bypass.
+
+Worker retains Python 3.11 on official glibc Trixie slim because
+Distroless Debian 13 Python is Python 3.13, incompatible with the
+reviewed 3.11 wheel lock without a separate ABI/dependency migration.
+The Worker shared base stage performs signed APT upgrades with no
+additional recommended packages. Installer tools remain stripped,
+dpkg metadata and system libraries remain intact. CI records installed
+Debian package versions and tests TLS trust store, SQLite, zlib, native
+DuckDB, NumPy, Pandas, psycopg, BaoStock and timezone support.
+No package database deletion or vulnerability exclusion is used.
+This is an incremental minimal-runtime candidate, not a custom scratch
+Python build or a fully immutable package snapshot; APT versions can
+change across builds. Final digest and exact package provenance must
+be reviewed after scanning. Wheel hash lock remains outstanding.
+
+Only build and test on PR #28; no GHCR push, merge, VPS or production
+modification. Retain all HIGH/CRITICAL findings including unfixed.

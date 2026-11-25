@@ -4,7 +4,7 @@ services:
   web:
     env_file: !override
       - /opt/ashare/test/config/web.env
-    entrypoint: ["/bin/sh", "-ec", "node /app/test-web-guard.cjs; exec node server.js"]
+    entrypoint: ["/nodejs/bin/node", "/app/test-web-launch.cjs"]
     command: []
     volumes:
       - type: bind

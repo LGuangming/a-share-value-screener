@@ -1,7 +1,14 @@
 # syntax=docker/dockerfile:1
 # CI resolves the candidate tag to one immutable manifest before both test matrices.
 ARG PYTHON_BASE=python:3.11-slim-trixie
-FROM ${PYTHON_BASE} AS deps
+FROM ${PYTHON_BASE} AS patched
+# Apply signed Debian updates through the normal package manager; retain dpkg metadata.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM patched AS deps
 WORKDIR /build
 COPY backend/requirements-worker.lock.txt ./
 # Install only the previously tested pinned wheels, without pip in the venv.
@@ -9,7 +16,7 @@ RUN python -m venv --without-pip /opt/venv \
     && python -m pip --python /opt/venv install --no-cache-dir --only-binary=:all: -r requirements-worker.lock.txt \
     && python -m pip --python /opt/venv check
 
-FROM ${PYTHON_BASE} AS runner
+FROM patched AS runner
 WORKDIR /app
 ENV PATH=/opt/venv/bin:$PATH PYTHONPATH=/app/backend PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TZ=Asia/Shanghai HOME=/tmp TMPDIR=/data/tmp DUCKDB_TEMP_DIRECTORY=/data/tmp/duckdb
 # Global installer tooling is not required by the runtime. Remove bundled
