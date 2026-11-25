@@ -18,8 +18,9 @@ same libsqlite3.so.0 SONAME, hardened flags and observed feature flags
 from original runtime. No distro library overwrite, fake dpkg package,
 or metadata suppression. Debian builder package stays intact; do not
 copy it to candidate. Record old/new compile options, source identity,
-actual library digest, and actual wheel/source references. Reject
-unsupported special parser features rather than silently omit them.
+actual library digest, and actual wheel/source references. For special parser features regenerate the amalgamation from the separately
+SHA256/SHA3-256-locked canonical release source, record generated source hash,
+verify exact source ID and test UPDATE/DELETE ORDER BY LIMIT if enabled.
 Run matching CPython test_sqlite3 against the new library; final image
 verifies actual loader path, SQLite source ID, hash, Pandas SQL roundtrip,
 FTS5, JSON, integrity, exact packages and all retained ELF graphs.

@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import urllib.request
+import zipfile
 
 lock = json.loads(Path("/minimal-sqlite-source.lock.json").read_text())
 work = Path("/tmp/minimal-sqlite-build")
@@ -33,13 +34,32 @@ with sqlite3.connect(":memory:") as db:
     original_id = db.execute("select sqlite_source_id()").fetchone()[0]
 # Preserve feature flags of the actual old runtime. Explicitly record any
 # behavioral/limit differences; do not claim binary-identical configuration.
-# ENABLE_UPDATE_DELETE_LIMIT needs a specially generated parser, not merely
-# a compiler define. Reject any such baseline requirement pending review.
+# Preserve any special parser features by regenerating from canonical
+# source when needed, instead of pretending a define changes prebuilt grammar.
 feature_flags = [x for x in original if x.startswith(("ENABLE_", "OMIT_"))]
-assert "ENABLE_UPDATE_DELETE_LIMIT" not in feature_flags, "Special parser feature requires review"
 selected = [x for x in original if x.startswith(("ENABLE_", "OMIT_", "DEFAULT_", "MAX_", "THREADSAFE=", "TEMP_STORE=", "DQS=")) or x in ("SECURE_DELETE", "SOUNDEX", "LIKE_DOESNT_MATCH_BLOBS", "HAVE_ISNAN", "USE_URI")]
 for flag in selected:
-    assert re.fullmatch(r"[A-Z][A-Z0-9_]*(?:=[0-9]+)?", flag), flag
+    assert re.fullmatch(r"[A-Z][A-Z0-9_]*(?:=-?(?:[0-9]+|0[xX][a-fA-F0-9]+))?", flag), flag
+amalgamation = src / "sqlite3.c"
+generation = "official-release-amalgamation"
+if "ENABLE_UPDATE_DELETE_LIMIT" in feature_flags or any(x.startswith("OMIT_") for x in feature_flags):
+    canonical = lock["canonical_source"]
+    archive2 = work / "canonical.zip"
+    with urllib.request.urlopen(canonical["url"], timeout=120) as response, archive2.open("wb") as output:
+        shutil.copyfileobj(response, output)
+    assert digest(archive2, "sha256") == canonical["sha256"]
+    assert digest(archive2, "sha3_256") == canonical["sha3_256"]
+    with zipfile.ZipFile(archive2) as z:
+        z.extractall(work)
+    source_tree = work / "sqlite-src-3540100"
+    build = work / "generated"
+    build.mkdir()
+    subprocess.run([str(source_tree / "configure"), "--disable-tcl"], cwd=build, check=True)
+    subprocess.run(["make", "-j2", "sqlite3.c", "OPTS=" + " ".join("-DSQLITE_" + x for x in selected)], cwd=build, check=True)
+    amalgamation = build / "sqlite3.c"
+    assert amalgamation.is_file()
+    generation = "verified-canonical-source-generated-parser"
+    print("PASS: locked canonical SQLite source and regenerated parser", flush=True)
 # SQLite shared library uses the same public SONAME and ABI as the distro
 # library. Put it in a separate source-built directory; Debian stays intact
 # in the builder and will never be copied to the final candidate.
@@ -49,7 +69,7 @@ lib = out / "libsqlite3.so.0"
 command = ["gcc", "-shared", "-fPIC", "-O2", "-fstack-protector-strong",
            "-D_FORTIFY_SOURCE=2", "-Wl,-z,relro,-z,now", "-Wl,-soname,libsqlite3.so.0",
            *["-DSQLITE_" + x for x in selected],
-           str(src / "sqlite3.c"), "-o", str(lib), "-lm", "-ldl", "-pthread"]
+           str(amalgamation), "-o", str(lib), "-lm", "-ldl", "-pthread"]
 subprocess.run(command, check=True)
 env = dict(os.environ, LD_LIBRARY_PATH=str(out) + ":/usr/local/lib")
 probe = """
@@ -62,6 +82,8 @@ actual = json.loads(subprocess.check_output([sys.executable, "-B", "-c", probe],
 assert actual["version"] == lock["version"], actual
 assert actual["source_id"] == lock["source_id"], actual
 assert set(feature_flags) <= set(actual["compile_options"]), (feature_flags, actual)
+if "ENABLE_UPDATE_DELETE_LIMIT" in feature_flags:
+    subprocess.run([sys.executable, "-B", "-c", "import sqlite3; d=sqlite3.connect(':memory:'); d.executescript('create table t(x); insert into t values(1),(2); update t set x=3 order by x limit 1; delete from t order by x limit 1'); assert d.execute('select count(*) from t').fetchone()==(1,)"], env=env, check=True)
 # Upstream CPython tests run against the actually loaded new SQLite library.
 # The matching CPython release source was verified/extracted by XML build.
 testlib = "/tmp/minimal-xml-build/Python-3.13.18/Lib"
@@ -94,6 +116,8 @@ for scope, root in (("application", Path("/audit/value_screener")),
 report = {"source":lock,"original_version":sqlite3.sqlite_version,
           "original_source_id":original_id,"original_compile_options":original,
           "selected_compiler_defines":selected,"actual":actual,
+          "amalgamation_generation":generation,
+          "compiled_amalgamation_sha3_256":digest(amalgamation,"sha3_256"),
           "compile_options_added":sorted(set(actual["compile_options"])-set(original)),
           "compile_options_removed":sorted(set(original)-set(actual["compile_options"])),
           "library_sha256":digest(lib,"sha256"),"upstream_sqlite_regression":"passed",
