@@ -79,8 +79,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-web:ci -ec 'test "$(id -u):$(id -g)" = 10001:10010; node --version; ! command -v npm; ! command -v npx; ! command -v yarn; ! command -v corepack'
-          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-worker:ci -ec 'test "$(id -u):$(id -g)" = 10002:10010; ! command -v pip; ! command -v pip3; python -c "import importlib.util as u; assert all(u.find_spec(x) is None for x in (\"pip\",\"setuptools\",\"wheel\",\"ensurepip\")); import psycopg, duckdb, boto3, baostock, pandas, numpy, tzdata; print(\"Runtime imports PASS\")"'
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-web:ci -ec 'test "$(id -u):$(id -g)" = 10001:10010; node --version; for tool in npm npx yarn yarnpkg corepack; do if command -v "$tool"; then echo "Unexpected Web package manager: $tool"; exit 1; fi; done'
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint sh ashare-worker:ci -ec 'test "$(id -u):$(id -g)" = 10002:10010; for tool in pip pip3 pip3.11; do if command -v "$tool"; then echo "Unexpected Worker package manager: $tool"; exit 1; fi; done; python -c "import importlib.util as u; assert all(u.find_spec(x) is None for x in (\"pip\",\"setuptools\",\"wheel\",\"ensurepip\")); import psycopg, duckdb, boto3, baostock, pandas, numpy, tzdata; print(\"Runtime imports PASS\")"'
           docker run --rm -i --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint python ashare-worker:ci -c '
           import importlib.metadata as m, sys
           expected = {line.split("==")[0]: line.split("==")[1] for line in sys.stdin.read().splitlines() if "==" in line and not line.startswith("#")}
