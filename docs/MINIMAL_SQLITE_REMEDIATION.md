@@ -45,3 +45,25 @@ https://sqlite.org/download.html?topic=1057
 https://lists.buildroot.org/pipermail/buildroot/2026-October/813774.html
 https://github.com/rogerbinns/apsw/blob/master/checksums
 https://security-tracker.debian.org/tracker/source-package/sqlite3
+
+## 11E-9A — canonical ZIP permission repair
+
+11E-9 run 45588835723 jobs 139117581022 and 139117581030 verified both source
+archives and the official amalgamation, then failed identically with EACCES
+at canonical configure after Python zipfile extraction. No new SQLite
+runtime, tests or scanner report existed. Preserve original source hashes,
+exact source ID, feature gates and default runner.
+
+Validate the complete hash-verified ZIP's path/type inventory before extraction;
+reject traversal, duplicates, links and other special files. Restore 0755 for
+regular files marked executable, 0644 otherwise; strip elevated/write bits.
+For archives missing Unix modes restore only the reviewed shell entry point
+and Autosetup helpers (configure, autosetup, autosetup-find-tclsh), checking
+shebang and file type; invoke configure explicitly through /bin/sh. Unit tests
+cover permission restoration, unsafe paths, symlinks and existing destinations.
+Print original SQLite version, source ID, compile flags, dependency file counts
+and source references before downloads/build; print exact parser triggers and
+actual compile-option differences before runtime assertions. Capture full plain
+Docker build log as an artifact even when build fails, preserving pipefail.
+No claim that parser generation, SQLite regression or scanner results have
+passed until new CI completes. No changes to package/source locks or gates.

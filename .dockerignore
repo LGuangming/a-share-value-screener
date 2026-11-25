@@ -28,6 +28,7 @@
 !deploy/rebuild-minimal-xml.py
 !deploy/minimal-xml-sources.lock.json
 !deploy/rebuild-minimal-sqlite.py
+!deploy/sqlite_source_zip.py
 !deploy/minimal-sqlite-source.lock.json
 !database/
 !database/**

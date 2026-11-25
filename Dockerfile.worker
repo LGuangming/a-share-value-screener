@@ -43,6 +43,7 @@ ENV PYTHON_BASE=$PYTHON_BASE
 COPY deploy/rebuild-minimal-xml.py /rebuild-minimal-xml.py
 COPY deploy/minimal-xml-sources.lock.json /minimal-xml-sources.lock.json
 COPY deploy/rebuild-minimal-sqlite.py /rebuild-minimal-sqlite.py
+COPY deploy/sqlite_source_zip.py /sqlite_source_zip.py
 COPY deploy/minimal-sqlite-source.lock.json /minimal-sqlite-source.lock.json
 COPY deploy/prepare-cp313-minimal.py /prepare-cp313-minimal.py
 COPY deploy/minimal-debian-amd64.lock.json /minimal-debian-amd64.lock.json

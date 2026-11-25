@@ -329,12 +329,18 @@ jobs:
           test "$actual" = "$expected"
           echo "ref=$MINIMAL_RUNTIME_BASE" >> "$GITHUB_OUTPUT"
           cp deploy/minimal-base.lock "$RUNNER_TEMP/minimal-base.lock"
+      - name: Test SQLite source ZIP extraction and permission restoration
+        run: python3 -m unittest discover -s tests -p test_sqlite_source_zip.py -v
       - name: Build CPython 3.13.18 minimal glibc comparison
         id: minimal
         env:
           PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
           MINIMAL_RUNTIME_BASE: ${{ steps.base.outputs.ref }}
-        run: docker build --pull --platform linux/amd64 --target minimal-evaluation --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:minimal-eval .
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p eval-reports
+          docker build --progress=plain --pull --platform linux/amd64 --target minimal-evaluation --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:minimal-eval . 2>&1 | tee eval-reports/minimal-build.log
       - name: Record actual runtime and test native wheels
         shell: bash
         run: |
