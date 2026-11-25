@@ -16,7 +16,7 @@ import stat
 import subprocess
 import psycopg
 from common import digest, load, write_json
-from postgres import inventory, readonly, json_value
+from postgres import inventory, readonly, json_value, SYSTEM
 from permissions import grant, policy, verify, role_guard
 
 TARGET="ashare"
@@ -102,6 +102,12 @@ def snapshot(c):
     try: return json_value(inventory(c))
     finally: c.execute("ROLLBACK")
 
+def assert_no_user_relations(c):
+    # Reject foreign-owned or unreadable existing tables before inventory()
+    # attempts a data scan. The full catalog check below remains mandatory.
+    if c.execute("SELECT EXISTS(SELECT 1 FROM pg_class r JOIN pg_namespace n ON n.oid=r.relnamespace WHERE "+SYSTEM+" AND r.relkind IN ('r','p','v','m','S','f'))").fetchone()[0]:
+        raise DirectError("TARGET_NOT_EMPTY")
+
 def empty_target(doc):
     if doc["schemas"]!=[["public"]] or any(doc[k] for k in ("relations","functions","types","rules","large_objects","policies","triggers")) or any(doc["special_objects"].values()) or any(e[0]!="plpgsql" for e in doc["extensions"]):
         raise DirectError("TARGET_NOT_EMPTY")
@@ -155,6 +161,7 @@ def main():
             role_guard(c)
         if a.action=="check":
             with step("empty-target-catalog"):
+                assert_no_user_relations(c)
                 empty_target(snapshot(c))
             with step("host-capacity"):
                 capacity(root)
@@ -173,6 +180,7 @@ def main():
                 capacity(root,int(src["database"][2]))
             c.execute("SELECT pg_advisory_lock(617392002)")
             with step("locked-empty-target-catalog"):
+                assert_no_user_relations(c)
                 target_before=snapshot(c)
                 empty_target(target_before)
             # Preserve original schema and database-local ACL evidence.

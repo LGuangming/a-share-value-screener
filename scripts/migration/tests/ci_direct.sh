@@ -71,6 +71,7 @@ expect_block TARGET_ENDPOINT run ashare_test ashare_owner scripts/migration/dire
 echo 'PASS: unapproved and wrong database blocked'
 # A real nonempty fixture must still be refused, even with zero table rows.
 echo 'CREATE TABLE public.must_be_empty(id int);' | admin ashare
+# Owned by postgres; ashare_owner must not require SELECT to reject it.
 expect_block TARGET_NOT_EMPTY direct check --approved-target-read
 echo 'DROP TABLE public.must_be_empty;' | admin ashare
 direct check --approved-target-read
