@@ -13,12 +13,12 @@ from archive_verify import inspect
 
 @mock_aws
 class ArchiveTest(unittest.TestCase):
-    def setUp(self):
+    def setUp(self,bucket="archive-fixture"):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
         self.s3=boto3.client("s3",region_name="us-east-1")
-        self.bucket="archive-fixture"
+        self.bucket=bucket
         self.s3.create_bucket(Bucket=self.bucket)
         self.key="a-share-backtest/01_raw_data/daily_prices/year=2026/month=11/data.parquet"
         path=self.root/"fixture.parquet"
@@ -155,7 +155,7 @@ class ArchiveTest(unittest.TestCase):
         for case in ("coverage","bad_base64","original_hash","duplicate","array","missing_backup",
                      "backup_hash","retirement_digest","status","count","missing_done"):
             with self.subTest(case=case):
-                self.setUp()
+                self.setUp("archive-fixture-"+case.replace("_","-"))
                 root=self.legacy_fixture(case)
                 with self.assertRaises(ValueError):
                     inspect(root)
