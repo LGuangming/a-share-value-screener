@@ -66,6 +66,7 @@ def iso(v):
 
 def inspect(root,memory_limit="256MB"):
     root=Path(root)
+    (root/"verify-archive.json").unlink(missing_ok=True)
     manifest=load(root/"inventory-storage.json")
     verify(manifest,root)
     state=load(root/"checkpoint.json")

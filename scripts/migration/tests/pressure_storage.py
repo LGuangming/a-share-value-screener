@@ -63,6 +63,7 @@ def metrics(label,start,root,extra=None):
     size=sum(p.stat().st_size for p in root.rglob("*") if p.is_file())
     result={"phase":label,"seconds":round(time.monotonic()-start,3),"logical_file_bytes":size,"process_peak_rss_kib":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss}
     result.update(extra or {})
+    result["filesystem_free_bytes"]=shutil.disk_usage(root).free
     print("PRESSURE_STORAGE "+json.dumps(result,sort_keys=True),flush=True)
 
 def build(s3,rows):
@@ -126,6 +127,17 @@ def main():
     if digest(old/"files"/BUCKET/key)!=old_hash or digest(new/"files"/BUCKET/key)==old_hash: raise RuntimeError("generation isolation failed")
     metrics("increment",t,new,{"workers":4,**r})
     inspect(new)
+    # All fixture directories still coexist; report actual allocated file blocks.
+    allocated=sum(p.stat().st_blocks*512 for p in root.rglob("*") if p.is_file())
+    print("PRESSURE_STORAGE_DISK "+json.dumps({"all_generations_allocated_bytes":allocated,"filesystem_free_bytes":shutil.disk_usage(root).free}),flush=True)
+    rel=next(line.split(":",2)[2] for line in Path("/proc/self/cgroup").read_text().splitlines() if line.startswith("0::"))
+    cg=Path("/sys/fs/cgroup")/rel.lstrip("/")
+    events=dict(line.split() for line in (cg/"memory.events").read_text().splitlines())
+    peak=int((cg/"memory.peak").read_text())
+    limit=int((cg/"memory.max").read_text())
+    print("PRESSURE_STORAGE_CGROUP "+json.dumps({"peak_bytes":peak,"limit_bytes":limit,"events":events}),flush=True)
+    if limit!=1024**3 or int(events["oom"]) or int(events["oom_kill"]):
+        raise RuntimeError("unexpected worker memory limit or OOM")
     print("PASS: pressure archive generation and increment",flush=True)
 
 if __name__=="__main__": main()

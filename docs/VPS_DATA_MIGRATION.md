@@ -150,3 +150,17 @@ Production-schema candidate ACL uses all eight tables for read/write, DELETE
 only for screen_results and retention tables. Application DDL/bootstrap and
 reader grant compatibility must be assessed with the final worker build.
 No actual Neon/VPS permissions or resources changed.
+
+
+### D01-B-3 follow-up evidence gates
+Default CLI archive workers=2 (1/2/4 remain selectable), DuckDB 256MB and
+one thread, serial transactional database restore. Re-verification invalidates
+prior success evidence before running; a failed verification must not leave a
+stale pass receipt. Parallel interruption must resume only unfinished objects.
+Pressure CI records cgroup memory.events and fails if oom/oom_kill are nonzero,
+rather than treating container PID 1 survival as proof of no OOM. Database
+filesystem free space is sampled every second, including the disposable
+source and target, WAL and fixture files; this is an observed lower bound on
+peak consumption, not exact per-phase disk accounting. Archive evidence records
+allocated filesystem blocks across retained generations and worker cgroup peak.
+Real VPS/network performance and actual Neon inventory remain separate gates.

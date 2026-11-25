@@ -65,6 +65,8 @@ def sync(client, manifest, root, previous=None, workers=1):
     if workers not in (1,2,4):
         raise ValueError("workers must be 1, 2 or 4")
     root=Path(root)
+    (root/"verify-storage.json").unlink(missing_ok=True)
+    (root/"verify-archive.json").unlink(missing_ok=True)
     data=root/"files"
     data.mkdir(parents=True,exist_ok=True,mode=0o700)
     if root.is_symlink() or data.is_symlink():
@@ -164,6 +166,7 @@ def sync(client, manifest, root, previous=None, workers=1):
 
 def verify(manifest,root):
     root=Path(root)
+    (root/"verify-storage.json").unlink(missing_ok=True)
     state=load(root/"checkpoint.json") if (root/"checkpoint.json").exists() else {}
     expected=set()
     total=0
@@ -195,7 +198,7 @@ def main():
     p.add_argument("--bucket",action="append",default=[])
     p.add_argument("--approved-live-read",action="store_true")
     p.add_argument("--previous-generation")
-    p.add_argument("--workers",type=int,choices=[1,2,4],default=1)
+    p.add_argument("--workers",type=int,choices=[1,2,4],default=2)
     a=p.parse_args()
     root=Path(a.root)
     if a.action=="verify":

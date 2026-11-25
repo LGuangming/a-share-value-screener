@@ -108,3 +108,31 @@ class StorageTest(unittest.TestCase):
                 sync(self.client,m,self.root)
         self.assertFalse(list((self.root/"files").rglob(".download-*")))
         self.assertTrue(sync(self.client,m,self.root)["passed"])
+
+    def test_failed_reverification_invalidates_receipt(self):
+        m=self.manifest()
+        sync(self.client,m,self.root)
+        self.assertTrue((self.root/"verify-storage.json").exists())
+        path=self.root/"files/second-fixture/elsewhere/manifest.json"
+        path.write_bytes(b"bad")
+        with self.assertRaises(ValueError):
+            verify(m,self.root)
+        self.assertFalse((self.root/"verify-storage.json").exists())
+
+    def test_parallel_interruption_after_partial_publication(self):
+        m=self.manifest()
+        original=self.client.get_object
+        broken_key=m["objects"][1]["key"]
+        def broken(**kw):
+            if kw["Key"]==broken_key:
+                raise OSError("fixture failure")
+            return original(**kw)
+        with patch.object(self.client,"get_object",side_effect=broken):
+            with self.assertRaises(OSError):
+                sync(self.client,m,self.root,workers=2)
+        self.assertTrue((self.root/"checkpoint.jsonl").exists())
+        self.assertFalse((self.root/"verify-storage.json").exists())
+        with patch.object(self.client,"get_object",wraps=original) as get:
+            self.assertTrue(sync(self.client,m,self.root,workers=2)["passed"])
+            self.assertEqual(get.call_count,1)
+        self.assertFalse((self.root/"checkpoint.jsonl").exists())
