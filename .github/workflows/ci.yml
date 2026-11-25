@@ -18,6 +18,34 @@ jobs:
         env:
           PYTHONPATH: backend
         run: python -m unittest discover -s backend/tests -v
+  python-local-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: fixture_admin
+          POSTGRES_PASSWORD: fixture_only
+          POSTGRES_DB: ashare_pipeline_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixture_admin -d ashare_pipeline_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install isolated worker dependencies
+        run: python -m pip install -r backend/requirements-worker.txt
+      - name: Actual PostgreSQL and Parquet local pipeline integration
+        env:
+          PYTHONPATH: backend
+          TEST_PIPELINE_DATABASE_URL: postgresql://fixture_admin:fixture_only@127.0.0.1:5432/ashare_pipeline_test
+        run: python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
   next-build:
     runs-on: ubuntu-latest
     services:

@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from .archive_paths import RAW_PREFIX as PREFIX
+from .archive_storage import archive_driver, local_config
 NEON_HOST = re.compile(
     r"^br-[a-z0-9-]+\.storage\.c-[0-9]+\.([a-z0-9-]+)\.aws\.neon\.tech$"
 )
@@ -36,9 +37,13 @@ class StorageConfig:
     access_key: str
     secret_key: str
     region: str
+    local_root: Path | None = None
 
     @classmethod
     def from_environment(cls) -> "StorageConfig":
+        if archive_driver()=="local":
+            root,bucket=local_config()
+            return cls("",bucket,"","","",root)
         fields = {
             "NEON_STORAGE_ENDPOINT": os.environ.get("NEON_STORAGE_ENDPOINT"),
             "NEON_STORAGE_BUCKET": os.environ.get("NEON_STORAGE_BUCKET"),
@@ -71,6 +76,9 @@ class StorageConfig:
 
 
 def s3_client(config: StorageConfig):
+    if config.local_root is not None:
+        from .local_archive import LocalArchive
+        return LocalArchive(str(config.local_root))
     import boto3
     from botocore.config import Config
     return boto3.client(
@@ -203,7 +211,7 @@ def preflight(client,bucket:str) -> None:
             Metadata={"sha256":checksum},ContentType="application/octet-stream"
         )
         verify_object(client,bucket,key,len(payload),checksum)
-        print("NEON_STORAGE_PREFLIGHT read_write_delete_verified",flush=True)
+        print(("LOCAL_ARCHIVE_PREFLIGHT" if archive_driver()=="local" else "NEON_STORAGE_PREFLIGHT")+" read_write_delete_verified",flush=True)
     finally:
         # Permissions must include write/delete; failures are intentionally fatal.
         client.delete_object(Bucket=bucket,Key=key)

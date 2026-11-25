@@ -5,6 +5,7 @@ An incomplete or unverifiable published archive is a hard failure: never
 silently overwrite a published dataset or proceed to the next year.
 """
 from __future__ import annotations
+from .archive_storage import duckdb_connection
 
 import argparse
 from datetime import date
@@ -26,7 +27,7 @@ def validate_restored_data(root: Path, manifest: dict) -> None:
     import duckdb
 
     paths = [str(root / item["path"]) for item in manifest["partition_files"]]
-    con = duckdb.connect()
+    con = duckdb_connection()
     try:
         rows, unique_keys, sessions, invalid_bars = con.execute(
             """

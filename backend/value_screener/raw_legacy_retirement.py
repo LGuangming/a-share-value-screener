@@ -1,5 +1,6 @@
 """Retire only the exact verified duplicate legacy inventory; never delete new data."""
 from __future__ import annotations
+from .archive_storage import require_neon_only
 import base64
 import gzip
 import hashlib
@@ -140,6 +141,7 @@ def retire(s3, bucket):
 
 
 def main():
+    require_neon_only()
     web_gate()
     cfg = StorageConfig.from_environment()
     s3 = s3_client(cfg)

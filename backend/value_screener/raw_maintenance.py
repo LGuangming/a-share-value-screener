@@ -17,7 +17,10 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from urllib.request import urlopen
+from urllib.request import urlopen, Request, build_opener, HTTPRedirectHandler, ProxyHandler
+from urllib.parse import urlsplit
+from uuid import uuid4
+from .archive_storage import archive_driver
 
 from .archive_paths import RAW_PREFIX
 from .neon_archive import StorageConfig, s3_client, verify_object
@@ -93,18 +96,44 @@ def complete_year_gate(s3,bucket,latest):
 
 def web_gate(latest):
     origin="https://stock.guangming.blog"
+    opener=None
+    headers={}
+    if archive_driver()=="local":
+        origin=os.getenv("ARCHIVE_LOCAL_WEB_ORIGIN","")
+        parsed=urlsplit(origin)
+        if (parsed.scheme!="http" or parsed.hostname not in ("web","127.0.0.1","localhost","::1")
+                or parsed.port!=3000 or parsed.username or parsed.password or parsed.path not in ("","/")
+                or parsed.query or parsed.fragment):
+            raise NotReady("Local web health origin not configured")
+        origin=origin.rstrip("/")
+        cookie=os.getenv("ARCHIVE_LOCAL_WEB_COOKIE","")
+        if cookie:
+            if "\r" in cookie or "\n" in cookie:
+                raise NotReady("Invalid local web health credential")
+            headers["Cookie"]=cookie
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self,*args,**kwargs):
+                return None
+        opener=build_opener(ProxyHandler({}),NoRedirect())
+    def request(route,timeout):
+        if opener is None:
+            return urlopen(origin+route,timeout=timeout)
+        try:
+            return opener.open(Request(origin+route,headers=headers),timeout=timeout)
+        except Exception as exc:
+            raise NotReady("Local web health check failed") from exc
     for route,field in (
         (f"/api/quotes/600000.SH?year={latest.year}","bars"),
         (f"/api/quotes/600000.SH/factors?year={latest.year}","factors"),
     ):
-        with urlopen(origin+route,timeout=75) as response:
+        with request(route,75) as response:
             doc=json.load(response)
             coverage=doc.get("coverage",{})
             if (response.status!=200 or doc.get("archive_prefix")!=RAW_PREFIX
                     or not doc.get(field) or coverage.get("partial") is not False
                     or coverage.get("latest","")<latest.isoformat()):
                 raise NotReady(f"Production {field} reader not fully current")
-    with urlopen(origin+"/api/health",timeout=30) as response:
+    with request("/api/health",30) as response:
         if response.status!=200 or json.load(response).get("status")!="ok":
             raise NotReady("Production health not ready")
 
@@ -296,6 +325,9 @@ def main():
     parser=argparse.ArgumentParser()
     parser.add_argument("--apply",action="store_true")
     args=parser.parse_args()
+    if archive_driver()=="local" and args.apply:
+        if os.getenv("ARCHIVE_LOCAL_ALLOW_MAINTENANCE_APPLY")!="true" or not os.getenv("PIPELINE_RUN_ID"):
+            raise RuntimeError("Local cleanup disabled; explicit opt-in and locked pipeline required")
     cfg=StorageConfig.from_environment()
     s3=s3_client(cfg);bucket=cfg.bucket
     now=datetime.now(timezone.utc)
@@ -359,7 +391,7 @@ def main():
             report["reason"]=str(exc)
         report["database_after"]=db_state(conn)
         report["storage_after"]=storage_state(s3,bucket)
-    run=os.environ.get("GITHUB_RUN_ID","manual")
+    run=os.environ.get("GITHUB_RUN_ID") or os.environ.get("PIPELINE_RUN_ID") or ("local-"+uuid4().hex if archive_driver()=="local" else "manual")
     attempt=os.environ.get("GITHUB_RUN_ATTEMPT","1")
     key=f"{RAW_PREFIX}/_maintenance/reports/year={now.year}/run={run}_{attempt}.json"
     put_manifest(s3,bucket,key,report)

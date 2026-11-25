@@ -6,6 +6,7 @@ An existing verified month/year is reused with zero provider requests.
 Historical ST and financial VIP are NOT silently inferred or treated as complete.
 """
 from __future__ import annotations
+from .archive_storage import duckdb_connection
 
 import argparse
 import csv
@@ -251,7 +252,7 @@ def collect_month(client, dataset: str, year: int, month: str, days: list[str],
             days_nonempty += int(bool(records))
             print(f"PHASE2_DAY dataset={dataset} date={day} rows={len(records)}",
                   flush=True)
-    con = duckdb.connect()
+    con = duckdb_connection()
     csv_path = str(csv_file).replace("'", "''")
     pq_path = str(pq_file).replace("'", "''")
     select = []

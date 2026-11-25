@@ -37,7 +37,7 @@ def fetch_market(args) -> bool:
     run_id = uuid4()
     store.start_run(run_id, "market_refresh", day)
     stats = {"asof": day.isoformat(), "api_source": client.source,
-             "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+             "github_run_id": os.environ.get("GITHUB_RUN_ID"), "local_run_id": os.environ.get("PIPELINE_RUN_ID"),
              "notes": "Market data only. NCAV publication is handled by recalculate-ncav."}
     try:
         if not client.trade_open(day.strftime("%Y%m%d")):
@@ -116,6 +116,10 @@ def recalculate_ncav(args):
     # manual SQL step before the first historical backfill runs.
     store.ensure_price_history_tables()
     trigger_run_id = getattr(args, "trigger_run_id", None)
+    local_trigger = getattr(args, "trigger_local_run_id", None)
+    if local_trigger is not None and not store.has_successful_local_trigger(local_trigger):
+        LOGGER.info("Skipping recalculate-ncav: no eligible changes in local pipeline run")
+        return
     if trigger_run_id is not None and not store.has_successful_data_trigger(trigger_run_id):
         LOGGER.info("Skipping recalculate-ncav: no eligible changes for the latest quote date in upstream run %s",
                     trigger_run_id)
@@ -143,7 +147,7 @@ def recalculate_ncav(args):
              "market_api_calls": 0, "financial_api_calls": 0,
              "listed_stocks": coverage["listed_stocks"],
              "quoted_stocks": coverage["quoted_stocks"],
-             "notes": "Recalculated with Neon data; disclosures strictly earlier than quote day."}
+             "notes": "Recalculated with stored PostgreSQL data; disclosures strictly earlier than quote day."}
     try:
         rows = store.screen_inputs(quote_day)
         stats["pre_screened"] = len(rows)
@@ -220,7 +224,7 @@ def run_financial_refresh(args):
     run_id = uuid4()
     store.start_run(run_id, "financial_refresh", day)
     stats = {"asof": day.isoformat(), "budget": args.budget,
-             "api_source": client.source if client else "archive_only", "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+             "api_source": client.source if client else "archive_only", "github_run_id": os.environ.get("GITHUB_RUN_ID"), "local_run_id": os.environ.get("PIPELINE_RUN_ID"),
              "recalc_needed": False, "mode": None, "attempted": 0,
              "succeeded": 0, "failed": 0, "financial_api_calls": 0,
              "disclosure_api_calls": 0,
@@ -504,7 +508,9 @@ def main():
     market.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default latest eligible session")
     recalc = subs.add_parser("recalculate-ncav", help="Publish NCAV using cached market and financial data")
     recalc.add_argument("--date", help="Optional latest date bound (default today)")
-    recalc.add_argument("--trigger-run-id", type=int,
+    triggers = recalc.add_mutually_exclusive_group()
+    triggers.add_argument("--trigger-local-run-id", type=lambda v: str(__import__("uuid").UUID(v)), help="Only recalculate after a successful changed local pipeline run")
+    triggers.add_argument("--trigger-run-id", type=int,
                         help="Only recalculate if triggering Actions run successfully saved market/finance data")
     scan = subs.add_parser("scan", help="Legacy combined market fetch and NCAV calculation")
     scan.add_argument("--date", help="Asia/Shanghai YYYY-MM-DD; default latest eligible session")

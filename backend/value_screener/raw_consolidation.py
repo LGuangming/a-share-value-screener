@@ -6,6 +6,7 @@ Destination manifests translate only archive object paths; the original source
 manifests remain unchanged. Publish the catalog only after every group verifies.
 """
 from __future__ import annotations
+from .archive_storage import require_neon_only
 
 import argparse
 from collections import Counter
@@ -281,6 +282,7 @@ def publish_catalog(s3, bucket):
 
 
 def main():
+    require_neon_only()
     parser = argparse.ArgumentParser()
     parser.add_argument("--group", choices=tuple(GROUPS) + ("catalog",), required=True)
     args = parser.parse_args()

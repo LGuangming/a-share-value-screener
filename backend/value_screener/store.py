@@ -190,6 +190,19 @@ class Store:
             """, (str(github_run_id),)).fetchone()
         return bool(row["changed"])
 
+    def has_successful_local_trigger(self, local_run_id: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute("""
+                SELECT EXISTS (
+                    SELECT 1 FROM job_runs
+                    WHERE job_type IN ('market_refresh','financial_refresh')
+                      AND status='success'
+                      AND metrics->>'local_run_id'=%s
+                      AND metrics->>'recalc_needed'='true'
+                ) AS changed
+            """,(str(local_run_id),)).fetchone()
+        return bool(row["changed"])
+
     def has_published_snapshot(self, quote_day: date) -> bool:
         """A previously successful same-day NCAV publication exists."""
         with self.connect() as conn:
