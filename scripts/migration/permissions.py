@@ -25,16 +25,16 @@ def role_guard(c):
 def policy(c, path):
     data=load(path)
     allowed={}
-    for k in ("read_tables","write_tables","write_sequences"):
-        entries=data[k]
+    for k in ("read_tables","write_tables","write_sequences","delete_tables"):
+        entries=data.get(k,data["write_tables"]) if k=="delete_tables" else data[k]
         allowed[k]={tuple(x) for x in entries}
         if len(allowed[k])!=len(entries) or any(len(x)!=2 for x in allowed[k]):
             raise ValueError("invalid policy")
     actual={(s,n):k for s,n,k in relations(c)}
-    if not allowed["read_tables"] or not allowed["write_tables"]<=allowed["read_tables"]:
+    if not allowed["read_tables"] or not allowed["write_tables"]<=allowed["read_tables"] or not allowed["delete_tables"]<=allowed["write_tables"]:
         raise ValueError("invalid read/write policy")
     for k,entries in allowed.items():
-        kinds=("S",) if k=="write_sequences" else ("r","p") if k=="write_tables" else ("r","p","v","m")
+        kinds=("S",) if k=="write_sequences" else ("r","p") if k in ("write_tables","delete_tables") else ("r","p","v","m")
         if any(actual.get(x) not in kinds for x in entries):
             raise ValueError("policy refers to missing or unsupported object")
     return allowed
@@ -66,7 +66,9 @@ def grant(c,p):
         if (s,n) in p["read_tables"]:
             c.execute(sql.SQL("GRANT SELECT ON {} TO {}, {}").format(obj,*map(sql.Identifier,ROLES)))
         if (s,n) in p["write_tables"]:
-            c.execute(sql.SQL("GRANT INSERT, UPDATE, DELETE ON {} TO {}").format(obj,sql.Identifier(WRITER)))
+            c.execute(sql.SQL("GRANT INSERT, UPDATE ON {} TO {}").format(obj,sql.Identifier(WRITER)))
+        if (s,n) in p["delete_tables"]:
+            c.execute(sql.SQL("GRANT DELETE ON {} TO {}").format(obj,sql.Identifier(WRITER)))
         if (s,n) in p["write_sequences"]:
             c.execute(sql.SQL("GRANT USAGE, SELECT ON SEQUENCE {} TO {}").format(obj,sql.Identifier(WRITER)))
 
@@ -82,7 +84,7 @@ def verify(c,p):
         for s,n,kind in relations(c):
             obj=sql.Identifier(s,n).as_string(c)
             for priv in SEQ_PRIVS if kind=="S" else TABLE_PRIVS:
-                expected=(kind=="S" and role==WRITER and (s,n) in p["write_sequences"] and priv in ("USAGE","SELECT")) or (kind!="S" and (s,n) in p["read_tables"] and priv=="SELECT") or (kind!="S" and role==WRITER and (s,n) in p["write_tables"] and priv in ("INSERT","UPDATE","DELETE"))
+                expected=(kind=="S" and role==WRITER and (s,n) in p["write_sequences"] and priv in ("USAGE","SELECT")) or (kind!="S" and (s,n) in p["read_tables"] and priv=="SELECT") or (kind!="S" and role==WRITER and (s,n) in p["write_tables"] and (priv in ("INSERT","UPDATE") or priv=="DELETE" and (s,n) in p["delete_tables"]))
                 fn="has_sequence_privilege" if kind=="S" else "has_table_privilege"
                 actual=c.execute("SELECT "+fn+"(%s,%s,%s)",(role,obj,priv)).fetchone()[0]
                 if actual!=expected:

@@ -1,6 +1,8 @@
 """Read-only S3 inventory and verified download; no put/delete calls."""
 import argparse
 import hashlib
+import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import re
@@ -59,70 +61,105 @@ def inventory(client, expected):
             raise ValueError("file/directory collision")
     return {"captured_at":datetime.now(timezone.utc).isoformat(),"buckets":sorted(discovered),"objects":objects,"total_bytes":sum(x["size"] for x in objects),"prefixes":prefixes}
 
-def sync(client, manifest, root, previous=None):
+def sync(client, manifest, root, previous=None, workers=1):
+    if workers not in (1,2,4):
+        raise ValueError("workers must be 1, 2 or 4")
     root=Path(root)
     data=root/"files"
     data.mkdir(parents=True,exist_ok=True,mode=0o700)
     if root.is_symlink() or data.is_symlink():
         raise ValueError("symlink root")
     statefile=root/"checkpoint.json"
+    journal=root/"checkpoint.jsonl"
+    if statefile.is_symlink() or journal.is_symlink():
+        raise ValueError("symlink evidence")
     state=load(statefile) if statefile.exists() else {}
+    if journal.exists():
+        # A torn tail is not trusted: fail closed, retain evidence for review.
+        with journal.open(encoding="utf-8") as f:
+            for line in f:
+                record=json.loads(line)
+                state[record["id"]]=record["receipt"]
     prior=load(Path(previous)/"checkpoint.json") if previous else {}
+    todo=[]
     for obj in manifest["objects"]:
-        bucket,key=obj["bucket"],obj["key"]
-        ident=bucket+"/"+key
-        path=safe_path(data,bucket,key)
+        b,k=obj["bucket"],obj["key"]
+        ident=b+"/"+k
+        path=safe_path(data,b,k)
         old=state.get(ident)
         if path.exists():
             if old and old["object"]==obj and path.is_file() and path.stat().st_size==obj["size"] and digest(path)==old["sha256"]:
                 continue
             raise ValueError("existing file is unverified or changed; use new generation")
-        if previous and prior.get(ident,{}).get("object")==obj:
-            src=safe_path(Path(previous)/"files",bucket,key)
-            expected=prior[ident]["sha256"]
-            if not src.is_file() or src.stat().st_size!=obj["size"] or digest(src)!=expected:
-                raise ValueError("previous generation corrupt")
-            path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-            fd,temp=tempfile.mkstemp(prefix=".reuse-",dir=path.parent)
-            os.close(fd)
-            try:
+        todo.append((obj,ident,path))
+    if shutil.disk_usage(data).free < sum(x[0]["size"] for x in todo)+64*1024*1024:
+        raise OSError("insufficient disk")
+    def prepare(task):
+        obj,ident,path=task
+        bucket,key=obj["bucket"],obj["key"]
+        path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        fd,temp=tempfile.mkstemp(prefix=".download-",dir=path.parent)
+        try:
+            if previous and prior.get(ident,{}).get("object")==obj:
+                src=safe_path(Path(previous)/"files",bucket,key)
+                expected=prior[ident]["sha256"]
+                if not src.is_file() or src.stat().st_size!=obj["size"] or digest(src)!=expected:
+                    raise ValueError("previous generation corrupt")
+                os.close(fd)
+                fd=None
                 shutil.copyfile(src,temp)
                 if digest(temp)!=expected:
                     raise ValueError("copy integrity mismatch")
-                state[ident]={"object":obj,"sha256":expected}
-                write_json(statefile,state)
-                os.link(temp,path)
+                return task,temp,expected
+            response=client.get_object(Bucket=bucket,Key=key,IfMatch=obj["etag"])
+            body=response["Body"]
+            try:
+                h=hashlib.sha256()
+                size=0
+                with os.fdopen(fd,"wb") as f:
+                    fd=None
+                    for chunk in body.iter_chunks(chunk_size=1024*1024):
+                        f.write(chunk)
+                        h.update(chunk)
+                        size+=len(chunk)
+                    f.flush()
+                    os.fsync(f.fileno())
+                if size!=obj["size"] or response.get("ETag")!=obj["etag"] or response["LastModified"].isoformat()!=obj["modified"]:
+                    raise ValueError("source changed or size mismatch")
+                claimed=response.get("Metadata",{}).get("sha256")
+                if claimed and claimed.lower()!=h.hexdigest():
+                    raise ValueError("source metadata SHA256 mismatch")
+                return task,temp,h.hexdigest()
             finally:
-                Path(temp).unlink(missing_ok=True)
-            continue
-        if shutil.disk_usage(data).free < obj["size"] + 64*1024*1024:
-            raise OSError("insufficient disk")
-        path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
-        response=client.get_object(Bucket=bucket,Key=key,IfMatch=obj["etag"])
-        body=response["Body"]
-        fd,temp=tempfile.mkstemp(prefix=".download-",dir=path.parent)
-        try:
-            h=hashlib.sha256()
-            size=0
-            with os.fdopen(fd,"wb") as f:
-                for chunk in body.iter_chunks(chunk_size=1024*1024):
-                    f.write(chunk)
-                    h.update(chunk)
-                    size+=len(chunk)
-                f.flush()
-                os.fsync(f.fileno())
-            if size!=obj["size"] or response.get("ETag")!=obj["etag"] or response["LastModified"].isoformat()!=obj["modified"]:
-                raise ValueError("source changed or size mismatch")
-            claimed=response.get("Metadata",{}).get("sha256")
-            if claimed and claimed.lower()!=h.hexdigest():
-                raise ValueError("source metadata SHA256 mismatch")
-            # Hard link is an atomic no-overwrite publication on the same filesystem.
-            state[ident]={"object":obj,"sha256":h.hexdigest()}
-            write_json(statefile,state)
-            os.link(temp,path)
-        finally:
-            body.close()
+                body.close()
+        except BaseException:
+            if fd is not None:
+                os.close(fd)
             Path(temp).unlink(missing_ok=True)
+            raise
+    # Bounded groups, parallel reads but serialized durable receipt + publication.
+    # The journal removes quadratic rewriting of the whole checkpoint per object.
+    with ThreadPoolExecutor(max_workers=workers) as pool, journal.open("a",encoding="utf-8") as log:
+        for offset in range(0,len(todo),workers):
+            futures=[pool.submit(prepare,t) for t in todo[offset:offset+workers]]
+            try:
+                for future in futures:
+                    (obj,ident,path),temp,sha=future.result()
+                    receipt={"object":obj,"sha256":sha}
+                    log.write(json.dumps({"id":ident,"receipt":receipt},ensure_ascii=False)+"\n")
+                    log.flush()
+                    os.fsync(log.fileno())
+                    state[ident]=receipt
+                    os.link(temp,path)
+            finally:
+                for future in futures:
+                    try:
+                        _,temp,_=future.result()
+                        Path(temp).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+    write_json(statefile,state)
+    journal.unlink(missing_ok=True)
     return verify(manifest,root)
 
 def verify(manifest,root):
@@ -158,6 +195,7 @@ def main():
     p.add_argument("--bucket",action="append",default=[])
     p.add_argument("--approved-live-read",action="store_true")
     p.add_argument("--previous-generation")
+    p.add_argument("--workers",type=int,choices=[1,2,4],default=1)
     a=p.parse_args()
     root=Path(a.root)
     if a.action=="verify":
@@ -183,7 +221,7 @@ def main():
                 raise ValueError("source changed or removed; new generation required")
         write_json(old,manifest)
         if a.action=="sync":
-            sync(client,manifest,root,a.previous_generation)
+            sync(client,manifest,root,a.previous_generation,a.workers)
             final=inventory(client,a.bucket)
             if final["objects"]!=manifest["objects"]:
                 (root/"verify-storage.json").unlink(missing_ok=True)

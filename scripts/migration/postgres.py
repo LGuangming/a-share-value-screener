@@ -115,7 +115,7 @@ def readonly(c):
     c.execute("SET LOCAL lock_timeout = '5s'")
 
 def run(args):
-    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1800)
 
 def backup(args):
     root=Path(args.root)
@@ -128,6 +128,9 @@ def backup(args):
     with connect(args.approved_live_source) as c:
         readonly(c)
         source=inventory(c)
+        # The snapshot-exporting session must stay alive while pg_dump reads.
+        # Override only this transaction, with bounded child execution below.
+        c.execute("SET LOCAL idle_in_transaction_session_timeout = 0")
         snapshot=c.execute("SELECT pg_export_snapshot()").fetchone()[0]
         client=subprocess.check_output(["pg_dump","--version"],text=True).strip()
         # Use the first version number; distro suffixes are irrelevant.

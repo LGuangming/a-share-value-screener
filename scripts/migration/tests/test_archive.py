@@ -62,3 +62,36 @@ class ArchiveTest(unittest.TestCase):
         self.doc["fields"]=["close"]
         with self.assertRaises(ValueError):
             inspect(self.materialize(self.doc))
+
+
+    def test_catalog_and_financial_jsonl(self):
+        import gzip
+        import hashlib
+        from archive_verify import FIN_FIELDS,RAW
+        b=self.bucket
+        code="000001.SZ"
+        snapshot=RAW+"stock_basic/stock_basic_snapshot.json"
+        self.s3.put_object(Bucket=b,Key=snapshot,Body=json.dumps({"dataset":"stock_basic_snapshot","rows":1,"records":[{"ts_code":code}]}).encode())
+        key=RAW+"financial/income/start=00000_count=020.jsonl.gz"
+        row={f:None for f in FIN_FIELDS["income"].split(",")}
+        row.update(ts_code=code,end_date="20250930",f_ann_date="20251031")
+        blob=gzip.compress((json.dumps(row)+"\n").encode(),mtime=0)
+        self.s3.put_object(Bucket=b,Key=key,Body=blob)
+        fin={"object_key":key,"sha256":hashlib.sha256(blob).hexdigest(),"compressed_bytes":len(blob),"rows":1,"kind":"income","start_index":0,"requested_codes":1,"codes_sha256":hashlib.sha256(json.dumps([code],ensure_ascii=False).encode()).hexdigest(),"missing_codes":[],"missing_codes_count":0,"missing_f_ann_date_rows":0}
+        self.s3.put_object(Bucket=b,Key=key+".manifest.json",Body=json.dumps(fin).encode())
+        entry={"object_key":key,"bytes":len(blob),"source_bytes":len(blob),"sha256":fin["sha256"]}
+        receipt=RAW+"_migration/financial.json"
+        self.s3.put_object(Bucket=b,Key=receipt,Body=json.dumps({"dataset":"financial","status":"copied_and_verified","objects":1,"bytes":len(blob),"source_bytes":len(blob),"entries":[entry]}).encode())
+        catalog={"status":"consolidated_verified","objects":1,"bytes":len(blob),"source_bytes":len(blob),"datasets":[{"dataset":"financial","prefix":RAW+"financial/","inventory":receipt,"objects":1,"bytes":len(blob),"source_bytes":len(blob)}]}
+        self.s3.put_object(Bucket=b,Key=RAW+"dataset_catalog.json",Body=json.dumps(catalog).encode())
+        r=inspect(self.materialize(self.doc))
+        self.assertEqual(r["gzip_rows"],1)
+        self.assertEqual(len(r["catalogs"]),1)
+
+    def test_gzip_bad_crc(self):
+        import gzip
+        from archive_verify import read_gzip
+        path=self.root/"bad.jsonl.gz"
+        path.write_bytes(gzip.compress(b'{"ts_code":"000001.SZ"}\n')[:-5])
+        with self.assertRaises((EOFError,OSError)):
+            read_gzip(path,path.name)

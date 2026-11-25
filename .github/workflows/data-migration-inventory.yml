@@ -124,3 +124,65 @@ jobs:
           python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/recovery-copy"
           python scripts/migration/permissions.py apply --policy scripts/migration/tests/acl-policy.json --root "$RUNNER_TEMP/recovery-copy" --approved-isolated-acl
           echo 'PASS: independent backup recovery and ACL reconstruction'
+
+  pressure-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tier: 100MB
+            rows: 120000
+          - tier: 500MB
+            rows: 600000
+          - tier: 1GB
+            rows: 1200000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-18
+          echo /usr/lib/postgresql/18/bin >> "$GITHUB_PATH"
+          python -m pip install 'psycopg[binary]>=3.2,<4'
+      - name: Constrained PostgreSQL pressure and recovery
+        env:
+          FIXTURE_ROWS: ${{ matrix.rows }}
+          FIXTURE_TIER: ${{ matrix.tier }}
+          PGHOST: 127.0.0.1
+          PGUSER: postgres
+          PGSSLMODE: disable
+        run: bash scripts/migration/tests/pressure_postgres.sh
+      - name: Remove disposable containers
+        if: always()
+        run: docker rm -f migration-pressure-source migration-pressure-target 2>/dev/null || true
+  pressure-storage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        rows: [90000, 150000]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install 'boto3>=1.40,<2' 'pyarrow>=19,<25' 'duckdb>=1.2,<2' numpy
+      - name: Generate 6000 objects, full and incremental sync, DuckDB validation
+        env:
+          FIXTURE_ROWS: ${{ matrix.rows }}
+        run: |
+          set -euo pipefail
+          export PYTHONPATH=scripts/migration
+          # Runner-side worker is limited to two CPU cores and 1 GiB memory.
+          # systemd scope inherits the runner user; fixture has no network client.
+          sudo systemd-run --scope --quiet -p CPUQuota=200% -p MemoryMax=1G -p MemorySwapMax=0 \
+            sudo -u "$(id -un)" env "PATH=$PATH" "PYTHONPATH=$PYTHONPATH" /usr/bin/time -v python scripts/migration/tests/pressure_storage.py --root "$RUNNER_TEMP/storage-pressure" --rows "$FIXTURE_ROWS"

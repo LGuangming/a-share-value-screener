@@ -118,3 +118,35 @@ rollback window/backup recovery accepted. No cleanup in this PR.
 - Fixture CI records /usr/bin/time -v and evidence bytes; these are runner-side
   measurements, not estimates of Neon billed compute or VPS throughput. CI recreates
   only the disposable local target and restores from an independent backup copy.
+
+
+## D01-B-3 pressure and archive-format preparation
+CI only: actual eight-table schema with 120k/600k/1.2m synthetic quote rows plus
+compact history, financials and screening rows; measured database bytes determine
+actual tier. Both containers use postgres:18.7-alpine, 1.5 CPU, 800 MiB memory,
+192 MiB shared_buffers, 4 MiB work_mem, 30 connections and 60s idle timeout.
+Snapshot export uses a transaction-local override, bounded pg_dump subprocess.
+Serial single-transaction restore remains the only production default. Parallel
+jobs=2 benchmark is non-atomic and is used only after disposable fixture reset.
+Small tier repeats the final full snapshot after a source change; this is not
+logical replication or incremental PostgreSQL replication.
+
+Disk-backed S3-shaped load fixture: 6,000 synthetic keys and measured bytes,
+100 large Parquet files and 2,900 small ST-shaped gzip files plus manifests,
+controlled 1ms request overhead; compare 1/2/4 workers, 256/512MB DuckDB, new
+generation reuse. Worker scope capped at 2 CPU and 1 GiB. No remote HTTP
+throughput claim: Moto tests separately exercise S3 protocol client semantics.
+The checkpoint journal writes a durable receipt per object, then publishes
+atomically; interrupted transfers are retried per object. Torn journal or
+unverified file fails closed. No byte-level resume or concurrent processes.
+
+Local archive verifier checks recognized catalog receipts, nested references,
+gzip JSONL/JSON arrays, financial fields and frozen-universe coverage, disclosure
+periods, hashes, counts and known ST batch code lists. Unknown manifest forms,
+retired catalog references and unsupported binary formats remain review gates;
+actual production manifests not retrieved. The historical catalog is a receipt
+not a full current inventory. No claim of point-in-time financial certification.
+Production-schema candidate ACL uses all eight tables for read/write, DELETE
+only for screen_results and retention tables. Application DDL/bootstrap and
+reader grant compatibility must be assessed with the final worker build.
+No actual Neon/VPS permissions or resources changed.
