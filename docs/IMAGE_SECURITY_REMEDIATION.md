@@ -83,3 +83,39 @@ be reviewed after scanning. Wheel hash lock remains outstanding.
 
 Only build and test on PR #28; no GHCR push, merge, VPS or production
 modification. Retain all HIGH/CRITICAL findings including unfixed.
+
+## Phase 11E-3 — Node 26 LTS and Python 3.13 Distroless
+
+11E-2 actual run 45578701994: Web 3 HIGH/0 CRITICAL, Worker 53 HIGH/0
+CRITICAL; application/Compose smoke, identity, dependency, native
+runtime and secret checks passed. Strict vulnerability gate blocked.
+
+Candidate builds now use Node 26 and Python 3.13 on Debian 13; final
+images use official nodejs26-debian13:nonroot and python3-debian13:nonroot.
+Resolver obtains four actual immutable registry references. Availability,
+architecture and runtime compatibility must be proven in CI, not assumed.
+Python wheels are installed with --require-hashes from a single
+CPython 3.13 linux/amd64 hash lock generated from actual downloaded wheels
+and shared across both PostgreSQL matrices. Exact dependency versions
+are retained initially; missing wheel or new dependency fails resolution
+rather than falling back to source builds or unreviewed updates.
+The candidate hash lock is a CI artifact until reviewed and committed;
+a later commit must pin all four verified base digests and the reviewed
+hash lock, then rerun checks. Local build currently requires that
+generated lock file; do not release from floating defaults.
+The lock records downloaded bytes, not an independent signature audit.
+Node package-lock.json remains unchanged. Unit CI retains Python 3.11
+baseline and adds Python 3.13, while integration/Node builds use upgraded
+versions. Production workflow dependency files remain untouched.
+
+Worker copies only installed wheel site-packages into native Debian
+Python 3.13 Distroless, not a venv with incompatible interpreter paths.
+No shell, package manager, manual shared-library deletion or fake
+package metadata. Direct Python test launcher runs original database
+guard and execs pipeline with unchanged arguments. Fixtures use the
+absolute interpreter path; subprocess uses sys.executable.
+Runtime and SQL/archive tests must prove native wheel/ABI, TLS,
+timezone, compression, SQLite, PostgreSQL and readiness compatibility.
+SBOM replaces dpkg-query inventory for shell-free image. Zero HIGH and
+CRITICAL, including unfixed, and secret scan remain mandatory.
+No registry push, merge, VPS deployment or production changes.

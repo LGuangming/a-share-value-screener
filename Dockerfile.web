@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # CI resolves the candidate tag to one immutable manifest before both test matrices.
-ARG NODE_BASE=node:22-trixie-slim
-ARG WEB_RUNTIME_BASE=gcr.io/distroless/nodejs22-debian13:nonroot
+ARG NODE_BASE=node:26-trixie-slim
+ARG WEB_RUNTIME_BASE=gcr.io/distroless/nodejs26-debian13:nonroot
 FROM ${NODE_BASE} AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./

@@ -1,6 +1,6 @@
-# linux/amd64, CPython 3.11; exact versions from successful PR #26
+# linux/amd64, CPython 3.13 candidate; unchanged versions from successful PR #26
 # python-local-integration (job 139063903327) and PR #27 Worker build.
-# No hashes claimed: wheel-only installation plus scan of the built image.
+# Exact version constraints; CPython 3.13 wheel availability and hashes are validated by CI.
 baostock==0.9.4
 boto3==1.44.11
 botocore==1.44.11

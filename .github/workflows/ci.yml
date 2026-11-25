@@ -9,11 +9,15 @@ permissions:
 jobs:
   python-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python }}
       - name: Screening, multi-strategy and backtest kernel tests (no credentials)
         env:
           PYTHONPATH: backend
@@ -42,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
       - name: Install isolated worker dependencies
         run: |
           python -m pip install --only-binary=:all: -r backend/requirements-worker.lock.txt
@@ -76,7 +80,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Fundamental review classification tests
@@ -94,7 +98,7 @@ jobs:
         run: npm run test:db
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
       - name: Install fixture-only Parquet generator
         run: |
           python -m pip install --only-binary=:all: 'duckdb==1.5.6'

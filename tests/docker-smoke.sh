@@ -51,7 +51,7 @@ if "${dc[@]}" run --rm --no-deps -e DATABASE_READ_URL=postgresql://screener_read
   echo "Web guard unexpectedly accepted production database"; exit 1
 fi
 "${dc[@]}" run --rm worker --help
-"${dc[@]}" run --rm --entrypoint python worker /fixtures/docker-seed.py
+"${dc[@]}" run --rm --entrypoint /usr/bin/python3 worker /fixtures/docker-seed.py
 "${dc[@]}" up -d --wait web
 "${dc[@]}" exec -T web node -e 'const a=require("node:assert/strict"),fs=require("node:fs");a.equal(process.getuid(),10001);a.equal(process.getgid(),10010);a.ok(!process.env.DATABASE_URL&&!process.env.TUSHARE_TOKEN);a.throws(()=>fs.writeFileSync("/data/archive/forbidden","x"));'
 "${dc[@]}" exec -T web node -e 'const a=require("node:assert/strict"),{Client}=require("pg");(async()=>{const c=new Client({connectionString:process.env.DATABASE_READ_URL});await c.connect();try{const r=await c.query("SELECT has_table_privilege(current_user,\x27stocks\x27,\x27UPDATE\x27) AS can_write");a.equal(r.rows[0].can_write,false);await a.rejects(c.query("UPDATE stocks SET name=\x27forbidden\x27"),/permission denied/);}finally{await c.end()}})().catch(e=>{console.error(e);process.exitCode=1})'
