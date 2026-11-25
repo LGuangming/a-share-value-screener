@@ -164,3 +164,69 @@ source and target, WAL and fixture files; this is an observed lower bound on
 peak consumption, not exact per-phase disk accounting. Archive evidence records
 allocated filesystem blocks across retained generations and worker cgroup peak.
 Real VPS/network performance and actual Neon inventory remain separate gates.
+
+
+## D01-B-4 isolated VPS preparation (code and GitHub-hosted fixtures only)
+
+D01-B-3 accepted on commit a2e64369: four workflows and 20 jobs successful,
+22 focused tests, no OOM/kill/group-kill in six database and four archive
+pressure jobs. 1GB test sampled whole-runner disk delta ~5.79 GiB; archived
+three fixture generations use ~3.20 GiB. The 800 MiB and 1 GiB cgroups reached
+their limits without OOM; actual shared VPS load remains untested.
+
+New standalone tools live in scripts/migration/vps. They are not installed
+on the VPS by CI. Do not use production credentials in these fixtures.
+
+- Compose project ashare-migration has one fixed container, dedicated named
+  volume and internal bridge network; host binds only 127.0.0.1:55432.
+  800 MiB/1.5 CPU, no container restart policy, no application network.
+  Exact tag 18.7-alpine is the fixture version; review and pin the approved
+  image digest before actual host initialization.
+- prepare.py requires a local root operator, explicit --approved-local-prepare,
+  an already provisioned noninteractive ashare-migrate OS user, a root-owned
+  non-writable parent path, >=30 GiB free disk, and an entirely absent migration
+  root. Creates only /opt/ashare/migration; never overwrites or auto-cleans.
+  Root owns tools, compose and public summary directory; the migration OS user
+  owns private data areas and its owner pgpass. Secrets are random and distinct,
+  private on host, read-only within the isolated PostgreSQL container.
+  A partial prepare requires local administrator review, not a blind rerun.
+- db-init/10-roles.sh creates the database owner and business reader/writer as
+  non-superusers, no role/db creation, replication or bypass RLS. Bootstrap
+  postgres is only for cluster administration. Reader/writer cannot CONNECT
+  to postgres/template1. Owner initializes schema; permissions.py applies
+  candidate eight-table policy after restore. Do not give business roles
+  migration_owner credentials. Actual source special objects remain a review gate.
+- ops_dispatch.py accepts only exact no-argument data-inventory, data-capacity,
+  migration-status, migration-verify. Capacity is live from fixed local paths.
+  Other commands require root-published bounded aggregate JSON, timestamp and
+  exact schema; inventory TTL 24h, status/verification TTL 15min. Stale, future,
+  malformed or unknown reports fail closed. No subprocess, shell, Docker or SQL
+  access; no raw file names, secrets, logs or arbitrary path arguments.
+  Existing ping/status are NOT changed; later root integration may delegate
+  those four literal commands to the installed dispatcher while preserving
+  existing forced-command restrictions and host key pinning. Current main-only
+  workflow remains unchanged; no remote live validation in this PR.
+- control.py is local root-only. monitor checks container identity, volume,
+  network, binding, cgroup OOM counters, restart count, host memory/disk.
+  Stop requires --approved-isolated-stop and validates exact container identity
+  before stopping by full ID. No docker rm/down/prune, volume deletion, production
+  restart or data promotion. publish-summary accepts bounded aggregate JSON on
+  stdin, only explicit command names; root must independently review provenance.
+  A fresh summary is not a substitute for authenticated Launch approval.
+- Before actual setup: independently inspect existing users, port, path,
+  Docker resource names, disk/inodes, memory, existing production services,
+  image digest and security acceptance. Abort if any resource name already
+  exists unexpectedly or projected free disk <30 GiB / available memory <1.5 GiB.
+  No automatic production service shutdown. When separately approved, root
+  creates the noninteractive account and runs prepare; review generated files,
+  then use local Docker Compose with explicit unix socket and no pull/build.
+  Do not start while another heavy task runs. Check actual OOM event deltas,
+  system memory and disk. Rollback stops isolated container and preserves data.
+  Remove nothing without separate approval. The GitHub-hosted fixture can
+  restart its disposable container to check persistence; that is not a VPS action.
+- D01-B-4 fixture coverage: actual OS ownership and access denials, exact SSH
+  command rejection, summary expiry, isolated Compose config, role logins and
+  cross-database CONNECT denial, non-superuser schema/ACL setup, cgroup monitoring,
+  exact-ID stop, retained volume and restart persistence. Full backup restore
+  under final ownership, real production network/permissions and application
+  regression remain D01-B-5 / joint acceptance requirements.

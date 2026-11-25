@@ -186,3 +186,23 @@ jobs:
           # systemd scope inherits the runner user; fixture has no network client.
           sudo systemd-run --scope --quiet -p CPUQuota=200% -p MemoryMax=1G -p MemorySwapMax=0 \
             sudo -u "$(id -un)" env "PATH=$PATH" "PYTHONPATH=$PYTHONPATH" /usr/bin/time -v python scripts/migration/tests/pressure_storage.py --root "$RUNNER_TEMP/storage-pressure" --rows "$FIXTURE_ROWS"
+
+  vps-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install fixture dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+          python -m pip install 'psycopg[binary]>=3.2,<4'
+      - name: Test fixed command and rollback boundaries
+        run: |
+          python -m unittest discover -s scripts/migration/vps/tests -v
+          bash -n scripts/migration/vps/db-init/10-roles.sh scripts/migration/vps/tests/ci_isolation.sh
+      - name: Disposable runner filesystem and PostgreSQL isolation
+        run: bash scripts/migration/vps/tests/ci_isolation.sh

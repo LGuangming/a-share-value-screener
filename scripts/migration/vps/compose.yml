@@ -1,0 +1,52 @@
+name: ashare-migration
+services:
+  postgres:
+    image: postgres:18.7-alpine
+    container_name: ashare-migration-postgres
+    restart: "no"
+    cpus: 1.5
+    mem_limit: 800m
+    memswap_limit: 800m
+    shm_size: 256m
+    ports:
+      - "127.0.0.1:55432:5432"
+    environment:
+      POSTGRES_DB: ashare_migration
+      POSTGRES_PASSWORD_FILE: /run/migration-secrets/admin
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=peer"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=192MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=30
+      - -c
+      - idle_in_transaction_session_timeout=60s
+      - -c
+      - max_parallel_maintenance_workers=1
+    volumes:
+      - migration_pgdata:/var/lib/postgresql
+      - ./config/private/db-secrets:/run/migration-secrets:ro
+      - ./bin/db-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - migration
+    labels:
+      io.ashare.scope: migration-only
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "ashare_migration"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  migration_pgdata:
+    name: ashare-migration-pgdata
+    labels:
+      io.ashare.scope: migration-only
+networks:
+  migration:
+    name: ashare-migration-private
+    internal: true
