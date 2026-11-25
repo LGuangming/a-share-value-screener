@@ -1,0 +1,34 @@
+# Exclude every path by default; only explicit build inputs enter the context.
+**
+!package.json
+!package-lock.json
+!next.config.ts
+!next-env.d.ts
+!tsconfig.json
+!proxy.ts
+!app/
+!app/**
+!components/
+!components/**
+!lib/
+!lib/**
+!strategies/
+!strategies/**
+!backend/
+!backend/requirements.txt
+!backend/requirements-worker.txt
+!backend/value_screener/
+!backend/value_screener/**
+!database/
+!database/**
+# Defense in depth inside allowed paths.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.parquet
+**/*.jsonl.gz
+**/__pycache__
+**/__pycache__/**
+**/*.pyc

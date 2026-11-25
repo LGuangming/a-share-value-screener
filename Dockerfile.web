@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+FROM node:22-bookworm-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+FROM node:22-bookworm-slim AS builder
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1 NEXT_STANDALONE=1
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json next.config.ts next-env.d.ts tsconfig.json proxy.ts ./
+COPY app ./app
+COPY components ./components
+COPY lib ./lib
+COPY strategies ./strategies
+RUN npm run typecheck && npm run build && mkdir -p public
+
+FROM node:22-bookworm-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000 NODE_OPTIONS=--max-old-space-size=512
+RUN groupadd --gid 10010 archive && useradd --uid 10001 --gid 10010 --no-create-home --shell /usr/sbin/nologin web
+COPY --from=builder --chown=10001:10010 /app/.next/standalone ./
+COPY --from=builder --chown=10001:10010 /app/.next/static ./.next/static
+COPY --from=builder --chown=10001:10010 /app/public ./public
+RUN mkdir -p /app/.next/cache && chown 10001:10010 /app/.next/cache
+USER 10001:10010
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["node","-e","fetch('http://127.0.0.1:3000/login',{redirect:'manual',signal:AbortSignal.timeout(3000)}).then(r=>process.exit([200,503].includes(r.status)?0:1)).catch(()=>process.exit(1))"]
+CMD ["node","server.js"]

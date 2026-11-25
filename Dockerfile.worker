@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+FROM python:3.11-slim-bookworm AS deps
+WORKDIR /build
+COPY backend/requirements.txt backend/requirements-worker.txt ./
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install --no-cache-dir -r requirements-worker.txt
+
+FROM python:3.11-slim-bookworm AS runner
+WORKDIR /app
+ENV PATH=/opt/venv/bin:$PATH PYTHONPATH=/app/backend PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TZ=Asia/Shanghai HOME=/tmp TMPDIR=/data/tmp DUCKDB_TEMP_DIRECTORY=/data/tmp/duckdb
+RUN groupadd --gid 10010 archive && useradd --uid 10002 --gid 10010 --no-create-home --shell /usr/sbin/nologin worker
+COPY --from=deps /opt/venv /opt/venv
+COPY backend/value_screener /app/backend/value_screener
+COPY database /app/database
+RUN mkdir -p /data/archive /data/tmp/duckdb && chown -R 10002:10010 /data
+USER 10002:10010
+ENTRYPOINT ["python","-m","value_screener.local_pipeline"]
+CMD ["--help"]
