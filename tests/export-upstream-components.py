@@ -22,5 +22,7 @@ sql["properties"].append({"name":"source:id","value":s["source"]["source_id"]})
 bom={"bomFormat":"CycloneDX","specVersion":"1.5","version":1,"components":[py,exp,sql],
      "dependencies":[{"ref":py["bom-ref"],"dependsOn":[exp["bom-ref"],sql["bom-ref"]]}]}
 (directory/"upstream-components.cdx.json").write_text(json.dumps(bom,indent=2)+"\n")
-(directory/"build-toolchain-hash-candidate.json").write_text(json.dumps(m["build_toolchain"],indent=2)+"\n")
+assert m["build_toolchain"]["hash_status"] == "committed-and-verified"
+assert m["build_toolchain"]["installed_delta_count"] == 38
+(directory/"build-toolchain-hash-verified.json").write_text(json.dumps(m["build_toolchain"],indent=2)+"\n")
 print("PASS: upstream component inventory CPython, Expat, SQLite and separate build-only package inventory")

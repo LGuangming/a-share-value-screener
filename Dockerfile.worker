@@ -51,8 +51,9 @@ COPY deploy/prepare-cp313-minimal.py /prepare-cp313-minimal.py
 COPY deploy/minimal-debian-amd64.lock.json /minimal-debian-amd64.lock.json
 COPY backend/value_screener /audit/value_screener
 RUN apt-get -o APT::Update::Error-Mode=any update \
-    && python /install-minimal-build-toolchain.py \
-    && python /rebuild-minimal-xml.py \
+    && python /install-minimal-build-toolchain.py download
+RUN --network=none python /install-minimal-build-toolchain.py install
+RUN python /rebuild-minimal-xml.py \
     && python /rebuild-minimal-sqlite.py \
     && python /prepare-cp313-minimal.py
 

@@ -45,3 +45,22 @@ https://openssl-library.org/news/secadv/20261124.txt
 https://security-tracker.debian.org/tracker/CVE-2026-107494
 https://security-tracker.debian.org/tracker/CVE-2026-124709
 https://sqlite.org/capi3ref.html
+
+## 11E-10A — permanent archive hashes and offline install
+
+Both 11E-10 jobs 139126119164 (PG17) and 139126119045 (PG18.7), run
+45591294216, independently downloaded all 38 build-only archives and
+verified each byte hash against the signed APT index. Exact name, arch,
+version and SHA256 tuples match in both raw logs. Commit all 38 SHA256s
+with source run/job IDs; make every hash mandatory. Prior install failed
+with APT --no-download on local filenames, after successful verification.
+Separate network-enabled download/verification from a Docker RUN
+--network=none install layer. Rehash all local archives and verify dpkg
+identity and the complete base inventory again; unpack only those files,
+configure with dpkg, verify exact installed delta and no broken packages
+(dpkg audit and apt-get check). No dependency repair/download or force flags.
+Export verified hash inventory instead of proposed candidate hash inventory.
+Retain existing ROWID tests, verbose upstream regression, supplemental
+SBOM and actual OpenSSL reporting, both complete database matrices and
+strict vulnerability gates. OpenSSL remains blocked pending official fix.
+No merge, publish, deployment or production changes.

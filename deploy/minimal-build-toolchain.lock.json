@@ -5,197 +5,240 @@
     139120721669
   ],
   "base": "docker.io/library/python:3.13-slim-trixie@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50",
-  "hash_status": "version-locked; signed archive hashes to be captured and reviewed",
+  "hash_status": "permanently locked from identical signed-index and downloaded-byte verification in both 11E-10 matrices",
   "packages": [
     {
       "package": "binutils",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "6bc08c02539ba53b5e748142397144c499f9b20b5fa9bb56431545db124addeb"
     },
     {
       "package": "binutils-common",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "002da5d23f8757dee97a2c0a40e0e1d4d85a43da094488ee2ee7068d4d3691f9"
     },
     {
       "package": "binutils-x86-64-linux-gnu",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "e6741ce95ff0f7a131c8d9faa3528ccbbc453078bbc62a97da81340ed7462c53"
     },
     {
       "package": "cpp",
       "architecture": "amd64",
-      "version": "4:14.2.0-1"
+      "version": "4:14.2.0-1",
+      "sha256": "a6ba40550aadec80437813e0fce5516574945ff40e72306a5b378c03af3a6544"
     },
     {
       "package": "cpp-14",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "3bae5fe03c56c6d021900ab4fb79e35c6f75eee72a73fccc6f28a39db559d6a0"
     },
     {
       "package": "cpp-14-x86-64-linux-gnu",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "ef274b5379f5f97fc71619d39ecc84d039d3e184570d207b909c90afaa5d79e0"
     },
     {
       "package": "cpp-x86-64-linux-gnu",
       "architecture": "amd64",
-      "version": "4:14.2.0-1"
+      "version": "4:14.2.0-1",
+      "sha256": "d902f484e38bce59e82efc0df2fe20139a0932ca759ecafdfe6e5b6c72238eb8"
     },
     {
       "package": "gcc",
       "architecture": "amd64",
-      "version": "4:14.2.0-1"
+      "version": "4:14.2.0-1",
+      "sha256": "eee65c41a441c57c05f754ced1b9d093956966a1c7da9938c3ec00d3dc2f905d"
     },
     {
       "package": "gcc-14",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "21500408b5019d8d29f70ce58488e2eea469a1adb4b5fd7db45e819b5efcac4e"
     },
     {
       "package": "gcc-14-x86-64-linux-gnu",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "a17ef039f1ba482051c3efb5c2c24070002e60dd0bd09fd456ec31481a11b725"
     },
     {
       "package": "gcc-x86-64-linux-gnu",
       "architecture": "amd64",
-      "version": "4:14.2.0-1"
+      "version": "4:14.2.0-1",
+      "sha256": "04c28c2760b0094b3d7758154ac095303dd00599b63ebad4086a325b607308b7"
     },
     {
       "package": "libasan8",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "771899ade7310fe31aa538a509354c33d62bbe4e408b4e5fc1e513988dc42645"
     },
     {
       "package": "libatomic1",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "212b399aae2f7299203d261a57e49372e09565a9a5ea971905f94a3960366c05"
     },
     {
       "package": "libbinutils",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "4f4664c8a8f0ad0c8631c39fab02e3d8d86ccc6f4436a1d59f059dbcb0492679"
     },
     {
       "package": "libc-dev-bin",
       "architecture": "amd64",
-      "version": "2.41-12+deb13u5"
+      "version": "2.41-12+deb13u5",
+      "sha256": "9546268f031bd598f32262ea3ca8f2558cd41dcaada13dd1af9ad329c3dbf30c"
     },
     {
       "package": "libc6-dev",
       "architecture": "amd64",
-      "version": "2.41-12+deb13u5"
+      "version": "2.41-12+deb13u5",
+      "sha256": "858f4d477cc39324f3c6582cdebcf38928fb385bb17b40518c77a7dccd296428"
     },
     {
       "package": "libcc1-0",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "2d587e3bfba4aec701946b7ba0c1640b97b6d8dd0a34ba1c70ae85261ecedefa"
     },
     {
       "package": "libcrypt-dev",
       "architecture": "amd64",
-      "version": "1:4.4.38-1"
+      "version": "1:4.4.38-1",
+      "sha256": "98e2333aea8d64ca68f9b75c16256d3a05492fd8f9e6dba96adbc6f19e4f5a09"
     },
     {
       "package": "libctf-nobfd0",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "e280b2be3db6e584500e865c251605b95c346767d87ccb2524e44992048fc657"
     },
     {
       "package": "libctf0",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "120cafcd93132a276fa92a8fb4cf39b23d14e5a3e348f4f5580638d71ca95ac5"
     },
     {
       "package": "libgcc-14-dev",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "ca6f2d36d96b19b3eb71405b0b80134d8c89380b02204a2512e5c58ceb090628"
     },
     {
       "package": "libgomp1",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "72b7a1a33c48f3195efeb044111b34ae684b1e640bb6495c832443b798601cd5"
     },
     {
       "package": "libgprofng0",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "0d36d0bde85c467ac6735dded08e19dd30ae1369e3908b9eb48ccc0d6ff66648"
     },
     {
       "package": "libhwasan0",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "2cdaf797cad8ac30a964ab081370682dd065ae1b0305a0be9d8e0e14cd0657d7"
     },
     {
       "package": "libisl23",
       "architecture": "amd64",
-      "version": "0.27-1"
+      "version": "0.27-1",
+      "sha256": "ac8518042e81c00de1effb72bba7e88ac4ecd488f7ea8b9e3ebc63159cb53b35"
     },
     {
       "package": "libitm1",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "febdb3c528cde1a3abe952e17a1d3cfa7ccaca5b6f506d983d34385dad199490"
     },
     {
       "package": "libjansson4",
       "architecture": "amd64",
-      "version": "2.14-2+b3"
+      "version": "2.14-2+b3",
+      "sha256": "60707a62fe6c1228c3389b12a13ca4efd76defc5532473e547a29e99cf7d2a6e"
     },
     {
       "package": "liblsan0",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "a0df07da76287a45e665d584363dc2a6a1c4e240aee41b8bbc0f67cdff97cd68"
     },
     {
       "package": "libmpc3",
       "architecture": "amd64",
-      "version": "1.3.1-1+b3"
+      "version": "1.3.1-1+b3",
+      "sha256": "2af0a5c128e03694a41c0b011bd8a958b7297436cdb3a15ddad7866dae8c300b"
     },
     {
       "package": "libmpfr6",
       "architecture": "amd64",
-      "version": "4.2.2-1"
+      "version": "4.2.2-1",
+      "sha256": "75dddce11dabc7fc543712c33dc27b7f2ee66a111763eb5eac654d010b42cd92"
     },
     {
       "package": "libquadmath0",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "f5b51cf0ece3ec3bb7494d0cdbff3ce715ae00cfb2b6ed787f7db91319d64a7b"
     },
     {
       "package": "libsframe1",
       "architecture": "amd64",
-      "version": "2.44-3"
+      "version": "2.44-3",
+      "sha256": "38f625dfdc582717029ac3a3e97c51d994ec2e7a0e9b230c6b44e40d1276311f"
     },
     {
       "package": "libtsan2",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "529d7f68227d16975076c5f842e8b687faea1b5df8e0dcf62e436d5402844ca5"
     },
     {
       "package": "libubsan1",
       "architecture": "amd64",
-      "version": "14.2.0-19"
+      "version": "14.2.0-19",
+      "sha256": "9205a1bef7d6a52ffc06548e0cde169ff303e688c12d9be3a98f734449077e22"
     },
     {
       "package": "linux-libc-dev",
       "architecture": "all",
-      "version": "6.12.118-1"
+      "version": "6.12.118-1",
+      "sha256": "e3616a753c42c5591778df05c98a22db3b8731e7e8611aaeed4b89e14cb5271b"
     },
     {
       "package": "make",
       "architecture": "amd64",
-      "version": "4.4.1-2"
+      "version": "4.4.1-2",
+      "sha256": "70a9709e665383b06068ccd423d62ea191b65355f318a25565dbf324b254cec6"
     },
     {
       "package": "rpcsvc-proto",
       "architecture": "amd64",
-      "version": "1.4.3-1"
+      "version": "1.4.3-1",
+      "sha256": "32ac0692694f8a34cc90c895f4fc739680fb2ef0e2d4870a68833682bf1c81a3"
     },
     {
       "package": "xz-utils",
       "architecture": "amd64",
-      "version": "5.8.1-1+deb13u2"
+      "version": "5.8.1-1+deb13u2",
+      "sha256": "66b060ef2f09722c947ba019da5e9a63f6bac9d7bf90b32339a72c0390acc53f"
     }
+  ],
+  "hash_source_run": 45591294216,
+  "hash_source_jobs": [
+    139126119164,
+    139126119045
   ]
 }
