@@ -4,6 +4,7 @@ on:
     branches:
       - feature/ghcr-private-bootstrap
       - integration/ghcr-11e16c
+      - fix/ghcr-private-bootstrap-recovery
     paths:
       - '.github/workflows/ghcr-package-bootstrap.yml'
       - '.github/workflows/ghcr-bootstrap-tests.yml'
