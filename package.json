@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "test:review": "node --test tests/review.test.cjs",
     "test:price-history": "node --test tests/price-history.test.cjs",
-    "test:strategies": "node --test tests/strategy-catalog.test.cjs tests/strategy-switching.test.cjs"
+    "test:strategies": "node --test tests/strategy-catalog.test.cjs tests/strategy-switching.test.cjs",
+    "test:db": "node --test tests/db.test.cjs",
+    "test:archive": "node --test tests/archive-storage.test.cjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -21,12 +23,14 @@
     "lightweight-charts": "5.0.9",
     "hyparquet": "1.33.1",
     "hyparquet-compressors": "1.1.2",
-    "@aws-sdk/client-s3": "^3.900.0"
+    "@aws-sdk/client-s3": "^3.900.0",
+    "pg": "^8.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "@types/pg": "^8.11.10"
   }
 }

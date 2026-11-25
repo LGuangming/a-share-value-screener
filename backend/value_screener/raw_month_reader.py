@@ -4,6 +4,7 @@ Daily sources and their manifests are retained. The monthly manifest is the
 atomic publication pointer, never a completed-year historical manifest.
 """
 from __future__ import annotations
+from .archive_storage import duckdb_connection
 from calendar import monthrange
 from datetime import date
 import hashlib
@@ -74,7 +75,7 @@ def publish_month(s3, bucket, client, through):
                 paths.append(str(path))
             target=Path(tmp)/"month.parquet"
             quoted=str(target).replace("'","''")
-            with duckdb.connect() as db:
+            with duckdb_connection() as db:
                 # Parameterize input paths via relation, not string interpolation.
                 db.read_parquet(paths).order("ts_code,trade_date").write_parquet(str(target),compression="zstd")
                 count,unique=db.execute("SELECT count(*),count(DISTINCT (ts_code,trade_date)) FROM read_parquet(?)",[str(target)]).fetchone()

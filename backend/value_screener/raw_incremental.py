@@ -17,6 +17,7 @@ from pathlib import Path
 import tempfile
 
 from .archive_paths import RAW_PREFIX
+from .archive_storage import duckdb_connection
 from .history_parquet import FIELDS as PRICE_FIELDS, valid_daily
 from .market_session import CN_TZ, MARKET_CLOSE
 from .neon_archive import StorageConfig, s3_client, preflight, verify_object
@@ -87,7 +88,7 @@ def write_parquet(dataset, values, path):
     dst=str(path).replace("'","''")
     query=(f"SELECT {', '.join(selects)} FROM read_csv_auto('{src}',header=true,all_varchar=true)"
            if values else "SELECT "+", ".join(f"CAST(NULL AS {dtype(c)}) AS {c}" for c in fields)+" WHERE FALSE")
-    with duckdb.connect() as db:
+    with duckdb_connection() as db:
         db.execute(f"COPY ({query} ORDER BY ts_code,trade_date) TO '{dst}' (FORMAT PARQUET, COMPRESSION ZSTD)")
         rows=db.execute("SELECT COUNT(*) FROM read_parquet(?)",[str(path)]).fetchone()[0]
     if rows!=len(values):
@@ -96,7 +97,7 @@ def write_parquet(dataset, values, path):
 
 def read_codes(path, expected_rows):
     import duckdb
-    with duckdb.connect() as db:
+    with duckdb_connection() as db:
         count=db.execute("SELECT COUNT(*) FROM read_parquet(?)",[str(path)]).fetchone()[0]
         codes={x[0] for x in db.execute("SELECT DISTINCT ts_code FROM read_parquet(?)",[str(path)]).fetchall()}
     if count!=expected_rows:
@@ -163,7 +164,9 @@ def archive_session(s3,bucket,client,day,minimum):
     print(f"RAW_INCREMENT_DAY date={day} datasets={len(reports)} status=verified",flush=True)
 
 
-def market_run(trigger):
+def market_run(trigger, local_trigger=None):
+    if trigger and local_trigger:
+        raise RuntimeError("Conflicting run triggers")
     import psycopg
     with psycopg.connect(os.environ["DATABASE_URL"],connect_timeout=15) as db:
         query="""SELECT trade_date, (metrics->>'quoted_stocks')::int FROM job_runs
@@ -172,6 +175,8 @@ def market_run(trigger):
         params=()
         if trigger:
             query+=" AND metrics->>'github_run_id'=%s";params=(str(trigger),)
+        if local_trigger:
+            query+=" AND metrics->>'local_run_id'=%s";params=(str(local_trigger),)
         return db.execute(query+" ORDER BY trade_date DESC, finished_at DESC LIMIT 1",params).fetchone()
 
 
@@ -190,14 +195,16 @@ def sessions(client,start,end):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument("--trigger-run-id")
+    triggers=parser.add_mutually_exclusive_group()
+    triggers.add_argument("--trigger-run-id")
+    triggers.add_argument("--trigger-local-run-id",type=lambda v:str(__import__("uuid").UUID(v)))
     parser.add_argument("--backfill-2026", action="store_true", help="Backfill completed 2026 sessions, newest month first")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     args=parser.parse_args()
     now=datetime.now(CN_TZ)
     bound=now.date()-timedelta(days=int((now.hour,now.minute)<MARKET_CLOSE))
-    if args.backfill_2026 and (args.start_date or args.end_date or args.trigger_run_id):
+    if args.backfill_2026 and (args.start_date or args.end_date or args.trigger_run_id or args.trigger_local_run_id):
         parser.error("Backfill cannot be combined with date range or trigger")
     if args.backfill_2026:
         latest=market_run(None)
@@ -206,7 +213,7 @@ def main():
         start,end=date(2026,1,1),latest[0]
         minimum=5000
     elif args.start_date or args.end_date:
-        if not args.start_date or not args.end_date or args.trigger_run_id:
+        if not args.start_date or not args.end_date or args.trigger_run_id or args.trigger_local_run_id:
             parser.error("Supply both range dates, or a successful trigger run")
         start,end=date.fromisoformat(args.start_date),date.fromisoformat(args.end_date)
         if not date(2026,1,1)<=start<=end<=bound or (end-start).days>30:
@@ -217,7 +224,7 @@ def main():
                 raise RuntimeError("Today's market refresh not yet successful")
         minimum=5000
     else:
-        result=market_run(args.trigger_run_id)
+        result=market_run(args.trigger_run_id,args.trigger_local_run_id)
         if not result:
             print("RAW_INCREMENT_SKIP no_successful_market_refresh",flush=True)
             return

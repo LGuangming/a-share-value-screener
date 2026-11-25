@@ -1,25 +1,7 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
+import { connection } from "./db";
 import { unstable_cache } from "next/cache";
 import {companyMarket,companyReport,type CompanyOverview} from "./company-research";
-
-// Vercel Function read-only queries use HTTPS to Neon's SQL endpoint.
-// The previous postgres.js TCP path was repeatedly failing with CONNECT_TIMEOUT
-// on port 5432. No persistent serverless TCP pool is needed with neon().
-// Never fall back to DATABASE_URL: only the restricted reader credential is used.
-function makeReader(url: string) {
-  // Explicit response mode narrows Neon's generic type to row objects, not
-  // the union of array rows and full-result metadata.
-  return neon(url, { arrayMode: false, fullResults: false });
-}
-let client: ReturnType<typeof makeReader> | null = null;
-
-function connection() {
-  const url = process.env.DATABASE_READ_URL;
-  if (!url) return null;
-  if (!client) client = makeReader(url);
-  return client;
-}
 
 export type Snapshot = {
   trade_date: string;

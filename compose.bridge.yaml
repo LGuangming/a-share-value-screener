@@ -1,0 +1,11 @@
+# Optional alternative; do not combine with loopback.
+services:
+  web:
+    networks:
+      proxy:
+        aliases:
+          - ashare-web
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:?set actual OpenResty network}

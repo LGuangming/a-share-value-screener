@@ -1,0 +1,177 @@
+name: GHCR reviewed integration test images
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ghcr-test-images.yml'
+      - '.github/workflows/ghcr-reviewed-pair.yml'
+      - 'docs/GHCR_TEST_IMAGES.md'
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Enter PUBLISH-PR28-TEST only after separate publication approval'
+        required: true
+        type: string
+permissions:
+  contents: read
+env:
+  REVIEWED_SHA: 1a87f659f6e83d9d92d8f04cba5f3891bc769507
+  REVIEWED_RUN: '45633909294'
+concurrency:
+  group: ghcr-pr28-test-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  reviewed-pair:
+    uses: ./.github/workflows/ghcr-reviewed-pair.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      confirm: ${{ inputs.confirm || '' }}
+  publish-test:
+    name: Publish previously accepted private test pair (explicit dispatch only)
+    needs: reviewed-pair
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'LGuangming/a-share-value-screener'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.REVIEWED_SHA }}
+          persist-credentials: false
+      - name: Confirm exact reviewed checkout
+        run: test "$(git rev-parse HEAD)" = "$REVIEWED_SHA"
+      - name: Download only this dispatch attempt's accepted pair
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: accepted-pair-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accepted-pair
+      - name: Revalidate artifact, both image IDs and time-limited risk policy before any push
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$CONFIRM" = PUBLISH-PR28-TEST
+          dir="$RUNNER_TEMP/accepted-pair"
+          (cd "$dir"; sha256sum --strict -c SHA256SUMS)
+          python3 - <<'PY'
+          import json,os,pathlib,re
+          p=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"accepted-pair/pair.json").read_text())
+          assert p["source"]==os.environ["REVIEWED_SHA"] and p["reviewed_run"]==os.environ["REVIEWED_RUN"]
+          assert p["run_id"]==os.environ["GITHUB_RUN_ID"] and p["attempt"]==os.environ["GITHUB_RUN_ATTEMPT"]
+          assert all(re.fullmatch(r"sha256:[0-9a-f]{64}",p[x]) for x in ("web","minimal")) and p["web"]!=p["minimal"]
+          PY
+          docker load -i "$dir/pair.tar.gz"
+          for pair in 'web ashare-web:ci' 'minimal ashare-worker:minimal-eval'; do
+            read -r kind image <<< "$pair"
+            expected="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$dir/pair.json" "$kind")"
+            test "$(docker image inspect "$image" --format '{{.Id}}')" = "$expected"
+            test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+            test "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVIEWED_SHA"
+            if [[ "$kind" == web ]]; then
+              test "$(docker image inspect "$image" --format '{{.Config.User}}')" = 10001:10010
+            else
+              test "$(docker image inspect "$image" --format '{{.Config.User}}')" = 10002:10010
+            fi
+          done
+          for scan in minimal-trivy0700 minimal-trivy0762 web-trivy0762; do
+            case "$scan" in minimal-*) kind=minimal; image=ashare-worker:minimal-eval ;; web-*) kind=web; image=ashare-web:ci ;; *) exit 1 ;; esac
+            python3 tests/candidate_vulnerability_gate.py --candidate "$kind" --image-id "$(docker image inspect "$image" --format '{{.Id}}')" --report "$dir/$scan-vuln.json" --decision "$RUNNER_TEMP/$scan-publish-decision.json"
+          done
+          echo "PASS: both exact images and all three risk decisions revalidated"
+      - name: Require both dedicated packages already confirmed private before any push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for kind in web worker; do
+            package="a-share-value-screener-$kind-test-pr28"
+            visibility="$(gh api "users/lguangming/packages/container/$package" --jq .visibility)" || { echo "BLOCK: package visibility unavailable; obtain separate private-package setup approval"; exit 1; }
+            test "$visibility" = private || { echo "BLOCK: package is not private"; exit 1; }
+          done
+      - name: Push accepted pair and independently verify both immutable digests
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/accepted-pair"
+          receipt="$RUNNER_TEMP/published-pair"
+          mkdir -p "$receipt"
+          auth="$(mktemp -d)"
+          anon="$(mktemp -d)"
+          log="$(mktemp)"
+          cleanup() {
+            DOCKER_CONFIG="$auth" docker logout ghcr.io >/dev/null 2>&1 || true
+            rm -rf -- "$auth" "$anon" "$log"
+          }
+          trap cleanup EXIT
+          chmod 700 "$auth" "$anon"
+          printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$auth" docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          unset GHCR_TOKEN
+          tag="test-pr28-$REVIEWED_SHA-run-$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+          # Never overwrite an existing run-specific tag; inconclusive checks block.
+          for kind in web worker; do
+            remote="ghcr.io/lguangming/a-share-value-screener-$kind-test-pr28:$tag"
+            if DOCKER_CONFIG="$auth" docker manifest inspect "$remote" >"$log" 2>&1; then
+              echo "BLOCK: run-specific tag already exists"; exit 1
+            fi
+            grep -Eiq 'manifest unknown|no such manifest|manifest_unknown' "$log" || { echo "BLOCK: tag existence check inconclusive"; exit 1; }
+          done
+          for kind in web worker; do
+            if [[ "$kind" == web ]]; then image=ashare-web:ci; else image=ashare-worker:minimal-eval; fi
+            package="ghcr.io/lguangming/a-share-value-screener-$kind-test-pr28"
+            remote="$package:$tag"
+            docker tag "$image" "$remote"
+            DOCKER_CONFIG="$auth" docker push "$remote" | tee "$log"
+            digest="$(sed -nE 's/.*digest: (sha256:[a-f0-9]{64}) size:.*/\1/p' "$log" | tail -1)"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            pin="$package@$digest"
+            actual="$(DOCKER_CONFIG="$auth" docker buildx imagetools inspect "$remote" | awk '/^Digest:/ {print $2; exit}')"
+            test "$actual" = "$digest"
+            DOCKER_CONFIG="$auth" docker pull --platform linux/amd64 "$pin"
+            expected="$(docker image inspect "$image" --format '{{.Id}}')"
+            test "$(docker image inspect "$pin" --format '{{.Id}}')" = "$expected"
+            test "$(docker image inspect "$pin" --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+            test "$(docker image inspect "$pin" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$REVIEWED_SHA"
+            if DOCKER_CONFIG="$anon" docker manifest inspect "$pin" >"$log" 2>&1; then
+              echo "BLOCK: package accessible anonymously"; exit 1
+            fi
+            grep -Eiq 'unauthorized|denied|authentication required' "$log" || { echo "BLOCK: anonymous access check inconclusive"; exit 1; }
+            printf '%s\n%s\n%s\n' "$remote" "$pin" "$expected" > "$receipt/$kind.txt"
+          done
+      - name: Recheck package privacy and issue complete pair receipt only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/published-pair"
+          for kind in web worker; do
+            test "$(gh api "users/lguangming/packages/container/a-share-value-screener-$kind-test-pr28" --jq .visibility)" = private
+          done
+          python3 - <<'PY'
+          import json,os,pathlib,re
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])
+          receipt=root/"published-pair"
+          accepted=json.loads((root/"accepted-pair/pair.json").read_text())
+          out={"source":os.environ["REVIEWED_SHA"],"reviewed_run":os.environ["REVIEWED_RUN"],"run_id":os.environ["GITHUB_RUN_ID"],"attempt":os.environ["GITHUB_RUN_ATTEMPT"],"images":{}}
+          for kind,k in (("web","web"),("worker","minimal")):
+              tag,pin,image_id=(receipt/(kind+".txt")).read_text().splitlines()
+              assert image_id==accepted[k]
+              assert re.fullmatch(r"ghcr\.io/lguangming/a-share-value-screener-"+kind+r"-test-pr28@sha256:[0-9a-f]{64}",pin)
+              out["images"][kind]={"tag":tag,"pin":pin,"config_id":image_id,"platform":"linux/amd64","private":True}
+          (receipt/"pair-release.json").write_text(json.dumps(out,indent=2)+"\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as f:
+              f.write("## Complete verified private test pair (not deployment approval)\n")
+              for k,v in out["images"].items(): f.write("- "+k+": `"+v["pin"]+"`\n")
+          print("PASS: complete pair receipt; no deployment")
+          PY
+      - name: Preserve complete pair release receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: published-pair-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/published-pair/pair-release.json
+          retention-days: 14
+          if-no-files-found: error

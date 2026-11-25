@@ -20,3 +20,8 @@ venv/
 artifacts/
 *.parquet
 *.tmp.csv
+
+# VPS private runtime settings and data (never commit)
+/deploy/web.env
+/deploy/worker.env
+/config/

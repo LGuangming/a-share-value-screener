@@ -5,6 +5,7 @@ later be uploaded to a private S3-compatible object bucket. Without storage
 credentials the GitHub artifact is TEMPORARY and must not be treated as archival.
 """
 from __future__ import annotations
+from .archive_storage import duckdb_connection
 
 import argparse
 import csv
@@ -68,7 +69,7 @@ def export_year(client: TushareClient, year: int, root: Path,
     days = sessions_for_year(client, year)
     base = root / "daily_prices" / f"year={year}"
     base.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
+    con = duckdb_connection()
     manifest = {
         "format_version": 1, "source": "Tushare official daily OHLCV",
         "adjustment": "unadjusted", "dataset": "a_share_daily",

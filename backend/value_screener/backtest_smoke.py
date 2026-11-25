@@ -5,6 +5,7 @@ corporate actions and point-in-time financial reports. We only verify that
 the event-driven engine can consume a genuine Parquet dataset consistently.
 """
 from __future__ import annotations
+from .archive_storage import duckdb_connection
 import argparse
 from datetime import date
 from pathlib import Path
@@ -21,7 +22,7 @@ def smoke(root: Path) -> dict:
     if not manifest.get("partition_files") or manifest["sessions"]<150:
         raise RuntimeError("Historical Parquet manifest is incomplete")
     all_files = [str(root / part["path"]) for part in manifest["partition_files"]]
-    db = duckdb.connect()
+    db = duckdb_connection()
     rows = db.execute("""
         SELECT ts_code,trade_date,open,high,low,close,vol
         FROM read_parquet(?)
@@ -56,5 +57,17 @@ def smoke(root: Path) -> dict:
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--root",default="artifacts/history-2025")
+    parser.add_argument("--archive-year",type=int,help="Verify and restore completed archive for engineering smoke")
     args=parser.parse_args()
-    smoke(Path(args.root))
+    if args.archive_year is None:
+        smoke(Path(args.root))
+    else:
+        import tempfile
+        from .neon_archive import StorageConfig,s3_client,verify_archive
+        cfg=StorageConfig.from_environment(); client=s3_client(cfg)
+        try:
+            with tempfile.TemporaryDirectory(prefix="backtest-verified-") as tmp:
+                verify_archive(client,cfg.bucket,args.archive_year,Path(tmp))
+                smoke(Path(tmp))
+        finally:
+            client.close()

@@ -1,0 +1,80 @@
+# Production application only; PostgreSQL and OpenResty are managed by 1Panel.
+# WORKER_IMAGE must be the reviewed default Minimal runner image; entrypoint
+# comes from that immutable image. Never use a comparison image for deployment.
+name: ashare
+x-runtime: &runtime
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  web:
+    <<: *runtime
+    image: ${WEB_IMAGE:?set WEB_IMAGE to a reviewed image tag or digest}
+    restart: unless-stopped
+    user: "10001:10010"
+    env_file:
+      - ${WEB_ENV_FILE:-../config/web.env}
+    environment:
+      DATABASE_DRIVER: postgres
+      ARCHIVE_STORAGE_DRIVER: local
+      ARCHIVE_LOCAL_ROOT: /data/archive
+    expose:
+      - "3000"
+    volumes:
+      - type: bind
+        source: ${ARCHIVE_DIR:-../archive}
+        target: /data/archive
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WEB_CACHE_DIR:-../cache/nextjs}
+        target: /app/.next/cache
+        bind:
+          create_host_path: false
+    mem_limit: 768m
+    cpus: 1.5
+    networks:
+      database:
+  worker:
+    <<: *runtime
+    image: ${WORKER_IMAGE:?set WORKER_IMAGE to a reviewed image tag or digest}
+    profiles: ["worker"]
+    restart: "no"
+    user: "10002:10010"
+    env_file:
+      - ${WORKER_ENV_FILE:-../config/worker.env}
+    environment:
+      ARCHIVE_STORAGE_DRIVER: local
+      ARCHIVE_LOCAL_ROOT: /data/archive
+      TMPDIR: /data/tmp
+      DUCKDB_TEMP_DIRECTORY: /data/tmp/duckdb
+    volumes:
+      - type: bind
+        source: ${ARCHIVE_DIR:-../archive}
+        target: /data/archive
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${WORKER_TMP_DIR:-../tmp}
+        target: /data/tmp
+        bind:
+          create_host_path: false
+    mem_limit: 1024m
+    cpus: 2.0
+    networks:
+      database:
+      worker_egress:
+networks:
+  database:
+    external: true
+    name: ${DATABASE_NETWORK:?set actual 1Panel database network}
+  worker_egress:
+    driver: bridge

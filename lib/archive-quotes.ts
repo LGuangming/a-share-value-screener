@@ -1,26 +1,12 @@
 import "server-only";
 import { createHash } from "node:crypto";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import {storage,requiredObject,archiveCache,ArchiveUnavailable} from "./archive-storage";
+export {ArchiveUnavailable} from "./archive-storage";
 import { parquetReadObjects } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
-import { unstable_cache } from "next/cache";
 import { completeBar, recentWindow, recentMonthRange, RECENT_SESSIONS, type MarketBar, type Factor } from "./market-bars";
 
 import { RAW_PREFIX as PREFIX } from "./archive-paths";
-export class ArchiveUnavailable extends Error {}
-export function storage(){
-  const endpoint=process.env.NEON_STORAGE_ENDPOINT;
-  const bucket=process.env.NEON_STORAGE_BUCKET;
-  const accessKeyId=process.env.NEON_STORAGE_READ_ACCESS_KEY_ID;
-  const secretAccessKey=process.env.NEON_STORAGE_READ_SECRET_ACCESS_KEY;
-  if(!endpoint||!bucket||!accessKeyId||!secretAccessKey||process.env.NEON_STORAGE_PRIVATE_CONFIRMED!=="true")
-    throw new ArchiveUnavailable("历史行情读取尚未配置");
-  const url=new URL(endpoint);
-  const match=/^br-[a-z0-9-]+\.storage\.c-\d+\.([a-z0-9-]+)\.aws\.neon\.tech$/.exec(url.hostname);
-  if(url.protocol!=="https:"||!match||url.port||url.username||url.password||url.search||url.hash||url.pathname!=="/"||!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket))
-    throw new ArchiveUnavailable("历史行情读取配置无效");
-  return {bucket,client:new S3Client({endpoint,region:process.env.NEON_STORAGE_REGION||match[1],forcePathStyle:true,credentials:{accessKeyId,secretAccessKey},maxAttempts:2})};
-}
 function isoDay(value:unknown):string {
   if(value instanceof Date)return value.toISOString().slice(0,10);
   if(typeof value==="number"&&Number.isInteger(value)&&value>10000&&value<30000)return new Date(value*86400000).toISOString().slice(0,10);
@@ -34,14 +20,8 @@ function number(value:unknown):number {
 type Part={path:string;month:string;bytes:number;sha256:string;rows:number};
 async function queryYear(code:string,year:number,selectedMonths?:string[],sessionDates?:Set<string>):Promise<MarketBar[]>{
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2020||year>2025)throw new Error("Invalid query");
-  const {bucket,client}=storage();
-  async function get(key:string,max:number){
-    const result=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(15000)});
-    if(!result.Body||!result.ContentLength||result.ContentLength>max)throw new Error("Invalid archive object size");
-    const bytes=await result.Body.transformToByteArray();
-    if(bytes.byteLength!==result.ContentLength)throw new Error("Truncated archive object");
-    return bytes;
-  }
+  const s=storage();
+  const get=(key:string,max:number)=>requiredObject(s,key,max,15000);
   try {
     const raw=await get(PREFIX+"/daily_prices/year="+year+"/manifest.json",128*1024);
     const doc=JSON.parse(new TextDecoder().decode(raw));
@@ -74,21 +54,15 @@ async function queryYear(code:string,year:number,selectedMonths?:string[],sessio
     bars.sort((a,b)=>a.day.localeCompare(b.day));
     if(new Set(bars.map(b=>b.day)).size!==bars.length)throw new Error("Duplicate archived day");
     return bars;
-  } finally {client.destroy();}
+  } finally {s.close();}
 }
-export const archivedQuotes=unstable_cache((code:string,year:number)=>queryYear(code,year),["market-archive-raw-v1"],{revalidate:86400});
+export const archivedQuotes=archiveCache((code:string,year:number)=>queryYear(code,year),"market-archive-raw-v1",86400);
 
 async function queryFactors(code:string,year:number,selectedMonths?:string[]):Promise<Factor[]>{
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2020||year>2025)throw Error("Invalid factor query");
-  const {bucket,client}=storage();
+  const s=storage();
   const prefix=PREFIX+"/adj_factor/year="+year;
-  async function get(key:string,max:number){
-    const r=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(12000)});
-    if(!r.Body||!r.ContentLength||r.ContentLength>max)throw Error("Invalid factor object size");
-    const bytes=await r.Body.transformToByteArray();
-    if(bytes.length!==r.ContentLength)throw Error("Truncated factor object");
-    return bytes;
-  }
+  const get=(key:string,max:number)=>requiredObject(s,key,max,15000);
   try{
     const doc=JSON.parse(new TextDecoder().decode(await get(prefix+"/manifest.json",256*1024)));
     if(doc.format_version!==1||doc.dataset!=="adj_factor"||doc.year!==year||!Array.isArray(doc.months)||doc.months.length!==12)throw Error("Incomplete factor manifest");
@@ -118,9 +92,9 @@ async function queryFactors(code:string,year:number,selectedMonths?:string[]):Pr
     factors.sort((a,b)=>a.day.localeCompare(b.day));
     if(new Set(factors.map(f=>f.day)).size!==factors.length)throw Error("Duplicate adjustment day");
     return factors;
-  }finally{client.destroy();}
+  }finally{s.close();}
 }
-export const archivedFactors=unstable_cache((code:string,year:number)=>queryFactors(code,year),["market-factors-raw-v1"],{revalidate:86400});
+export const archivedFactors=archiveCache((code:string,year:number)=>queryFactors(code,year),"market-factors-raw-v1",86400);
 
 
 // 2026+ partial-year reader: read only published, content-addressed monthly
@@ -129,20 +103,13 @@ type MonthReader={format_version:number;status:string;dataset:string;year:number
 type Coverage={months:number;archivedSessions:number;missingMonths:string[];missingSessions:string[];latest:string;through:string;partial:boolean};
 async function readIncremental(code:string,year:number,dataset:"daily_prices"|"adj_factor",selectedMonths?:string[]){
   if(!/^\d{6}\.(SH|SZ|BJ)$/.test(code)||!Number.isInteger(year)||year<2026||year>new Date(Date.now()+8*3600000).getUTCFullYear())throw Error("Invalid incremental query");
-  const {bucket,client}=storage();
+  const s=storage();
   const now=new Date(Date.now()+8*3600000);
   const lastMonth=year===now.getUTCFullYear()?now.getUTCMonth()+1:12;
   const months=selectedMonths??Array.from({length:lastMonth},(_,i)=>String(i+1).padStart(2,"0"));
   const dayPattern=/^\d{4}-\d{2}-\d{2}$/;
   const wanted=dataset==="daily_prices"?["ts_code","trade_date","open","high","low","close","vol","amount"]:["ts_code","trade_date","adj_factor"];
-  async function get(key:string,max:number,optional=false){
-    try{
-      const r=await client.send(new GetObjectCommand({Bucket:bucket,Key:key}),{abortSignal:AbortSignal.timeout(15000)});
-      if(!r.Body||r.ContentLength===undefined||r.ContentLength<=0||r.ContentLength>max)throw Error("Invalid incremental object size");
-      const b=await r.Body.transformToByteArray();if(b.length!==r.ContentLength)throw Error("Truncated incremental object");
-      return b;
-    }catch(e){const x=e as {name?:string;$metadata?:{httpStatusCode?:number}};if(optional&&(x.name==="NoSuchKey"||x.$metadata?.httpStatusCode===404))return null;throw e;}
-  }
+  const get=async(key:string,max:number,optional=false)=>optional?await s.get(key,max,15000):await requiredObject(s,key,max,15000);
   const bars:MarketBar[]=[], factors:Factor[]=[], dates:string[]=[], missingMonths:string[]=[],missingSessions:string[]=[];
   let count=0,through="";
   try{
@@ -181,10 +148,10 @@ async function readIncremental(code:string,year:number,dataset:"daily_prices"|"a
     const latest=dates.at(-1)??"";
     const coverage:Coverage={months:count,archivedSessions:dates.length,missingMonths,missingSessions,latest,through,partial:!!(missingMonths.length||missingSessions.length)};
     return {bars,factors,coverage,dates};
-  }finally{client.destroy();}
+  }finally{s.close();}
 }
-export const incrementalQuotes=unstable_cache((code:string,year:number)=>readIncremental(code,year,"daily_prices"),["market-incremental-quotes-v1"],{revalidate:60});
-export const incrementalFactors=unstable_cache((code:string,year:number)=>readIncremental(code,year,"adj_factor"),["market-incremental-factors-v1"],{revalidate:60});
+export const incrementalQuotes=archiveCache((code:string,year:number)=>readIncremental(code,year,"daily_prices"),"market-incremental-quotes-v1",60);
+export const incrementalFactors=archiveCache((code:string,year:number)=>readIncremental(code,year,"adj_factor"),"market-incremental-factors-v1",60);
 
 
 // Read the newest verified monthly partitions first, stopping once 120 market
@@ -213,7 +180,7 @@ async function queryRecent(code:string){
     archivedSessions:window.dates.length,missingMonths,missingSessions:gaps,
     partial:window.dates.length<RECENT_SESSIONS||!!(missingMonths.length||gaps.length)}};
 }
-export const recentQuotes=unstable_cache(queryRecent,["market-recent-120-v1"],{revalidate:60});
+export const recentQuotes=archiveCache(queryRecent,"market-recent-120-v1",60);
 
 async function queryRecentFactors(code:string,from:string,to:string){
   const today=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
@@ -230,4 +197,4 @@ async function queryRecentFactors(code:string,from:string,to:string){
   if(new Set(result.map(f=>f.day)).size!==result.length)throw Error("Duplicate recent factor");
   return result;
 }
-export const recentFactors=unstable_cache(queryRecentFactors,["market-recent-factors-v1"],{revalidate:60});
+export const recentFactors=archiveCache(queryRecentFactors,"market-recent-factors-v1",60);

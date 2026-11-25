@@ -1,0 +1,10 @@
+# Host-network OpenResty: no external proxy network.
+services:
+  web:
+    ports:
+      - "127.0.0.1:${ASHARE_LOOPBACK_PORT:-3000}:3000"
+    networks:
+      web_loopback:
+networks:
+  web_loopback:
+    driver: bridge

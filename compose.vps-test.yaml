@@ -1,0 +1,41 @@
+# Requires base + loopback overlays. Compose >= 2.24.4.
+name: ashare-test
+services:
+  web:
+    env_file: !override
+      - /opt/ashare/test/config/web.env
+    entrypoint: ["/nodejs/bin/node", "/app/test-web-launch.cjs"]
+    command: []
+    volumes:
+      - type: bind
+        source: /opt/ashare/test/archive
+        target: /data/archive
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/ashare/test/cache/nextjs
+        target: /app/.next/cache
+        bind:
+          create_host_path: false
+  worker:
+    env_file: !override
+      - /opt/ashare/test/config/worker.env
+    entrypoint: ["/usr/local/bin/python3", "-m", "value_screener.test_worker_launch"]
+    command: ["--help"]
+    environment:
+      ARCHIVE_LOCAL_ALLOW_MAINTENANCE_APPLY: "false"
+    volumes:
+      - type: bind
+        source: /opt/ashare/test/archive
+        target: /data/archive
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /opt/ashare/test/tmp
+        target: /data/tmp
+        bind:
+          create_host_path: false
+networks:
+  worker_egress:
+    internal: true
