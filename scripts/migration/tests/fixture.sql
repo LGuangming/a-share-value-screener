@@ -12,3 +12,8 @@ INSERT INTO research.quotes VALUES (1,'2026-11-23',12.1234,'{"z":null,"a":[1,2]}
 INSERT INTO research.unkeyed VALUES ('重复'),('重复'),(NULL);
 INSERT INTO research.events VALUES ('2026-11-24','event');
 SELECT setval('public.stocks_id_seq',42,true);
+
+CREATE TYPE research.status AS ENUM ('open','closed');
+CREATE DOMAIN research.positive_amount AS numeric CHECK (VALUE >= 0);
+CREATE TABLE research.catalog_fixture(id integer PRIMARY KEY, status research.status, amount research.positive_amount);
+INSERT INTO research.catalog_fixture VALUES (1,'open',12);

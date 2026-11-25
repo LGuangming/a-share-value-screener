@@ -59,7 +59,7 @@ def inventory(client, expected):
             raise ValueError("file/directory collision")
     return {"captured_at":datetime.now(timezone.utc).isoformat(),"buckets":sorted(discovered),"objects":objects,"total_bytes":sum(x["size"] for x in objects),"prefixes":prefixes}
 
-def sync(client, manifest, root):
+def sync(client, manifest, root, previous=None):
     root=Path(root)
     data=root/"files"
     data.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -67,6 +67,7 @@ def sync(client, manifest, root):
         raise ValueError("symlink root")
     statefile=root/"checkpoint.json"
     state=load(statefile) if statefile.exists() else {}
+    prior=load(Path(previous)/"checkpoint.json") if previous else {}
     for obj in manifest["objects"]:
         bucket,key=obj["bucket"],obj["key"]
         ident=bucket+"/"+key
@@ -76,6 +77,24 @@ def sync(client, manifest, root):
             if old and old["object"]==obj and path.is_file() and path.stat().st_size==obj["size"] and digest(path)==old["sha256"]:
                 continue
             raise ValueError("existing file is unverified or changed; use new generation")
+        if previous and prior.get(ident,{}).get("object")==obj:
+            src=safe_path(Path(previous)/"files",bucket,key)
+            expected=prior[ident]["sha256"]
+            if not src.is_file() or src.stat().st_size!=obj["size"] or digest(src)!=expected:
+                raise ValueError("previous generation corrupt")
+            path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+            fd,temp=tempfile.mkstemp(prefix=".reuse-",dir=path.parent)
+            os.close(fd)
+            try:
+                shutil.copyfile(src,temp)
+                if digest(temp)!=expected:
+                    raise ValueError("copy integrity mismatch")
+                state[ident]={"object":obj,"sha256":expected}
+                write_json(statefile,state)
+                os.link(temp,path)
+            finally:
+                Path(temp).unlink(missing_ok=True)
+            continue
         if shutil.disk_usage(data).free < obj["size"] + 64*1024*1024:
             raise OSError("insufficient disk")
         path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -138,6 +157,7 @@ def main():
     p.add_argument("--root",required=True)
     p.add_argument("--bucket",action="append",default=[])
     p.add_argument("--approved-live-read",action="store_true")
+    p.add_argument("--previous-generation")
     a=p.parse_args()
     root=Path(a.root)
     if a.action=="verify":
@@ -149,6 +169,9 @@ def main():
         if not endpoint.startswith("https://"):
             raise ValueError("TLS endpoint required")
         client=boto3.client("s3",endpoint_url=endpoint,region_name=os.environ["NEON_STORAGE_REGION"],aws_access_key_id=os.environ["NEON_STORAGE_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["NEON_STORAGE_SECRET_ACCESS_KEY"],config=Config(retries={"mode":"standard","max_attempts":5},connect_timeout=10,read_timeout=60,s3={"addressing_style":"path"}))
+        if a.previous_generation and Path(a.previous_generation).resolve()==root.resolve():
+            raise ValueError("previous generation must differ")
+        (root/"verify-storage.json").unlink(missing_ok=True)
         manifest=inventory(client,a.bucket)
         old=root/"inventory-storage.json"
         if old.exists():
@@ -160,9 +183,10 @@ def main():
                 raise ValueError("source changed or removed; new generation required")
         write_json(old,manifest)
         if a.action=="sync":
-            sync(client,manifest,root)
+            sync(client,manifest,root,a.previous_generation)
             final=inventory(client,a.bucket)
             if final["objects"]!=manifest["objects"]:
+                (root/"verify-storage.json").unlink(missing_ok=True)
                 raise ValueError("source listing changed during download; repeat")
     print("storage evidence saved locally")
 

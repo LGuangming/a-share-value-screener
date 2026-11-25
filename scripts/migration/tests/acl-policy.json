@@ -1,0 +1,32 @@
+{
+  "read_tables": [
+    [
+      "public",
+      "stocks"
+    ],
+    [
+      "research",
+      "quotes"
+    ],
+    [
+      "research",
+      "latest"
+    ]
+  ],
+  "write_tables": [
+    [
+      "public",
+      "stocks"
+    ],
+    [
+      "research",
+      "quotes"
+    ]
+  ],
+  "write_sequences": [
+    [
+      "public",
+      "stocks_id_seq"
+    ]
+  ]
+}

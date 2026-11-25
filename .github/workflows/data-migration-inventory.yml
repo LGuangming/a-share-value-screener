@@ -23,8 +23,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install 'psycopg[binary]>=3.2,<4' 'boto3>=1.40,<2' 'moto[s3]>=5,<6'
-      - run: PYTHONPATH=scripts/migration python -m unittest discover -s scripts/migration/tests -v
+      - run: python -m pip install 'psycopg[binary]>=3.2,<4' 'boto3>=1.40,<2' 'moto[s3]>=5,<6' 'pyarrow>=19,<25' 'duckdb>=1.2,<2'
+      - run: PYTHONPATH=scripts/migration /usr/bin/time -v python -m unittest discover -s scripts/migration/tests -v
       - run: bash -n scripts/migration/inventory_vps.sh
   postgres-restore:
     runs-on: ubuntu-24.04
@@ -81,11 +81,46 @@ jobs:
           trap 'rm -f "$PGPASSFILE"' EXIT
           export PGPORT=55431 PGDATABASE=ashare_source
           psql -v ON_ERROR_STOP=1 -f scripts/migration/tests/fixture.sql
-          python scripts/migration/postgres.py backup --root "$RUNNER_TEMP/evidence"
+          /usr/bin/time -v python scripts/migration/postgres.py backup --root "$RUNNER_TEMP/evidence"
+          du -sb "$RUNNER_TEMP/evidence"
+          cp -a "$RUNNER_TEMP/evidence" "$RUNNER_TEMP/recovery-copy"
           export PGPORT=55432 PGDATABASE=ashare_migration
-          python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/evidence" --approved-isolated-restore
-          python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/evidence"
+          /usr/bin/time -v python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/evidence" --approved-isolated-restore
+          /usr/bin/time -v python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/evidence"
           if python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/evidence" --approved-isolated-restore; then exit 1; fi
           psql -v ON_ERROR_STOP=1 -c "UPDATE research.quotes SET close=99 WHERE stock_id=1"
           if python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/evidence"; then exit 1; fi
           echo 'PASS: restore guard and tamper detection'
+
+          # Fixture target only: roles and database are disposable service-container data.
+          psql -v ON_ERROR_STOP=1 -c "CREATE ROLE screener_reader LOGIN CONNECTION LIMIT 8 PASSWORD 'fixture-only-password'; CREATE ROLE screener_writer LOGIN CONNECTION LIMIT 8 PASSWORD 'fixture-only-password';"
+          python scripts/migration/permissions.py apply --policy scripts/migration/tests/acl-policy.json --root "$RUNNER_TEMP/evidence" --approved-isolated-acl
+          python scripts/migration/permissions.py verify --policy scripts/migration/tests/acl-policy.json --root "$RUNNER_TEMP/evidence"
+          printf '127.0.0.1:55432:ashare_migration:screener_reader:fixture-only-password\n127.0.0.1:55432:ashare_migration:screener_writer:fixture-only-password\n' >> "$PGPASSFILE"
+          PGUSER=screener_reader psql -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.stocks;"
+          PGUSER=screener_writer psql -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.stocks;"
+          if PGUSER=screener_reader psql -v ON_ERROR_STOP=1 -c "SELECT nextval('public.stocks_id_seq')"; then exit 1; fi
+          PGUSER=screener_writer psql -v ON_ERROR_STOP=1 -c "SELECT nextval('public.stocks_id_seq')"
+          psql -v ON_ERROR_STOP=1 -c "SET ROLE screener_reader; SELECT count(*) FROM public.stocks;"
+          if psql -v ON_ERROR_STOP=1 -c "SET ROLE screener_reader; INSERT INTO public.stocks(id,code) VALUES (999,'denied');"; then exit 1; fi
+          if psql -v ON_ERROR_STOP=1 -c "SET ROLE screener_reader; UPDATE research.quotes SET close=0;"; then exit 1; fi
+          if psql -v ON_ERROR_STOP=1 -c "SET ROLE screener_reader; DELETE FROM public.stocks;"; then exit 1; fi
+          psql -v ON_ERROR_STOP=1 -c "BEGIN; SET LOCAL ROLE screener_writer; INSERT INTO public.stocks(id,code) VALUES (999,'fixture'); UPDATE public.stocks SET code='fixture2' WHERE id=999; DELETE FROM public.stocks WHERE id=999; ROLLBACK;"
+          if psql -v ON_ERROR_STOP=1 -c "SET ROLE screener_writer; CREATE TABLE public.denied(id int);"; then exit 1; fi
+          if psql -v ON_ERROR_STOP=1 -c "SET ROLE screener_writer; TRUNCATE public.stocks CASCADE;"; then exit 1; fi
+          psql -v ON_ERROR_STOP=1 -c "GRANT SELECT ON research.catalog_fixture TO screener_reader"
+          if python scripts/migration/permissions.py verify --policy scripts/migration/tests/acl-policy.json --root "$RUNNER_TEMP/evidence"; then exit 1; fi
+          echo 'PASS: least privilege, real statements and ACL drift detection'
+          # Simulate recovery from immutable secondary backup on the disposable target.
+          [[ "$PGPORT" == 55432 && "$PGDATABASE" == ashare_migration ]]
+          printf 'corrupt' >> "$RUNNER_TEMP/evidence/source.dump"
+          if python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/evidence" --approved-isolated-restore; then exit 1; fi
+          export PGDATABASE=postgres
+          printf '127.0.0.1:55432:postgres:postgres:fixture-only-password\n' >> "$PGPASSFILE"
+          psql -v ON_ERROR_STOP=1 -c 'DROP DATABASE ashare_migration'
+          psql -v ON_ERROR_STOP=1 -c 'CREATE DATABASE ashare_migration'
+          export PGDATABASE=ashare_migration
+          /usr/bin/time -v python scripts/migration/postgres.py restore --root "$RUNNER_TEMP/recovery-copy" --approved-isolated-restore
+          python scripts/migration/postgres.py verify --root "$RUNNER_TEMP/recovery-copy"
+          python scripts/migration/permissions.py apply --policy scripts/migration/tests/acl-policy.json --root "$RUNNER_TEMP/recovery-copy" --approved-isolated-acl
+          echo 'PASS: independent backup recovery and ACL reconstruction'

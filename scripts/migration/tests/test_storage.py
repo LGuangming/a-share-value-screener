@@ -79,3 +79,32 @@ class StorageTest(unittest.TestCase):
         for i in range(1001):
             self.client.put_object(Bucket="second-fixture",Key=f"page/{i:04}",Body=b"x")
         self.assertEqual(len(inventory(self.client,self.buckets)["objects"]),1003)
+
+    def test_new_generation_reuses_only_unchanged(self):
+        old=self.manifest()
+        sync(self.client,old,self.root)
+        self.client.put_object(Bucket="second-fixture",Key="elsewhere/manifest.json",Body=b"changed")
+        new=inventory(self.client,self.buckets)
+        dest=self.root/"next-generation"
+        write_json(dest/"inventory-storage.json",new)
+        with patch.object(self.client,"get_object",wraps=self.client.get_object) as get:
+            self.assertTrue(sync(self.client,new,dest,self.root)["passed"])
+            self.assertEqual(get.call_count,1)
+        self.assertEqual((self.root/"files/second-fixture/elsewhere/manifest.json").read_bytes(),b"{}")
+        self.assertEqual((dest/"files/second-fixture/elsewhere/manifest.json").read_bytes(),b"changed")
+
+    def test_stream_interruption_resumes_object(self):
+        m=self.manifest()
+        original=self.client.get_object
+        def broken(**kw):
+            response=original(**kw)
+            def chunks(chunk_size):
+                yield b"x"
+                raise OSError("interrupted stream")
+            response["Body"].iter_chunks=chunks
+            return response
+        with patch.object(self.client,"get_object",side_effect=broken):
+            with self.assertRaises(OSError):
+                sync(self.client,m,self.root)
+        self.assertFalse(list((self.root/"files").rglob(".download-*")))
+        self.assertTrue(sync(self.client,m,self.root)["passed"])

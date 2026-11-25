@@ -66,6 +66,27 @@ def inventory(c):
         "sequence_values": [],
         "tables": [],
     }
+    data["types"] = rows(c, "SELECT n.nspname,t.typname,t.typtype::text,format_type(t.typbasetype,t.typtypmod),t.typnotnull,t.typdefault FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE "+SYSTEM+" AND t.typtype IN ('d','e','r','m') ORDER BY 1,2")
+    data["enums"] = rows(c, "SELECT n.nspname,t.typname,e.enumlabel FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid JOIN pg_namespace n ON n.oid=t.typnamespace WHERE "+SYSTEM+" ORDER BY 1,2,e.enumsortorder")
+    data["rules"] = rows(c, "SELECT n.nspname,r.relname,w.rulename,pg_get_ruledef(w.oid) FROM pg_rewrite w JOIN pg_class r ON r.oid=w.ev_class JOIN pg_namespace n ON n.oid=r.relnamespace WHERE "+SYSTEM+" AND w.rulename <> '_RETURN' ORDER BY 1,2,3")
+    data["large_objects"] = rows(c, "SELECT oid FROM pg_largeobject_metadata ORDER BY 1")
+    if data["large_objects"]:
+        raise ValueError("large objects require separate approved migration strategy")
+    data["special_objects"] = {
+        "publications": rows(c,"SELECT pubname FROM pg_publication ORDER BY 1"),
+        "foreign_servers": rows(c,"SELECT srvname FROM pg_foreign_server ORDER BY 1"),
+        "event_triggers": rows(c,"SELECT evtname FROM pg_event_trigger ORDER BY 1"),
+        "custom_aggregates": rows(c,"SELECT n.nspname,p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE "+SYSTEM+" AND p.prokind='a' ORDER BY 1,2"),
+        "custom_operators": rows(c,"SELECT n.nspname,o.oprname FROM pg_operator o JOIN pg_namespace n ON n.oid=o.oprnamespace WHERE "+SYSTEM+" ORDER BY 1,2"),
+    }
+    if any(data["special_objects"].values()):
+        raise ValueError("special objects require approved catalog/TOC review")
+    data["acl_evidence"] = {"relations":data["acl_evidence"],
+        "schemas":rows(c,"SELECT nspname,pg_get_userbyid(nspowner),nspacl::text FROM pg_namespace n WHERE "+SYSTEM+" ORDER BY 1"),
+        "functions":rows(c,"SELECT n.nspname,p.proname,pg_get_function_identity_arguments(p.oid),pg_get_userbyid(p.proowner),p.proacl::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE "+SYSTEM+" ORDER BY 1,2,3"),
+        "defaults":rows(c,"SELECT pg_get_userbyid(d.defaclrole),n.nspname,d.defaclobjtype::text,d.defaclacl::text FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace ORDER BY 1,2,3"),
+        "memberships":rows(c,"SELECT pg_get_userbyid(roleid),pg_get_userbyid(member),admin_option,inherit_option,set_option FROM pg_auth_members ORDER BY 1,2"),
+        "database":rows(c,"SELECT pg_get_userbyid(datdba),datacl::text FROM pg_database WHERE datname=current_database()")}
     for schema, name, kind, *_ in data["relations"]:
         ident = sql.Identifier(schema,name)
         if kind == "S":
@@ -102,7 +123,7 @@ def backup(args):
     dest=root/"source.dump"
     meta=root/"source.json"
     temp=root/"source.dump.partial"
-    if any(p.exists() or p.is_symlink() for p in (dest,meta,temp)):
+    if any(p.exists() or p.is_symlink() for p in (dest,meta,temp,root/"source.toc")):
         raise FileExistsError("use fresh evidence directory")
     with connect(args.approved_live_source) as c:
         readonly(c)
@@ -115,7 +136,9 @@ def backup(args):
             raise ValueError("pg_dump client older than source")
         try:
             run(["pg_dump","--format=custom","--compress=3","--lock-wait-timeout=5s","--snapshot="+snapshot,"--file="+str(temp)])
-            run(["pg_restore","--list",str(temp)])
+            toc=subprocess.check_output(["pg_restore","--list",str(temp)],stderr=subprocess.DEVNULL)
+            (root/"source.toc").write_bytes(toc)
+            source["toc_sha256"]=digest(root/"source.toc")
             source["dump_sha256"]=digest(temp)
             source["dump_bytes"]=temp.stat().st_size
             os.link(temp,dest)
@@ -130,6 +153,8 @@ def restore(args):
     dump=root/"source.dump"
     if digest(dump)!=meta["dump_sha256"] or dump.stat().st_size!=meta["dump_bytes"]:
         raise ValueError("dump integrity mismatch")
+    if digest(root/"source.toc")!=meta["toc_sha256"]:
+        raise ValueError("TOC integrity mismatch")
     if not args.approved_isolated_restore:
         raise ValueError("isolated restore approval required")
     with connect(target=True) as c:
@@ -143,11 +168,12 @@ def restore(args):
     print("isolated restore complete; verify separately")
 
 def verify(args):
+    (Path(args.root)/"verify-db.json").unlink(missing_ok=True)
     source=load(Path(args.root)/"source.json")
     with connect(target=True) as c:
         readonly(c)
         target=inventory(c)
-    excluded={"database","captured_at","acl_evidence","dump_sha256","dump_bytes"}
+    excluded={"database","captured_at","acl_evidence","dump_sha256","dump_bytes","toc_sha256"}
     fields=sorted(set(source)-excluded)
     mismatches=[field for field in fields if source[field]!=json_value(target.get(field))]
     write_json(Path(args.root)/"verify-db.json",{"passed":not mismatches,"mismatches":mismatches,"source_dump_sha256":source["dump_sha256"],"target":target})

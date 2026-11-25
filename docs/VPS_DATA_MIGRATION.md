@@ -89,3 +89,32 @@ It checks file integrity and completeness only, not authenticity or technical co
 Never fabricate evidence or use fixture success as live readiness. Separate approval for
 Launch, final freeze, cutover, downgrade and deletion. Retain original source until
 rollback window/backup recovery accepted. No cleanup in this PR.
+
+
+## D01-B-2 strengthened local evidence
+- source.toc is retained and hash-bound to the dump. Additional enum/domain, rules,
+  ACL/default ACL, role membership and special-object inventory. Large objects,
+  foreign servers, event triggers, publications, custom aggregates/operators stop
+  automatic migration; full custom type/collation/tablespace/subscription review
+  remains a manual TOC gate. Not a claim of exhaustive PostgreSQL catalog support.
+- permissions.py applies an explicit table/sequence allowlist only to loopback
+  ashare_migration. Roles must already exist and meet restricted attributes.
+  Example policy is fixture-only, not production. Actual schema/roles reviewed
+  before creating production policy. Rebuild ACL after every isolated restore.
+  Checks effective table, column, schema, sequence, database and function access;
+  no arbitrary role creation, no grants on other databases. For production, test
+  real separate login credentials, RLS, role inheritance, database CONNECT outside
+  the isolated DB, and security-definer/trigger behavior independently.
+- storage.py sync --previous-generation /private/old-generation reuses only
+  unchanged objects by verified independent copy; changed objects are fetched into
+  a new generation; removed objects retained in old generation. Never pass old
+  generation as target. Object-level interruption retry, not byte-range resume.
+- archive_verify.py --root /private/archive-generation reads every Parquet batch,
+  compares DuckDB row counts, reports schema and date ranges, checks supported
+  manifest object_key/partition_files hash, size, fields and rows. Unknown manifest
+  forms and unreferenced Parquet fail closed; real catalog/pointer shapes, JSON.GZ
+  financial payload validation and dataset-specific completeness need explicit
+  review; historical revisions may intentionally overlap. Do not delete them.
+- Fixture CI records /usr/bin/time -v and evidence bytes; these are runner-side
+  measurements, not estimates of Neon billed compute or VPS throughput. CI recreates
+  only the disposable local target and restores from an independent backup copy.
