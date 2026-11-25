@@ -88,10 +88,31 @@ docker network disconnect unexpected-network "$cid"
 docker network rm unexpected-network >/dev/null
 echo 'PASS: unknown third network rejected; original two networks retained'
 direct check --approved-target-read
+# Synthetic equivalent of the independently reviewed Neon Auth schema.
+admin ashare_source <<'SQL'
+CREATE SCHEMA neon_auth;
+CREATE TABLE neon_auth.account(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.invitation(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.jwks(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.member(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.organization(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.project_config(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.session(id integer PRIMARY KEY);
+CREATE TABLE neon_auth."user"(id integer PRIMARY KEY);
+CREATE TABLE neon_auth.verification(id integer PRIMARY KEY);
+INSERT INTO neon_auth.project_config VALUES (1);
+SQL
 run ashare_source postgres scripts/migration/postgres.py backup --root "$root"
+source_sha=$(sudo sha256sum "$root/source.dump")
+expect_block SOURCE_TABLE_SCOPE direct restore --approved-target-read --approved-final-restore
+echo 'PASS: Neon Auth exclusion requires explicit scope approval'
 expect_block APPROVAL_REQUIRED direct restore --approved-target-read
-direct restore --approved-target-read --approved-final-restore
-direct verify --approved-target-read
+direct restore --approved-target-read --approved-final-restore --approved-exclude-neon-auth
+direct verify --approved-target-read --approved-exclude-neon-auth
+[[ "$(echo "SELECT count(*) FROM pg_namespace WHERE nspname='neon_auth';" | admin ashare)" == 0 ]]
+[[ "$(sudo sha256sum "$root/source.dump")" == "$source_sha" ]]
+sudo "$py" -c 'import json,sys; d=json.load(open(sys.argv[1])); s=d["restore_scope"]; assert d["passed"] and s["restored_tables"]==8 and len(s["excluded_tables"])==9 and s["excluded_rows"]==1' "$root/direct-verified.json"
+echo 'PASS: exact eight public tables restored; nine Neon Auth tables excluded; full source dump unchanged'
 [[ "$(echo 'SELECT count(*) FROM stocks;' | admin ashare)" == 1 ]]
 role_sql(){
   docker exec --user 0 --env PGPASSWORD=fixture-only-password "$cid" psql -X -w -At -h 127.0.0.1 -p 5432 -U "$1" -d ashare -v ON_ERROR_STOP=1 -c "$2"
@@ -103,8 +124,8 @@ role_sql screener_writer "BEGIN; INSERT INTO stocks(ts_code,name) VALUES('WRITE_
 if err=$(role_sql screener_writer "DELETE FROM stocks WHERE ts_code='000001.SZ'" 2>&1); then exit 1; fi
 [[ "$err" == *"permission denied for table stocks"* ]]
 echo 'PASS: actual reader SELECT, reader INSERT denied, writer INSERT and rollback, writer DELETE denied'
-direct verify --approved-target-read
-expect_block PREVIOUS_RESTORE direct restore --approved-target-read --approved-final-restore
+direct verify --approved-target-read --approved-exclude-neon-auth
+expect_block PREVIOUS_RESTORE direct restore --approved-target-read --approved-final-restore --approved-exclude-neon-auth
 [[ "$(fingerprint)" == "$before" ]]
 [[ "$(echo "SELECT count(*) FROM pg_database WHERE datname='ashare_migration';" | admin postgres)" == 0 ]]
 [[ "$(echo "SELECT count(*) FROM pg_roles WHERE rolname LIKE 'ashare_mig_%';" | admin postgres)" == 0 ]]

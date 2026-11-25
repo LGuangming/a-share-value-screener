@@ -125,17 +125,55 @@ def empty_target(doc):
     if doc["schemas"]!=[["public"]] or any(doc[k] for k in ("relations","functions","types","rules","large_objects","policies","triggers")) or any(doc["special_objects"].values()) or any(e[0]!="plpgsql" for e in doc["extensions"]):
         raise DirectError("TARGET_NOT_EMPTY")
 
-def source_evidence(root):
+NEON_AUTH_TABLES={"account","invitation","jwks","member","organization","project_config","session","user","verification"}
+SCHEMA_FIELDS=("relations","columns","indexes","constraints","views","functions","sequences","triggers","policies","rls","types","enums","rules","sequence_values")
+
+
+def approved_source_scope(src,exclude_neon_auth=False):
+    """Keep the complete snapshot untouched; project only the approved public scope."""
+    has_auth=src["schemas"]==[["neon_auth"],["public"]]
+    if src["schemas"]!=[["public"]] and not (has_auth and exclude_neon_auth):
+        raise DirectError("SOURCE_TABLE_SCOPE")
+    expected={("public",t) for t in TABLES}
+    if has_auth:
+        expected.update(("neon_auth",t) for t in NEON_AUTH_TABLES)
+    tables=src["tables"]
+    relations=src["relations"]
+    if (len(tables)!=len(expected) or len(relations)!=len(expected) or
+        {(r["schema"],r["name"]) for r in tables}!=expected or
+        {(r[0],r[1],r[2]) for r in relations}!={(s,t,"r") for s,t in expected}):
+        raise DirectError("SOURCE_TABLE_SCOPE")
+    if (any(src[k] for k in ("functions","triggers","policies","rules","large_objects","types","views","sequences","sequence_values","enums")) or
+        any(src["special_objects"].values()) or any(e[0]!="plpgsql" for e in src["extensions"])):
+        raise DirectError("SOURCE_CUSTOM_OBJECTS")
+    excluded=[{"schema":r["schema"],"name":r["name"],"rows":r["rows"]} for r in tables if r["schema"]=="neon_auth"]
+    if has_auth and any(type(r["rows"]) is not int or r["rows"]!=(1 if r["name"]=="project_config" else 0) for r in excluded):
+        raise DirectError("NEON_AUTH_DATA_SCOPE")
+    projected=dict(src)
+    projected["schemas"]=[["public"]]
+    projected["tables"]=[r for r in tables if r["schema"]=="public"]
+    for field in SCHEMA_FIELDS:
+        if any(r[0] not in ({"public","neon_auth"} if has_auth else {"public"}) for r in src[field]):
+            raise DirectError("SOURCE_CATALOG_SCOPE")
+        public=[r for r in src[field] if r[0]=="public"]
+        # Catalog definitions use a pg_catalog search_path; reject possible
+        # cross-schema dependencies instead of dropping referenced objects.
+        if has_auth and field in ("columns","constraints","indexes") and any("neon_auth" in json.dumps(r).lower() for r in public):
+            raise DirectError("CROSS_SCHEMA_DEPENDENCY")
+        projected[field]=public
+    scope={"restored_schema":"public","restored_tables":len(projected["tables"]),
+           "restored_rows":sum(r["rows"] for r in projected["tables"]),
+           "excluded_tables":excluded,"excluded_rows":sum(r["rows"] for r in excluded)}
+    return projected,scope
+
+
+def source_evidence(root,exclude_neon_auth=False):
     src=load(root/"source.json")
     dump=root/"source.dump"
     if digest(dump)!=src["dump_sha256"] or dump.stat().st_size!=src["dump_bytes"] or digest(root/"source.toc")!=src["toc_sha256"]:
         raise DirectError("BACKUP_CHECKSUM")
-    if src["schemas"]!=[["public"]] or {(r["schema"],r["name"]) for r in src["tables"]}!={("public",t) for t in TABLES} or {(r[0],r[1],r[2]) for r in src["relations"]}!={("public",t,"r") for t in TABLES}:
-        raise DirectError("SOURCE_TABLE_SCOPE")
-    # The expected application has no custom executable objects or extensions.
-    if any(src[k] for k in ("functions","triggers","policies","rules","large_objects","types")) or any(src["special_objects"].values()) or any(e[0]!="plpgsql" for e in src["extensions"]):
-        raise DirectError("SOURCE_CUSTOM_OBJECTS")
-    return src,dump
+    projected,scope=approved_source_scope(src,exclude_neon_auth)
+    return projected,dump,scope
 
 def compare(source,target):
     excluded={"database","captured_at","acl_evidence","dump_sha256","dump_bytes","toc_sha256"}
@@ -155,6 +193,7 @@ def main():
     p.add_argument("--container-id",required=True)
     p.add_argument("--approved-target-read",action="store_true")
     p.add_argument("--approved-final-restore",action="store_true")
+    p.add_argument("--approved-exclude-neon-auth",action="store_true",help="restore only public; retain the approved nine Neon Auth tables in the full backup")
     a=p.parse_args()
     if not a.approved_target_read or (a.action=="restore" and not a.approved_final_restore):
         raise DirectError("APPROVAL_REQUIRED")
@@ -185,7 +224,8 @@ def main():
         if ident!=load(root/"direct-target.json"):
             raise DirectError("PREFLIGHT_IDENTITY")
         with step("source-checksum-and-scope"):
-            src,dump=source_evidence(root)
+            src,dump,scope=source_evidence(root,a.approved_exclude_neon_auth)
+            print("RESTORE_SCOPE:",json.dumps(scope,sort_keys=True),flush=True)
         if a.action=="restore":
             if (root/"target-before.dump").exists() or (root/"target-before.dump").is_symlink():
                 raise DirectError("PREVIOUS_RESTORE")
@@ -203,7 +243,7 @@ def main():
             with step("pre-restore-backend-binding"):
                 confirm_backend(c,a.container_id,nonce)
             with step("single-transaction-pg-restore"):
-                subprocess.run(["pg_restore","--exit-on-error","--single-transaction","--no-owner","--no-acl","--dbname=ashare",str(dump)],env=env,check=True,timeout=1800,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                subprocess.run(["pg_restore","--schema=public","--exit-on-error","--single-transaction","--no-owner","--no-acl","--dbname=ashare",str(dump)],env=env,check=True,timeout=1800,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         with step("logical-catalog-and-row-hashes"):
             target=snapshot(c)
             mismatches=compare(src,target)
@@ -221,7 +261,7 @@ def main():
         after=host_guard(a.container_id)
         if after["State"]["StartedAt"]!=before["State"]["StartedAt"] or after["RestartCount"]!=before["RestartCount"] or confirm_backend(c,a.container_id,nonce)!=ident:
             raise DirectError("FINAL_IDENTITY")
-        write_json(root/"direct-verified.json",{"passed":True,"identity":ident,"source_sha256":src["dump_sha256"],"tables":target["tables"],"acl_checks":checks})
+        write_json(root/"direct-verified.json",{"passed":True,"identity":ident,"source_sha256":src["dump_sha256"],"tables":target["tables"],"restore_scope":scope,"acl_checks":checks})
         print("PASS: full logical consistency and existing application ACL checks",checks)
 
 if __name__=="__main__":
