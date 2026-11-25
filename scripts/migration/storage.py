@@ -225,10 +225,13 @@ def main():
         write_json(old,manifest)
         if a.action=="sync":
             sync(client,manifest,root,a.previous_generation,a.workers)
-            final=inventory(client,a.bucket)
-            if final["objects"]!=manifest["objects"]:
+            try:
+                final=inventory(client,a.bucket)
+                if final["objects"]!=manifest["objects"]:
+                    raise ValueError("source listing changed during download; repeat")
+            except BaseException:
                 (root/"verify-storage.json").unlink(missing_ok=True)
-                raise ValueError("source listing changed during download; repeat")
+                raise
     print("storage evidence saved locally")
 
 if __name__=="__main__":

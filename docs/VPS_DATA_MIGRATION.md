@@ -1,317 +1,153 @@
-# VPS data migration — D01-B preparation only
+# VPS data migration — one offline full backup and restore
 
-This branch is isolated from the application PR stack. No production credentials are
-referenced by its CI; no live migration, merge, deployment, upgrade or cutover is authorized.
+**Current plan, supersedes D01-B-5D shared/independent instance proposals.**
+Use the existing ashare-postgres and its existing ashare DB. No additional
+container, database, role, HBA rule, remote dispatch command or incremental
+rehearsal is needed. Historical independent-mode tools/tests remain for
+regression evidence only; do not run their provisioning scripts. Shared-mode
+development is discontinued and its changes are removed from the active branch.
 
-## Before Launch
-1. Review the fixture CI matrix (PostgreSQL 17 and 18 sources to PostgreSQL 18 target,
-   simulated S3 with two buckets). The floating fixture image tags are not production images.
-2. Verify the real VPS locally with scripts/migration/inventory_vps.sh; record permissions,
-   filesystem/inodes, PostgreSQL versions, databases and actual sizes using a dedicated
-   local read-only account. Do not grant Docker socket or shell access to ashare-ops.
-3. Design a root-owned dispatcher with fixed no-argument commands data-inventory and
-   data-capacity, validated output limited to aggregate metrics. No arbitrary SQL,
-   shell, upload, forwarding, docker group, sudo wildcards or credentials in logs.
-   Existing ping/status remain unchanged. Implementation on VPS requires separate approval.
-4. Provision a private isolated ashare_migration database and role with ownership only
-   of that database, no superuser/CREATEDB/CREATEROLE, no production database access.
-   Restrict connections to loopback. Source account needs CONNECT, schema USAGE,
-   SELECT on all included tables/sequences; RLS must not hide rows (review owner/BYPASSRLS
-   requirements without granting broad rights by default).
-5. Prepare source direct endpoint with TLS verify-full, private PGPASSFILE (0600),
-   separate read-only S3 credentials (list all expected buckets and read objects).
-   Independently confirm bucket scope in Neon Console. If ListBuckets isn't supported,
-   stop and design an approved console/API-backed scope mechanism.
-6. Use separate private evidence directories (0700) on VPS, not the application archive;
-   run only one process per generation. Files are per bucket to prevent collisions.
-   Ensure sufficient disk for backup, restore, WAL, temp sorts, archive and rollback.
-   Never copy untrusted dumps to a privileged server or restore as superuser in production.
-7. Complete application security and deployment acceptance, real permissions test,
-   Parquet schema/rows, manifest references and DuckDB business validation. These
-   are explicit gates not yet implemented as dataset-specific validators in this PR.
-8. Record current billing, maximum compute, autosuspend, quota reset and downgrade
-   constraints. Approve the exact paid window separately; no assumption that downgrading
-   while above Free quota is possible.
+## Approval gates
 
-## Approved future paid-window commands (not executable by CI)
-Use explicit PGHOST, PGPORT, PGUSER, PGDATABASE, PGSSLMODE=verify-full and a private
-PGPASSFILE. Do not use DATABASE_URL on command lines or echo credentials.
-Run from scripts/migration with a PostgreSQL client major >= source and compatible
-with target. Direct Neon endpoint only. Example command forms, no real credentials:
+1. Before any paid window: prepare the local tools, confirm existing target
+   owner and application roles, confirm the ashare target really has no user
+   objects or client sessions, verify existing container/digest and local TCP
+   access. If any gate fails, stop. A pre-created schema with zero rows is NOT
+   an empty database for this plan; no automatic DROP/TRUNCATE/CLEAN.
+2. Separately approve Launch and the final read-only export. Freeze all Neon
+   database and object writers (scheduled and manual jobs; wait for running
+   jobs), and keep VPS target writers stopped. Confirm billing terms and
+   preserve the old read service. No production connection under the current
+   development-only approval.
+3. Use the existing postgres.py backup (standard pg_dump -Fc with exported
+   repeatable-read snapshot), and storage.py sync for all keys in the approved
+   private bucket. Compare initial/final inventory, downloaded bytes, SHA256
+   and producer manifests; no source write/delete. Keep all objects, including
+   legacy prefixes, in the backup. No incremental loop or previous generation.
+4. Review source.json and source.toc locally. direct_restore.py restore verifies
+   the exact existing container, target owner, bound TCP session, DB OID and
+   cluster ID against preflight, checks empty target and capacity, captures a
+   target-before.dump and ACL evidence, and uses pg_restore --no-owner --no-acl
+   --single-transaction --exit-on-error (never --create or --clean). It then
+   checks every supported schema definition and deterministic table row hash
+   against the dump snapshot. It applies database-local grants only to the
+   existing screener_reader and screener_writer, verifies ACLs, and writes a
+   receipt. No role creation or role changes. Source scope is the eight public
+   tables in database/neon-schema.sql; unexpected tables, executable objects,
+   extensions or schemas require review instead of silently excluding them.
+5. Archive activation, application configuration, smoke tests and cutover
+   require separate approval. Keep source backups and source services intact.
+   Downgrade only after reconciliation, stable operation and billing review.
 
-    python postgres.py inventory --root /private/evidence --approved-live-source
-    python postgres.py backup --root /private/generation --approved-live-source
+## Administrator commands (future approved execution only)
 
-Prefer backup over separate inventory: backup captures inventory and dump under the
-same exported REPEATABLE READ snapshot, so the separate inventory can be skipped
-to avoid source scans. Row count and sorted COPY digest each scan the data; for
-large tables evaluate cost and disk spill. Sequences are not MVCC; require a final
-approved writer freeze or reconciliation. No claim of cross-system atomicity.
-Logical comparison is deliberately strict; cross-version catalog/deparser/custom
-types may need explicit reviewed normalization. Foreign tables fail closed.
-Large objects, custom types/operators, aggregate functions, rules, grants/default
-privileges, tablespaces, publication/subscription and role membership require a
-separate catalog/TOC review. Restore deliberately strips ownership and ACL; rebuild
-least privilege and verify reader/write denial plus writer permitted operations before cutover.
+Use a root terminal, never paste credentials into chat, shell command arguments
+or Git. The private working directory must be fresh, owned by root and on a
+filesystem with sufficient space. Obtain this reviewed revision of
+scripts/migration and its tests/production-policy.json locally before use.
+Check pg_dump/pg_restore major >= source (18 recommended), python3-venv and
+TLS CA availability before Launch. Install missing packages only after approval.
 
-Switch environment to isolated loopback database ashare_migration, never ashare:
+```bash
+sudo -i
+set -euo pipefail
+umask 077
+# Set this to the reviewed local checkout; do not use an unreviewed branch.
+TOOLS=/root/a-share-value-screener/scripts/migration
+test -f "$TOOLS/direct_restore.py"
+test -f "$TOOLS/tests/production-policy.json"
+pg_dump --version
+pg_restore --version
+WORK=$(mktemp -d /root/ashare-full.XXXXXX)
+python3 -m venv "$WORK/venv"
+"$WORK/venv/bin/pip" install 'psycopg[binary]>=3.2,<4' 'boto3>=1.40,<2' 'pyarrow>=19,<25' 'duckdb>=1.2,<2'
+PY="$WORK/venv/bin/python"
+CID=$(docker --host unix:///var/run/docker.sock inspect --type container --format '{{.Id}}' ashare-postgres)
+echo "WORK=$WORK"
+```
 
-    python postgres.py restore --root /private/generation --approved-isolated-restore
-    python postgres.py verify --root /private/generation
+Use a root-only pgpass file with exact entries (no wildcards). This helper
+prompts without echoing passwords and escapes colon/backslash; use it for both
+source and target. Use actual existing target DB owner, not the app writer.
 
-Restore requires a new empty database. No automatic drop/clean/overwrite.
-A failed restore is not evidence of migration success. On mismatch inspect private report,
-not public CI logs. Source dump + JSON are a pair; keep authenticated off-host backups
-and a signed external hash receipt before production switch.
+```bash
+mkpass() {
+  "$PY" - "$@" <<'PYCODE'
+import getpass, os, sys
+path, host, port, db, user = sys.argv[1:]
+def esc(v): return v.replace(chr(92),chr(92)*2).replace(":",chr(92)+":")
+pw = getpass.getpass("Database password: ")
+if not pw or "\n" in pw or "\r" in pw: raise SystemExit("invalid password")
+with os.fdopen(os.open(path,os.O_CREAT|os.O_EXCL|os.O_WRONLY|os.O_NOFOLLOW,0o600),"w") as f:
+    f.write(":".join(map(esc,(host,port,db,user,pw)))+"\n")
+PYCODE
+}
+read -rp 'Existing VPS ashare owner: ' OWNER
+mkpass "$WORK/target.pgpass" 127.0.0.1 5432 ashare "$OWNER"
+target() {
+  env -i PATH="$PATH" HOME=/root LC_ALL=C PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=ashare PGUSER="$OWNER" PGPASSFILE="$WORK/target.pgpass" PGSSLMODE=disable "$PY" "$TOOLS/direct_restore.py" "$@" --root "$WORK" --container-id "$CID"
+}
+# Only AFTER separately approved local target read:
+target check --approved-target-read
+```
 
-Storage commands (credentials only from dedicated environment):
+Only AFTER source export approval, confirmed writer freeze and approved Launch:
 
-    python storage.py inventory --root /private/archive-generation --bucket APPROVED_BUCKET --approved-live-read
-    python storage.py sync --root /private/archive-generation --bucket APPROVED_BUCKET --approved-live-read
-    python storage.py verify --root /private/archive-generation
+```bash
+read -rp 'Neon direct hostname (not pooler): ' NH
+read -rp 'Neon database name: ' ND
+read -rp 'Neon source login: ' NU
+[[ "$NH" == *.neon.tech && "$NH" != *-pooler* ]]
+mkpass "$WORK/source.pgpass" "$NH" 5432 "$ND" "$NU"
+env -i PATH="$PATH" HOME=/root LC_ALL=C PGHOST="$NH" PGPORT=5432 PGDATABASE="$ND" PGUSER="$NU" PGSSLMODE=verify-full PGSSLROOTCERT=/etc/ssl/certs/ca-certificates.crt PGPASSFILE="$WORK/source.pgpass" "$PY" "$TOOLS/postgres.py" backup --root "$WORK" --approved-live-source
+sha256sum "$WORK/source.dump"
+# Read-only S3 credentials: confirm bucket is private and exact endpoint in Neon Console.
+(
+  read -rp 'Neon S3 HTTPS endpoint: ' NEON_STORAGE_ENDPOINT
+  read -rp 'Neon S3 region: ' NEON_STORAGE_REGION
+  read -rsp 'Neon S3 access key: ' NEON_STORAGE_ACCESS_KEY_ID; echo
+  read -rsp 'Neon S3 secret key: ' NEON_STORAGE_SECRET_ACCESS_KEY; echo
+  export NEON_STORAGE_ENDPOINT NEON_STORAGE_REGION NEON_STORAGE_ACCESS_KEY_ID NEON_STORAGE_SECRET_ACCESS_KEY
+  "$PY" "$TOOLS/storage.py" sync --root "$WORK/objects" --bucket a-share-backtest-private --workers 2 --approved-live-read
+)
+"$PY" "$TOOLS/storage.py" verify --root "$WORK/objects"
+"$PY" "$TOOLS/archive_verify.py" --root "$WORK/objects" --memory-limit 256MB
+# Review the private source.json/source.toc, verify-storage.json, verify-archive.json.
+# Only AFTER explicit final restore approval, still with writers stopped:
+target restore --approved-target-read --approved-final-restore
+target verify --approved-target-read
+```
 
-Repeat --bucket for all independently confirmed buckets. Full listing (no prefix restriction).
-Read-only GET with If-Match, length and available metadata SHA256; SHA256 computed from
-stream, ETag is not SHA256. Repeat skips only locally rehashed verified files. Object-level
-resume, not byte-range resume. SDK retries requests; failed streamed transfers retry on
-next invocation. Changed/deleted objects require a fresh generation and reconciliation,
-not overwrite/delete. Empty directory-marker keys fail for manual mapping review.
-Archive promotion must explicitly map each approved bucket's relative keys to the final
-archive root, retaining all other buckets separately. Final full listing and DB snapshot
-must use a common approved writer freeze/manifest watermark. Archive file hashes alone
-do not prove Parquet schema, row coverage or manifest correctness.
+Do not run these blocks now. No password or connection string needs to be
+committed. Existing target roles must already meet the app ACL requirements.
+The local TCP port may be unreachable with an internal Docker network; if
+check fails, stop and review; do not change the firewall or networking.
+The CI tests use a fixture network namespace, not evidence of real host access.
 
-## Readiness
-readiness.py accepts a local readiness.json with exactly the named gates in REQUIRED.
-Each entry is {"approved":true,"reviewer":"...","reviewed_at":"...","sha256":"..."}
-with corresponding <gate>.json containing passed:true and underlying reviewed evidence.
-It checks file integrity and completeness only, not authenticity or technical correctness.
-Never fabricate evidence or use fixture success as live readiness. Separate approval for
-Launch, final freeze, cutover, downgrade and deletion. Retain original source until
-rollback window/backup recovery accepted. No cleanup in this PR.
+## Archive activation and rollback
 
+The verified download tree is WORK/objects/files/a-share-backtest-private/
+and retains every object key. Runtime raw prefix is
+a-share-backtest/01_raw_data/. After separate activation approval, copy the
+verified raw prefix to a fresh same-filesystem staging path under
+/opt/ashare/archive, verify copied hashes, ownership and app mount contract,
+then rename to the final path only when it is absent. If the destination
+already exists, do not overwrite or merge; review it first. Keep the full
+bucket backup, including legacy keys, independent of runtime files. PR #28
+application local archive support must be accepted before cutover.
 
-## D01-B-2 strengthened local evidence
-- source.toc is retained and hash-bound to the dump. Additional enum/domain, rules,
-  ACL/default ACL, role membership and special-object inventory. Large objects,
-  foreign servers, event triggers, publications, custom aggregates/operators stop
-  automatic migration; full custom type/collation/tablespace/subscription review
-  remains a manual TOC gate. Not a claim of exhaustive PostgreSQL catalog support.
-- permissions.py applies an explicit table/sequence allowlist only to loopback
-  ashare_migration. Roles must already exist and meet restricted attributes.
-  Example policy is fixture-only, not production. Actual schema/roles reviewed
-  before creating production policy. Rebuild ACL after every isolated restore.
-  Checks effective table, column, schema, sequence, database and function access;
-  no arbitrary role creation, no grants on other databases. For production, test
-  real separate login credentials, RLS, role inheritance, database CONNECT outside
-  the isolated DB, and security-definer/trigger behavior independently.
-- storage.py sync --previous-generation /private/old-generation reuses only
-  unchanged objects by verified independent copy; changed objects are fetched into
-  a new generation; removed objects retained in old generation. Never pass old
-  generation as target. Object-level interruption retry, not byte-range resume.
-- archive_verify.py --root /private/archive-generation reads every Parquet batch,
-  compares DuckDB row counts, reports schema and date ranges, checks supported
-  manifest object_key/partition_files hash, size, fields and rows. Unknown manifest
-  forms and unreferenced Parquet fail closed; real catalog/pointer shapes, JSON.GZ
-  financial payload validation and dataset-specific completeness need explicit
-  review; historical revisions may intentionally overlap. Do not delete them.
-- Fixture CI records /usr/bin/time -v and evidence bytes; these are runner-side
-  measurements, not estimates of Neon billed compute or VPS throughput. CI recreates
-  only the disposable local target and restores from an independent backup copy.
+Restore failure rolls back the pg_restore transaction. A later comparison or
+ACL failure can leave a successfully restored database; leave it offline,
+retain both dumps and all evidence, and do not automatically retry, delete,
+truncate or drop. Reverting to the old application/source configuration is
+the first rollback after cutover (before new writes). After VPS writes begin,
+reconcile them before rollback; do not silently discard them. Never use
+--clean/--create against the existing container. Any destructive target
+reset needs separate explicit approval and verified backup.
 
-
-## D01-B-3 pressure and archive-format preparation
-CI only: actual eight-table schema with 120k/600k/1.2m synthetic quote rows plus
-compact history, financials and screening rows; measured database bytes determine
-actual tier. Both containers use postgres:18.7-alpine, 1.5 CPU, 800 MiB memory,
-192 MiB shared_buffers, 4 MiB work_mem, 30 connections and 60s idle timeout.
-Snapshot export uses a transaction-local override, bounded pg_dump subprocess.
-Serial single-transaction restore remains the only production default. Parallel
-jobs=2 benchmark is non-atomic and is used only after disposable fixture reset.
-Small tier repeats the final full snapshot after a source change; this is not
-logical replication or incremental PostgreSQL replication.
-
-Disk-backed S3-shaped load fixture: 6,000 synthetic keys and measured bytes,
-100 large Parquet files and 2,900 small ST-shaped gzip files plus manifests,
-controlled 1ms request overhead; compare 1/2/4 workers, 256/512MB DuckDB, new
-generation reuse. Worker scope capped at 2 CPU and 1 GiB. No remote HTTP
-throughput claim: Moto tests separately exercise S3 protocol client semantics.
-The checkpoint journal writes a durable receipt per object, then publishes
-atomically; interrupted transfers are retried per object. Torn journal or
-unverified file fails closed. No byte-level resume or concurrent processes.
-
-Local archive verifier checks recognized catalog receipts, nested references,
-gzip JSONL/JSON arrays, financial fields and frozen-universe coverage, disclosure
-periods, hashes, counts and known ST batch code lists. Unknown manifest forms,
-retired catalog references and unsupported binary formats remain review gates;
-actual production manifests not retrieved. The historical catalog is a receipt
-not a full current inventory. No claim of point-in-time financial certification.
-Production-schema candidate ACL uses all eight tables for read/write, DELETE
-only for screen_results and retention tables. Application DDL/bootstrap and
-reader grant compatibility must be assessed with the final worker build.
-No actual Neon/VPS permissions or resources changed.
-
-
-### D01-B-3 follow-up evidence gates
-Default CLI archive workers=2 (1/2/4 remain selectable), DuckDB 256MB and
-one thread, serial transactional database restore. Re-verification invalidates
-prior success evidence before running; a failed verification must not leave a
-stale pass receipt. Parallel interruption must resume only unfinished objects.
-Pressure CI records cgroup memory.events and fails if oom/oom_kill are nonzero,
-rather than treating container PID 1 survival as proof of no OOM. Database
-filesystem free space is sampled every second, including the disposable
-source and target, WAL and fixture files; this is an observed lower bound on
-peak consumption, not exact per-phase disk accounting. Archive evidence records
-allocated filesystem blocks across retained generations and worker cgroup peak.
-Real VPS/network performance and actual Neon inventory remain separate gates.
-
-
-## D01-B-4 isolated VPS preparation (code and GitHub-hosted fixtures only)
-
-D01-B-3 accepted on commit a2e64369: four workflows and 20 jobs successful,
-22 focused tests, no OOM/kill/group-kill in six database and four archive
-pressure jobs. 1GB test sampled whole-runner disk delta ~5.79 GiB; archived
-three fixture generations use ~3.20 GiB. The 800 MiB and 1 GiB cgroups reached
-their limits without OOM; actual shared VPS load remains untested.
-
-New standalone tools live in scripts/migration/vps. They are not installed
-on the VPS by CI. Do not use production credentials in these fixtures.
-
-- Compose project ashare-migration has one fixed container, dedicated named
-  volume and a dedicated bridge network with inter-container communication disabled;
-  host binds only 127.0.0.1:55432. Docker internal-only networks do not expose
-  the required host port on the tested runner, so this bridge is not internal.
-  This does NOT enforce outbound egress denial. Verify actual VPS host/network
-  reachability and no production network attachment before initialization; any
-  firewall/egress change requires separate approval.
-  800 MiB/1.5 CPU, no container restart policy, no application network.
-  Exact tag 18.7-alpine is the fixture version; review and pin the approved
-  image digest before actual host initialization.
-- prepare.py requires a local root operator, explicit --approved-local-prepare,
-  an already provisioned noninteractive ashare-migrate OS user, a root-owned
-  non-writable parent path, >=30 GiB free disk, and an entirely absent migration
-  root. Creates only /opt/ashare/migration; never overwrites or auto-cleans.
-  Root owns tools, compose and public summary directory; the migration OS user
-  owns private data areas and its owner pgpass. Secrets are random and distinct,
-  private on host, read-only within the isolated PostgreSQL container.
-  A partial prepare requires local administrator review, not a blind rerun.
-- db-init/10-roles.sh creates the database owner and business reader/writer as
-  non-superusers, no role/db creation, replication or bypass RLS. Bootstrap
-  postgres is only for cluster administration. Reader/writer cannot CONNECT
-  to postgres/template1. Owner initializes schema; permissions.py applies
-  candidate eight-table policy after restore. Do not give business roles
-  migration_owner credentials. Actual source special objects remain a review gate.
-- ops_dispatch.py accepts only exact no-argument data-inventory, data-capacity,
-  migration-status, migration-verify. Capacity is live from fixed local paths.
-  Other commands require root-published bounded aggregate JSON, timestamp and
-  exact schema; inventory TTL 24h, status/verification TTL 15min. Stale, future,
-  malformed or unknown reports fail closed. No subprocess, shell, Docker or SQL
-  access; no raw file names, secrets, logs or arbitrary path arguments.
-  Existing ping/status are NOT changed; later root integration may delegate
-  those four literal commands to the installed dispatcher while preserving
-  existing forced-command restrictions and host key pinning. Current main-only
-  workflow remains unchanged; no remote live validation in this PR.
-- control.py is local root-only. monitor checks container identity, volume,
-  network, binding, cgroup OOM counters, restart count, host memory/disk.
-  Stop requires --approved-isolated-stop and validates exact container identity
-  before stopping by full ID. No docker rm/down/prune, volume deletion, production
-  restart or data promotion. publish-summary accepts bounded aggregate JSON on
-  stdin, only explicit command names; root must independently review provenance.
-  A fresh summary is not a substitute for authenticated Launch approval.
-- Before actual setup: independently inspect existing users, port, path,
-  Docker resource names, disk/inodes, memory, existing production services,
-  image digest and security acceptance. Abort if any resource name already
-  exists unexpectedly or projected free disk <30 GiB / available memory <1.5 GiB.
-  No automatic production service shutdown. When separately approved, root
-  creates the noninteractive account and runs prepare; review generated files,
-  then use local Docker Compose with explicit unix socket and no pull/build.
-  Do not start while another heavy task runs. Check actual OOM event deltas,
-  system memory and disk. Rollback stops isolated container and preserves data.
-  Remove nothing without separate approval. The GitHub-hosted fixture can
-  restart its disposable container to check persistence; that is not a VPS action.
-- D01-B-4 fixture coverage: actual OS ownership and access denials, exact SSH
-  command rejection, summary expiry, isolated Compose config, role logins and
-  cross-database CONNECT denial, non-superuser schema/ACL setup, cgroup monitoring,
-  exact-ID stop, retained volume and restart persistence. Full backup restore
-  under final ownership, real production network/permissions and application
-  regression remain D01-B-5 / joint acceptance requirements.
-
-B4 runner diagnostic: /opt on hosted CI was mode 0777; the strict preparation guard correctly rejected it. The fixture normalizes only the disposable runner parent after asserting refusal. Production parent ownership checks remain unchanged. The earlier pressure script used a transient Unix socket readiness check; authenticated TCP readiness now gates actual fixture execution.
-
-
-## D01-B-5 read-only host preflight and image lock
-
-Approved D01-B-4 CI pull evidence: postgres:18.7-alpine digest sha256:0115267ab5a509022df9319c77be365cef335adb71556c75f60f5360ee247e71. Compose and production-size pressure fixtures use postgres@that digest, with Compose linux/amd64 and pull_policy never. Existing 17/18 floating-tag compatibility matrix intentionally remains unchanged. Runtime control requires the exact digest reference, verified local RepoDigests, Linux amd64 and actual container image ID matching the local pinned image. An unrelated image, mutable tag, missing digest or different platform fails closed; stop uses the same checks. No image is pulled on the VPS by this PR.
-
-Run scripts/migration/vps/preflight.sh only as local root on the VPS, after reviewing its exact commit contents. It reads host resources, path ownership, Docker metadata, local image evidence, account membership and network baseline; no SQL, downloads, container execution, filesystem creation or firewall changes. A missing image is a review gate; no pull is attempted. At least 30 GiB free on each relevant filesystem is a conservative preflight rule, 1.5 GiB MemAvailable and cgroup v2 memory controller required. Separate filesystem budgets, inode headroom, actual sudo/SSH policies and outbound network reachability remain manual review. A completed preflight is not authorization for initialization. For sudo policy locally use sudo -l -U ashare-ops and, if present, sudo -l -U ashare-migrate; do not publish secret-bearing outputs. Existing VPS remote dispatcher is unchanged.
-
-
-## D01-B-5D revised: shared instance preferred, isolated instance optional
-
-The existing ashare-postgres is the preferred target at 127.0.0.1:5432.
-Keep ashare and ashare_test unchanged. Shared mode does not create a Docker
-container, volume, network, or expose port 55432. It requires the existing
-container ID, approved image digest, internal ashare-db network and tested
-800 MiB/1.5 CPU limits. No production VPS operations are performed by CI.
-Existing isolated mode, Compose, stop tool and regression tests remain available.
-
-IMPORTANT: PostgreSQL roles are cluster-wide; revoking individual CONNECT
-cannot deny privileges granted to PUBLIC. Do not revoke PUBLIC CONNECT from
-existing databases or alter existing roles. Shared mode deliberately refuses
-initialization unless the first four parsed pg_hba.conf rules are the exact
-scoped rules printed by shared_admin.py hba-plan, the config reload has been
-observed, and real rejected-authentication probes pass for all other connectable
-databases. Only the three new names ashare_mig_owner, ashare_mig_reader and
-ashare_mig_writer are affected. This requires separately approved local admin
-review of existing HBA rules, backup and controlled reload before real init;
-there is no automatic host HBA writer in the tools. Existing rules must be
-preserved byte-for-byte below the scoped block. Never weaken or replace them.
-Denied connection attempts against protected database names (must fail before
-login) require approval in the actual environment; CI only uses synthetic DBs.
-If HBA changes/reload are not approved or the existing configuration cannot
-satisfy these constraints, use independent-container mode instead.
-
-For future approved local preparation use prepare.py --mode shared
---approved-local-prepare (new root only), retaining private migration directories
-and only dedicated credentials. No standalone Compose or stop tool is installed
-in shared mode. shared_admin.py init --container-id FULL_ID
---approved-shared-init runs only local Docker exec admin SQL against postgres
-maintenance database and new ashare_migration. It refuses existing names,
-creates NOLOGIN roles and an initially inaccessible empty DB, sets target ACL,
-verifies HBA denial, writes a root-owned cluster/database/role-OID record, then
-enables the dedicated roles. Partial initialization requires manual review;
-no automatic DROP or retry. PostgreSQL superusers and trusted root operators
-are outside this security boundary. No concurrent administrative role/DB/HBA
-changes during a migration window.
-
-To execute shared target restore/verify/ACL use ASHARE_MIGRATION_MODE=shared,
-PGHOST=127.0.0.1, PGPORT=5432, PGDATABASE=ashare_migration,
-PGUSER=ashare_mig_owner and the dedicated owner pgpass in config/client.
-Run as ashare-migrate, with reviewed scripts and dependencies. The target
-guard validates root-owned identity evidence, live system_identifier, database
-OID, role OIDs, owner, login and privileges; default isolated mode rejects
-5432. The single-transaction restore holds a live connection/advisory lock,
-does not use --create or --clean, and requires an empty target. ACL applies
-only dedicated role names. Run local shared_admin monitor before each heavy
-step: whole-instance cgroup peak/events, connection counts, host resources.
-The existing 800 MiB cap is shared, NOT an independent quota; serial heavy
-work only. No automatic shared-container stop. Approved pause only changes
-the three bound migration roles to NOLOGIN, does not kill sessions, drop DB,
-delete data, restart or stop the shared container. If sessions remain, they
-must drain; resuming needs separate review. HBA must be rechecked before
-every migration session; a later privileged HBA change is not prevented by
-the database identity check.
-
-CI uses a disposable shared container with two protected synthetic databases,
-a source fixture and migration target. It checks schema/data dumps, database
-ACL/owner/flags, existing roles/membership and container metadata before and
-after, missing HBA/role collision refusal, real restore and ACL, cross-database
-rejection, monitor and NOLOGIN pause. On Docker engines where an internal bridge
-does not publish host loopback, the fixture uses nsenter into its own network
-namespace for TCP tests. This validates PostgreSQL isolation, not actual VPS
-host TCP reachability; verify VPS 127.0.0.1:5432 reachability separately before
-approving real shared init. Do not change firewall or production network to
-make the fixture work. Actual host Docker identity, HBA review, shared
-resource headroom and real application availability remain independent gates.
-
-Shared mode installs the approved PostgreSQL restore, verification and ACL modules and policy files into the root-owned bin directory. The noninteractive account need not traverse the administrator's private checkout. CI initially detected checkout traversal denial; the correction preserves the checkout permissions rather than widening access.
+The existing historical 100MB/500MB/1GB and 6000-object tests support sizing,
+not actual source capacity. Final capacity gate is based on real source size,
+including WAL and backup headroom. Source changes after the snapshot or S3
+download invalidate the migration: keep writers frozen until cutover or
+abort, reopen old writers and take a new full backup later. No promise about
+Neon billing or actual transfer duration.

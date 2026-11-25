@@ -5,9 +5,8 @@ from psycopg import sql
 from common import load, write_json, main_guard
 from postgres import connect, SYSTEM
 
-from shared_target import shared, ROLES as SHARED_ROLES
-
-READER,WRITER=SHARED_ROLES[1:] if shared() else ("screener_reader","screener_writer")
+READER="screener_reader"
+WRITER="screener_writer"
 ROLES=(READER,WRITER)
 TABLE_PRIVS=("SELECT","INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER")
 SEQ_PRIVS=("USAGE","SELECT","UPDATE")
@@ -40,14 +39,17 @@ def policy(c, path):
             raise ValueError("policy refers to missing or unsupported object")
     return allowed
 
-def grant(c,p):
+def grant(c,p,database="ashare_migration"):
+    if database not in ("ashare_migration","ashare") or c.execute("SELECT current_database()").fetchone()[0]!=database:
+        raise ValueError("unexpected ACL target")
+    db=sql.Identifier(database)
     role_guard(c)
     # These are isolated database-local ACL changes, not cluster role mutations.
-    c.execute("REVOKE ALL ON DATABASE ashare_migration FROM PUBLIC")
+    c.execute(sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(db))
     for role in ROLES:
         ident=sql.Identifier(role)
-        c.execute(sql.SQL("REVOKE ALL ON DATABASE ashare_migration FROM {}").format(ident))
-        c.execute(sql.SQL("GRANT CONNECT ON DATABASE ashare_migration TO {}").format(ident))
+        c.execute(sql.SQL("REVOKE ALL ON DATABASE {} FROM {}").format(db,ident))
+        c.execute(sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(db,ident))
     schemas=[r[0] for r in c.execute("SELECT nspname FROM pg_namespace n WHERE "+SYSTEM).fetchall()]
     for schema in schemas:
         s=sql.Identifier(schema)
@@ -121,8 +123,6 @@ def main():
     (Path(a.root)/"verify-acl.json").unlink(missing_ok=True)
     with connect(target=True) as c:
         with c.transaction():
-            if shared():
-                c.execute("SELECT pg_advisory_xact_lock(617392001)")
             plan=policy(c,a.policy)
             if a.action=="apply":
                 grant(c,plan)
