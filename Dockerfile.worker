@@ -2,6 +2,7 @@
 # CPython 3.13 x86_64 wheels; build and runtime use Debian 13/glibc.
 # CI resolves both base digests and a wheel hash lock before building.
 ARG PYTHON_BASE=docker.io/library/python:3.13-slim-trixie@sha256:7249d5587b78209a006dc4a3b5340678f84ea729239193aa559962cd8c1fce50
+ARG MINIMAL_RUNTIME_BASE=gcr.io/distroless/cc-debian13:nonroot
 ARG WORKER_RUNTIME_BASE=gcr.io/distroless/python3-debian13:nonroot@sha256:806765f9f0863a1f36ce5f796983fed4eced9ec367e67e2f62f57f3e325c60b6
 FROM ${PYTHON_BASE} AS zstd-patch
 COPY deploy/prepare-zstd-patch.sh /prepare-zstd-patch.sh
@@ -26,6 +27,27 @@ RUN apt-get -o APT::Update::Error-Mode=any update \
     && groupadd --gid 10010 archive && useradd --uid 10002 --gid 10010 --no-create-home worker
 WORKDIR /app
 ENV PYTHONPATH=/app/backend:/opt/runtime-packages PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TZ=Asia/Shanghai HOME=/tmp TMPDIR=/data/tmp DUCKDB_TEMP_DIRECTORY=/data/tmp/duckdb
+COPY --from=deps /opt/venv/lib/python3.13/site-packages/ /opt/runtime-packages/
+COPY --from=deps --chown=10002:10010 /opt/runtime-data/ /data/
+COPY backend/value_screener /app/backend/value_screener
+COPY database /app/database
+USER 10002:10010
+ENTRYPOINT ["/usr/local/bin/python3","-m","value_screener.local_pipeline"]
+CMD ["--help"]
+
+# 11E-5 comparison: upstream CPython patch with a genuinely smaller OS base.
+# This stage is not the default or an approved deployment target.
+FROM deps AS minimal-assembly
+ARG PYTHON_BASE
+ENV PYTHON_BASE=$PYTHON_BASE
+COPY deploy/prepare-cp313-minimal.py /prepare-cp313-minimal.py
+RUN apt-get -o APT::Update::Error-Mode=any update && python /prepare-cp313-minimal.py
+
+FROM ${MINIMAL_RUNTIME_BASE} AS minimal-evaluation
+COPY --from=minimal-assembly /minimal-root/ /
+COPY --from=zstd-patch /patch/ /
+WORKDIR /app
+ENV PATH=/usr/local/bin:/usr/bin:/bin LD_LIBRARY_PATH=/usr/local/lib PYTHONPATH=/app/backend:/opt/runtime-packages PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 TZ=Asia/Shanghai HOME=/tmp TMPDIR=/data/tmp DUCKDB_TEMP_DIRECTORY=/data/tmp/duckdb
 COPY --from=deps /opt/venv/lib/python3.13/site-packages/ /opt/runtime-packages/
 COPY --from=deps --chown=10002:10010 /opt/runtime-data/ /data/
 COPY backend/value_screener /app/backend/value_screener

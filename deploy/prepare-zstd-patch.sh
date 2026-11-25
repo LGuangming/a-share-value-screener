@@ -15,6 +15,7 @@ test "$(dpkg-deb -f "$deb" Version)" = "$version"
 test "$(dpkg-deb -f "$deb" Architecture)" = amd64
 # APT validates repository signatures and the package hash. Preserve original
 # control and md5sums as specified by Distroless PACKAGE_METADATA.md.
+printf '%s  %s\n' '23a6f8a774d5dceda5f759b4ecdcdd652dfbefbf8271912e6a7ab0ee3250dc75' "$deb" | sha256sum -c -
 sha256sum "$deb"
 dpkg-deb -x "$deb" /patch
 dpkg-deb -e "$deb" /tmp/zstd-control

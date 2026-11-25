@@ -23,6 +23,7 @@
 !backend/value_screener/**
 !deploy/
 !deploy/prepare-zstd-patch.sh
+!deploy/prepare-cp313-minimal.py
 !database/
 !database/**
 # Defense in depth inside allowed paths.

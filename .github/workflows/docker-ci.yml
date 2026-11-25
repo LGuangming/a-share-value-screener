@@ -305,3 +305,99 @@ jobs:
           format: table
           exit-code: '1'
           cache: 'false'
+  minimal-worker-evaluation:
+    needs: resolve-base-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Resolve evaluation-only Distroless cc manifest
+        id: base
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=gcr.io/distroless/cc-debian13:nonroot
+          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "ref=$image@$digest" >> "$GITHUB_OUTPUT"
+          echo "$image@$digest" | tee "$RUNNER_TEMP/minimal-base.lock"
+      - name: Build CPython 3.13.18 minimal glibc comparison
+        id: minimal
+        env:
+          PYTHON_BASE: ${{ needs.resolve-base-images.outputs.python }}
+          MINIMAL_RUNTIME_BASE: ${{ steps.base.outputs.ref }}
+        run: docker build --pull --platform linux/amd64 --target minimal-evaluation --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:minimal-eval .
+      - name: Record actual runtime and test native wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect ashare-worker:minimal-eval --format '{{.Size}} {{.Config.User}}'
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint /usr/local/bin/python3 ashare-worker:minimal-eval -c '
+          import os,sys,ssl,sqlite3,duckdb,numpy,pandas,psycopg,boto3,baostock,zoneinfo,zlib,ctypes,shutil,importlib.util,importlib.metadata,json,xml.parsers.expat
+          print(sys.version,ssl.OPENSSL_VERSION,sqlite3.sqlite_version,xml.parsers.expat.EXPAT_VERSION)
+          assert sys.version_info[:3]==(3,13,18)
+          assert (os.getuid(),os.getgid())==(10002,10010)
+          assert not os.path.exists("/bin/sh")
+          assert all(shutil.which(x) is None for x in ("sh","bash","pip","pip3","apt","apt-get","dpkg"))
+          assert all(importlib.util.find_spec(x) is None for x in ("pip","setuptools","wheel","ensurepip"))
+          assert ssl.create_default_context().get_ca_certs()
+          assert sqlite3.connect(":memory:").execute("select 1").fetchone()==(1,)
+          assert duckdb.connect(":memory:").execute("select 1").fetchone()==(1,)
+          assert numpy.array([1,2]).sum()==3 and pandas.Series([1,2]).sum()==3
+          assert zlib.decompress(zlib.compress(b"fixture"))==b"fixture"
+          assert zoneinfo.ZoneInfo("Asia/Shanghai")
+          assert ctypes.CDLL("libzstd.so.1").ZSTD_versionNumber()==10507
+          assert len(list(importlib.metadata.distributions()))==15
+          print(open("/opt/cp313-provenance.json").read())
+          print("PASS: minimal glibc native runtime")
+          '
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges ashare-worker:minimal-eval --help
+      - name: Collect static reachability evidence (no exploitation)
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p eval-reports
+          git grep -nEi 'quic|http3|wrap_bio|sni_callback|HTMLParser|html\.parser|xml\.etree|xml\.parsers|tarfile|extractall|sqlite3|FTS5|nsenter|infocmp|libuuid|uuid4|urllib\.request|boto3|baostock' -- app lib backend/value_screener compose.yaml compose.vps-test.yaml compose.loopback.yaml > eval-reports/source-usage.txt || test "$?" = 1
+          cp "$RUNNER_TEMP/minimal-base.lock" eval-reports/
+      - name: Minimal comparison SBOM
+        if: always() && steps.minimal.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ashare-worker:minimal-eval
+          format: cyclonedx
+          output: eval-reports/minimal.cdx.json
+          cache: 'false'
+      - name: Minimal comparison secret gate
+        if: always() && steps.minimal.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ashare-worker:minimal-eval
+          scanners: secret
+          severity: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: Minimal comparison HIGH and CRITICAL gate
+        if: always() && steps.minimal.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: image
+          image-ref: ashare-worker:minimal-eval
+          scanners: vuln
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: 'false'
+          format: table
+          exit-code: '1'
+          cache: 'false'
+      - name: Preserve evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: minimal-cp313-evaluation
+          path: eval-reports/
+          retention-days: 14
+          if-no-files-found: error

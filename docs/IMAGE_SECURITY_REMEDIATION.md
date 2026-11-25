@@ -156,3 +156,13 @@ default target, does not run the complete Compose matrix and is
 not approved for deployment. Distroless remains the primary
 candidate. All full application and two primary DB matrices and
 strict secret/HIGH/CRITICAL scans retained. No publish or merge.
+
+## Phase 11E-5 — residual CVE triage and minimal CPython evaluation
+
+See [REMAINING_CVE_REVIEW.md](REMAINING_CVE_REVIEW.md). The 37 HIGH findings
+represent 19 CVEs; all remain open in Debian Trixie at review time.
+Preserve current primary image and its full CI. Pin the previously
+observed zstd .deb SHA256 before extraction. Add isolated CPython 3.13.18
+Distroless cc evaluation with signed full native library packages,
+actual provenance, SBOM, strict scans and native smoke tests. No merge,
+registry push, VPS, production modification or waiver.
