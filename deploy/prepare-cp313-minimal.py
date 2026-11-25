@@ -61,7 +61,7 @@ def omit(path, names):
     if path == stdlib:
         selected |= set(names) & {"site-packages", "ensurepip", "tkinter", "idlelib", "turtle.py", "turtledemo"}
     if path == stdlib / "lib-dynload":
-        selected |= {n for n in names if re.fullmatch(r"_tkinter(?:\\.[^.]+)*\\.so", n)}
+        selected |= {n for n in names if n.startswith("_tkinter.") and n.endswith(".so")}
     excluded.extend(str((path / name).relative_to(stdlib)) for name in sorted(selected) if name != "__pycache__")
     return selected
 shutil.copytree(stdlib, python_root / "lib/python3.13", symlinks=True, ignore=omit)
