@@ -36,3 +36,30 @@ test remain required after source access is restored.
 
 No change to archive storage, worker scheduling, Docker deployment or DNS is
 included in phase 05. Do not merge or deploy before explicit review.
+
+## Phase 06 — read-only archive compatibility
+
+The website defaults to ARCHIVE_STORAGE_DRIVER=neon and preserves the private
+branch-scoped HTTPS S3 endpoint and restricted reader credentials. Set
+ARCHIVE_STORAGE_DRIVER=local and ARCHIVE_LOCAL_ROOT=/data/archive to read the
+same object keys from the VPS. Bind mount /opt/ashare/archive:/data/archive:ro.
+Retain a-share-backtest/01_raw_data and every manifest, content-addressed
+snapshot, original Parquet and JSONL.GZ object; do not rewrite manifests.
+The configured root must exist, be absolute and canonical, and not be a
+symlink or the filesystem root. The archive writer must be trusted, with
+immutable parent directories and atomic publication; the web mount is read-only.
+Unknown driver values fail closed. There is no fallback to Neon.
+Missing files return null, malformed/corrupt/oversized files fail validation.
+Prefix listings support the two existing list patterns; maxKeys overflow is
+reported as truncated and rejected by the existing business readers (no silent
+partial listing). No general-purpose pagination API is exposed in this phase.
+Cache keys distinguish storage mode and root/bucket identity; existing TTLs
+are retained. No additional service or public static file route is introduced.
+
+Tests: npm run test:archive. For real Parquet tests install Python duckdb and
+set ARCHIVE_TEST_FIXTURES=1 (CI does so). Synthetic fixtures test annual and
+incremental archives, recent 120 sessions, factors, financial and ST manifests,
+corruption, and parity with a mocked S3 transport. No actual Neon requests.
+Python archive writers, inventory/export and production data verification are
+outside this phase. The actual VPS mount and full production archive must be
+verified before cutover. No merge or deployment without approval.

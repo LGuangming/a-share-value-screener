@@ -1,23 +1,13 @@
 import "server-only";
 import {createHash} from "node:crypto";
 import {gunzipSync} from "node:zlib";
-import {GetObjectCommand,ListObjectsV2Command} from "@aws-sdk/client-s3";
-import {unstable_cache} from "next/cache";
-import {storage} from "./archive-quotes";
+import {storage,archiveCache,type ArchiveStorage} from "./archive-storage";
 import {financialHistory,financialKinds,type FinancialKind,type FinancialRecord} from "./research-analysis";
 
 import { RAW_PREFIX as root } from "./archive-paths";
 const phase=root,fin=root+"/financial";
-type Store=ReturnType<typeof storage>;
-async function get(s:Store,key:string,max:number,timeout=12000):Promise<Uint8Array|null>{
-  try{
-    const r=await s.client.send(new GetObjectCommand({Bucket:s.bucket,Key:key}),{abortSignal:AbortSignal.timeout(timeout)});
-    if(!r.Body||r.ContentLength===undefined||r.ContentLength<0||r.ContentLength>max)throw Error("Invalid archive size");
-    const bytes=await r.Body.transformToByteArray();
-    if(bytes.length!==r.ContentLength)throw Error("Truncated archive");
-    return bytes;
-  }catch(e){const x=e as {name?:string;$metadata?:{httpStatusCode?:number}};if(x.name==="NoSuchKey"||x.$metadata?.httpStatusCode===404)return null;throw e;}
-}
+type Store=ArchiveStorage;
+const get=(s:Store,key:string,max:number,timeout=12000)=>s.get(key,max,timeout);
 async function json(s:Store,key:string,max=256*1024,timeout=5000){
   const raw=await get(s,key,max,timeout);
   return raw?JSON.parse(new TextDecoder().decode(raw)):null;
@@ -52,9 +42,9 @@ async function readFinancial(code:string){
     }));
     const today=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
     return {points:financialHistory(records,today),sources};
-  }finally{s.client.destroy();}
+  }finally{s.close();}
 }
-export const archivedFinancialHistory=unstable_cache(readFinancial,["research-financial-raw-v1"],{revalidate:3600});
+export const archivedFinancialHistory=archiveCache(readFinancial,"research-financial-raw-v1",3600);
 
 export type ArchiveDataset={id:string;name:string;years:{year:number;rows:number;sessions:number|null;unknown?:number}[];state:"ready"|"partial"|"unpublished"|"error";detail:string};
 async function readArchiveOverview():Promise<ArchiveDataset[]>{
@@ -82,9 +72,9 @@ async function readArchiveOverview():Promise<ArchiveDataset[]>{
     // Locate the frozen 2020–2025 ST namespace without guessing the universe hash.
     const stPrefix=phase+"/historical_st/v2/range=2020-2025/universe=";
     try{
-      const list=await s.client.send(new ListObjectsV2Command({Bucket:s.bucket,Prefix:stPrefix,Delimiter:"/",MaxKeys:100}),{abortSignal:AbortSignal.timeout(8000)});
-      const namespaces=(list.CommonPrefixes??[]).map(p=>p.Prefix??"").filter(p=>p.startsWith(stPrefix)&&/^[a-f0-9]{64}\/$/.test(p.slice(stPrefix.length)));
-      if(list.IsTruncated||namespaces.length>1)throw Error("Ambiguous ST namespace");
+      const list=await s.list(stPrefix,{delimiter:"/",maxKeys:100,timeout:8000});
+      const namespaces=list.prefixes.filter(p=>p.startsWith(stPrefix)&&/^[a-f0-9]{64}\/$/.test(p.slice(stPrefix.length)));
+      if(list.truncated||namespaces.length>1)throw Error("Ambiguous ST namespace");
       if(!namespaces.length)output.push({id:"historical_st",name:"历史ST",years:[],state:"unpublished",detail:"暂无已发布清单"});
       else{
         const base=namespaces[0],hash=base.slice(stPrefix.length,-1);
@@ -107,13 +97,13 @@ async function readArchiveOverview():Promise<ArchiveDataset[]>{
     // Listing counts are publication counts only; not effective security coverage.
     const financialOverview=await Promise.all(financialKinds.map(async(kind):Promise<ArchiveDataset>=>{
       try{
-        const r=await s.client.send(new ListObjectsV2Command({Bucket:s.bucket,Prefix:fin+"/"+kind+"/",MaxKeys:1000}),{abortSignal:AbortSignal.timeout(12000)});
-        if(r.IsTruncated)throw Error("Incomplete manifest list");
-        const manifests=(r.Contents??[]).filter(x=>/\/start=\d{5}_count=050\.manifest\.json$/.test(x.Key??"")).length;
+        const r=await s.list(fin+"/"+kind+"/",{maxKeys:1000,timeout:12000});
+        if(r.truncated)throw Error("Incomplete manifest list");
+        const manifests=r.keys.filter(x=>/\/start=\d{5}_count=050\.manifest\.json$/.test(x)).length;
         return {id:kind,name:({balancesheet:"历史资产负债表",income:"历史利润表",cashflow:"历史现金流量表",fina_indicator:"历史财务指标"})[kind],years:[],state:manifests?"partial":"unpublished",detail:"已发布批次 "+manifests+"（每批最多50只）"};
       }catch{return {id:kind,name:({balancesheet:"历史资产负债表",income:"历史利润表",cashflow:"历史现金流量表",fina_indicator:"历史财务指标"})[kind],years:[],state:"error",detail:"批次清单暂不可读"};}
     }));
     return [...output,...financialOverview];
-  }finally{s.client.destroy();}
+  }finally{s.close();}
 }
-export const archiveOverview=unstable_cache(readArchiveOverview,["research-archive-overview-raw-v1"],{revalidate:600});
+export const archiveOverview=archiveCache(readArchiveOverview,"research-archive-overview-raw-v1",600);
