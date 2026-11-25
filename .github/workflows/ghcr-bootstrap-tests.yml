@@ -3,17 +3,22 @@ on:
   push:
     branches:
       - feature/ghcr-private-bootstrap
+      - integration/ghcr-11e16c
     paths:
       - '.github/workflows/ghcr-package-bootstrap.yml'
       - '.github/workflows/ghcr-bootstrap-tests.yml'
       - 'tests/ghcr_private_bootstrap.py'
       - 'tests/test_ghcr_private_bootstrap.py'
+      - '.github/workflows/ghcr-package-readiness.yml'
+      - 'tests/test_ghcr_package_readiness.py'
   pull_request:
     paths:
       - '.github/workflows/ghcr-package-bootstrap.yml'
       - '.github/workflows/ghcr-bootstrap-tests.yml'
       - 'tests/ghcr_private_bootstrap.py'
       - 'tests/test_ghcr_private_bootstrap.py'
+      - '.github/workflows/ghcr-package-readiness.yml'
+      - 'tests/test_ghcr_package_readiness.py'
 permissions:
   contents: read
 jobs:
@@ -28,3 +33,5 @@ jobs:
         env:
           TEST_LOCAL_SCRATCH: '1'
         run: python3 -m unittest discover -s tests -p test_ghcr_private_bootstrap.py -v
+      - name: Test exact readiness workflow Python with offline HTTP fixtures (no token or network)
+        run: python3 -m unittest discover -s tests -p test_ghcr_package_readiness.py -v

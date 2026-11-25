@@ -10,7 +10,7 @@ jobs:
   # Explicit same-revision Docker CI for reviewed application branches and main.
   # No inherited secrets, registry permissions, publication or deployment.
   docker-pr28:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/feature/vps-image-security' || github.ref == 'refs/heads/integration/vps-11e15a' || github.ref == 'refs/heads/integration/vps-11e15d' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/feature/vps-image-security' || github.ref == 'refs/heads/integration/vps-11e15a' || github.ref == 'refs/heads/integration/vps-11e15d' || github.ref == 'refs/heads/integration/ghcr-11e16c' || github.ref == 'refs/heads/main')
     uses: ./.github/workflows/docker-ci.yml
     permissions:
       contents: read
