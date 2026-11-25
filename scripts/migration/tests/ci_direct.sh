@@ -60,16 +60,37 @@ py=$(command -v python)
 # The fixture uses its own network namespace, not a production Docker network.
 run(){ local db=$1 user=$2; shift 2; sudo nsenter -t "$pid" -n -- env -i PATH="$root/client-bin:$PATH" PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE="$db" PGUSER="$user" PGSSLMODE=disable PGPASSFILE="$root/pgpass" "$py" "$@"; }
 direct(){ run ashare ashare_owner scripts/migration/direct_restore.py "$@" --root "$root" --container-id "$cid"; }
-if direct check; then exit 1; fi
-if run ashare_test ashare_owner scripts/migration/direct_restore.py check --root "$root" --container-id "$cid" --approved-target-read; then exit 1; fi
+expect_block(){
+  local code=$1 output; shift
+  if output=$("$@" 2>&1); then echo "unexpected success: $code"; exit 1; fi
+  printf '%s\n' "$output"
+  grep -Fxq "FAILED: $code" <<<"$output"
+}
+expect_block APPROVAL_REQUIRED direct check
+expect_block TARGET_ENDPOINT run ashare_test ashare_owner scripts/migration/direct_restore.py check --root "$root" --container-id "$cid" --approved-target-read
 echo 'PASS: unapproved and wrong database blocked'
+# A real nonempty fixture must still be refused, even with zero table rows.
+echo 'CREATE TABLE public.must_be_empty(id int);' | admin ashare
+expect_block TARGET_NOT_EMPTY direct check --approved-target-read
+echo 'DROP TABLE public.must_be_empty;' | admin ashare
 direct check --approved-target-read
 run ashare_source postgres scripts/migration/postgres.py backup --root "$root"
-if direct restore --approved-target-read; then exit 1; fi
+expect_block APPROVAL_REQUIRED direct restore --approved-target-read
 direct restore --approved-target-read --approved-final-restore
 direct verify --approved-target-read
 [[ "$(echo 'SELECT count(*) FROM stocks;' | admin ashare)" == 1 ]]
-if direct restore --approved-target-read --approved-final-restore; then exit 1; fi
+role_sql(){
+  docker exec --user 0 --env PGPASSWORD=fixture-only-password "$cid" psql -X -w -At -h 127.0.0.1 -p 5432 -U "$1" -d ashare -v ON_ERROR_STOP=1 -c "$2"
+}
+[[ "$(role_sql screener_reader 'SELECT count(*) FROM stocks')" == 1 ]]
+if err=$(role_sql screener_reader "INSERT INTO stocks(ts_code,name) VALUES('DENIED','fixture')" 2>&1); then exit 1; fi
+[[ "$err" == *"permission denied for table stocks"* ]]
+role_sql screener_writer "BEGIN; INSERT INTO stocks(ts_code,name) VALUES('WRITE_OK','fixture'); ROLLBACK;"
+if err=$(role_sql screener_writer "DELETE FROM stocks WHERE ts_code='000001.SZ'" 2>&1); then exit 1; fi
+[[ "$err" == *"permission denied for table stocks"* ]]
+echo 'PASS: actual reader SELECT, reader INSERT denied, writer INSERT and rollback, writer DELETE denied'
+direct verify --approved-target-read
+expect_block PREVIOUS_RESTORE direct restore --approved-target-read --approved-final-restore
 [[ "$(fingerprint)" == "$before" ]]
 [[ "$(echo "SELECT count(*) FROM pg_database WHERE datname='ashare_migration';" | admin postgres)" == 0 ]]
 [[ "$(echo "SELECT count(*) FROM pg_roles WHERE rolname LIKE 'ashare_mig_%';" | admin postgres)" == 0 ]]
