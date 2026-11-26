@@ -39,3 +39,15 @@ are read; do not consume monthly reader snapshots. Each completed day has its ow
 immutable output directory. ST columns remain NULL and the manifest explicitly blocks
 formal strategy use; no current-name backfill. Historical annual partitions remain unchanged.
 This is not a scheduler or a completeness proof against an independent calendar.
+
+## Financial evidence gate
+
+Run value_screener.backtest_financial_evidence with --archive and --output (a new
+JSON file outside the archive). This offline audit verifies each frozen-universe
+50-code financial batch and counts candidate disclosure rows, missing fields,
+missing securities, periods and conflicting same-day versions. It also provides
+a conservative latest-report selection function with strict prior-day disclosure
+and no silent fallback on latest-version conflicts or missing core data. It does
+not certify historical revision completeness, join financial statements to daily
+bars, cross-check disclosure calendar, or publish financial factors. Indicator
+rows lack actual disclosure and consolidated-report lineage and are not selected.
