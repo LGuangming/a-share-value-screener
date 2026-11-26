@@ -14,11 +14,7 @@ export function proxy(request:NextRequest){
   }
   if(path.startsWith("/api/")||path==="/api"||path.startsWith("/_next/")||!["GET","HEAD"].includes(request.method))
     return NextResponse.json({error:"需要网站访问密码"},{status:401,headers:PRIVATE_HEADERS});
-  const login=request.nextUrl.clone();
-  login.pathname="/login";login.search="";
-  login.searchParams.set("next",safeReturnPath(path+request.nextUrl.search));
-  const response=NextResponse.redirect(login,307);
-  for(const [key,value] of Object.entries(PRIVATE_HEADERS))response.headers.set(key,value);
-  return response;
+  const query=new URLSearchParams({next:safeReturnPath(path+request.nextUrl.search)});
+  return new NextResponse(null,{status:307,headers:{...PRIVATE_HEADERS,Location:"/login?"+query.toString()}});
 }
 export const config={matcher:["/:path*"]};
