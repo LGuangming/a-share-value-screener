@@ -13,7 +13,10 @@ import os
 
 def run():
     day=datetime.now(CN_TZ).date()
-    store=Store(os.environ["DATABASE_URL"])
+    url=os.environ["DATABASE_URL"]
+    # Enforce read-only on every connection, including Store helper methods.
+    from psycopg.conninfo import make_conninfo
+    store=Store(make_conninfo(url, options="-c default_transaction_read_only=on"))
     quote=store.latest_quote_date(day)
     if not quote:
         raise RuntimeError("No market quotes")
