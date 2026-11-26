@@ -121,7 +121,9 @@ jobs:
         env:
           PYTHONPATH: backend
           TEST_PIPELINE_DATABASE_URL: postgresql://fixture_admin:fixture_only@127.0.0.1:5432/ashare_pipeline_test
-        run: python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
+        run: |
+          python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
+          python -m unittest discover -s backend/tests -p test_backtest_dataset.py -v
   next-build:
     needs: scope
     if: needs.scope.outputs.web == 'true'
