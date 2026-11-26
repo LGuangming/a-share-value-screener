@@ -1,1 +1,0 @@
-Read-only gap diagnosis; no provider calls or database changes.

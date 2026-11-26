@@ -1,1 +1,0 @@
-One-time backfill of 2025–2020 historical ST evidence from BaoStock and Tushare namechange; provider preflight and private archive verification required.
