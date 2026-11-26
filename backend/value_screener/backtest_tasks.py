@@ -6,7 +6,7 @@ import fcntl
 from pathlib import Path
 import sys
 
-from . import backtest_dataset, backtest_financial_daily, backtest_financial_evidence, backtest_security_evidence
+from . import backtest_dataset, backtest_financial_daily, backtest_financial_evidence, backtest_security_evidence, backtest_quality
 
 
 def main():
@@ -23,6 +23,9 @@ def main():
     fin.add_argument("--month",type=int,choices=range(1,13))
     audit=sub.add_parser("financial-audit")
     audit.add_argument("--report",required=True)
+    status=sub.add_parser("status")
+    status.add_argument("--year",type=int,required=True)
+    status.add_argument("--report",required=True)
     sec=sub.add_parser("security")
     sec.add_argument("--year",type=int,required=True)
     sec.add_argument("--month",type=int,required=True,choices=range(1,13))
@@ -44,6 +47,13 @@ def main():
             p.error("Use a plain JSON filename")
         fn=backtest_financial_evidence.main
         argv=["--archive","/data/archive","--output","/manifests/"+a.report]
+    elif a.task=="status":
+        if Path(a.report).name!=a.report or not a.report.endswith(".json") or a.report.startswith("."):
+            p.error("Use a plain JSON filename")
+        fn=backtest_quality.main
+        argv=["--archive","/data/archive","--market","/market","--financial","/financial",
+              "--security","/security","--scratch","/scratch","--output","/manifests/"+a.report,
+              "--year",str(a.year)]
     else:
         fn=backtest_security_evidence.main
         argv=["build","--archive","/data/archive","--market","/market","--evidence","/evidence",

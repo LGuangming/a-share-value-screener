@@ -51,3 +51,54 @@ and no silent fallback on latest-version conflicts or missing core data. It does
 not certify historical revision completeness, join financial statements to daily
 bars, cross-check disclosure calendar, or publish financial factors. Indicator
 rows lack actual disclosure and consolidated-report lineage and are not selected.
+
+## BT03-C2/B2/F/D — later stages
+
+Use only a separately accepted Worker image. This standalone Compose file is
+not an overlay and does not inherit production DB connections or tokens.
+Before running, create all required directories using uid 10002 gid 10010.
+Set BACKTEST_IMAGE to the independently reviewed digest and BACKTEST_DIR to
+/opt/ashare/backtest, ARCHIVE_DIR to /opt/ashare/archive. Execute from app:
+    docker compose -f compose.backtest.yaml run --rm -T --no-deps backtest-worker market --start-year 2025 --end-year 2025 --month 1
+    docker compose -f compose.backtest.yaml run --rm -T --no-deps backtest-worker financial-audit --report financial-audit-v1.json
+    docker compose -f compose.backtest.yaml run --rm -T --no-deps backtest-worker financial --year 2025 --month 1
+    docker compose -f compose.backtest.yaml run --rm -T --no-deps backtest-worker security --year 2025 --month 1
+    docker compose -f compose.backtest.yaml run --rm -T --no-deps backtest-worker update --day 2026-11-25
+    docker compose -f compose.backtest.yaml run --rm -T --no-deps backtest-worker status --year 2025 --report quality-2025-v1.json
+
+Financial daily joins use publication+one calendar day as inclusive availability,
+never scheduled publication dates. Actual publication must match verified calendar
+evidence. NCAV is current assets less total liabilities in yuan, market cap
+converted to yuan; positive NCAV ratio only. Income/cashflow are YTD not TTM;
+no certified ROE. Unresolved dates and conflicts produce nulls, not zeros.
+2018/2019 or 2026 disclosure calendars are not present in the observed archive,
+so no coverage is implied for those report periods. All results are explicitly
+not PIT certified; later source snapshots cannot reconstruct missing revisions.
+
+The security layer records frozen listing dates separately from historical status.
+2026+ ST remains unknown unless captured namechange evidence is present.
+The optional online capture CLI is intentionally outside offline Compose:
+value_screener.backtest_security_evidence capture --archive /data/archive
+--evidence /evidence --day YYYY-MM-DD --budget 50 --confirm CAPTURE-NAMECHANGE.
+Run only with explicit operator authorization, a separate official token,
+read-only archive mount and writable evidence dir. Do not overlap other provider
+tasks. This reads the selected committed day's mainboard universe, checkpoints
+one code per capture day, and uses the existing rate-limited official client.
+A single bounded run is not full coverage; cross-day captures are not silently
+merged. Capture-day snapshots are research evidence, not historical certification.
+Use security --capture-day YYYY-MM-DD after capture. Changed evidence requires a
+new output version/directory rather than overwriting an accepted partition.
+
+Status reads exact expected historical months or committed daily manifests and
+checks output hashes, source identities, row counts, keys, and future-disclosure
+constraints. It reports incomplete or corrupt partitions; even complete research
+partitions do not imply formal backtest readiness. It is not an independent
+exchange calendar check. The update command is an explicit single-day task,
+not a registered scheduler. Add scheduling only after VPS acceptance.
+
+VPS acceptance remains unexecuted: record /usr/bin/time -v or Docker stats,
+free -h and disk delta, single-month first, then repeat to verify resume,
+then full 2020–2025 and committed 2026 days. Confirm source archive hashes
+unchanged and no production DB/registry/deployment operations. Do not publish
+strategy performance until universe, revisions, corporate actions and actual
+execution semantics have been certified. 
