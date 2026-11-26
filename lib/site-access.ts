@@ -37,6 +37,9 @@ export function safeReturnPath(value:string|null|undefined){
     if(decoded.startsWith("//")||decoded.includes("\\")||/[\u0000-\u001f\u007f]/.test(decoded))return "/";
     const u=new URL(value,"https://internal.invalid");
     if(u.origin!=="https://internal.invalid"||/^\/(?:login|api|_next)(?:\/|$)/i.test(decodeURIComponent(u.pathname)))return "/";
+    // A normalized path can acquire a leading double slash after dot-segment removal.
+    // Never emit a network-path reference as a relative Location header.
+    if(u.pathname.startsWith("//")||decodeURIComponent(u.pathname).startsWith("//"))return "/";
     return u.pathname+u.search;
   }catch{return "/";}
 }
