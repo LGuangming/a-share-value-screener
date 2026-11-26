@@ -5,11 +5,6 @@ on:
   # Set repository variable ENABLE_FINANCIAL_SCHEDULE=true when ready.
   schedule:
     - cron: '17 0 * * *' # 08:17 Asia/Shanghai daily (including weekends)
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/finance-archive-first-20261124.txt'
-      - '.github/one-shot/full-netnet-precompute-20261124.txt'
   workflow_dispatch:
     inputs:
       budget:

@@ -8,9 +8,6 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['.github/one-shot/netnet-financial-ignore-20261124.txt']
 
 permissions:
   contents: read

@@ -10,10 +10,6 @@ on:
         description: Apply verified retention cleanup (false = audit only)
         type: boolean
         default: false
-  push:
-    branches: [main]
-    paths:
-      - '.github/one-shot/raw-maintenance-audit-20261124.txt'
 permissions:
   contents: read
 concurrency:
