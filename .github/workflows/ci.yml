@@ -37,7 +37,10 @@ jobs:
           PYTHONPATH: backend
         run: python -m unittest discover -s backend/tests -v
       - name: Registry manifest verification regression tests
-        run: python -m unittest discover -s tests -p test_verify_worker_manifest.py -v
+        run: |
+          python -m unittest discover -s tests -p test_verify_worker_manifest.py -v
+          python -m unittest discover -s tests -p test_diagnose_worker_identity.py -v
+          python -m unittest discover -s tests -p test_approve_worker_identity.py -v
   python-local-integration:
     runs-on: ubuntu-latest
     strategy:
@@ -214,9 +217,18 @@ jobs:
           digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
           immutable="${image%:*}@$digest"
-          actual="$(python3 tests/verify_worker_manifest.py "$immutable" "$expected")"
-          test "$actual" = "$expected"
-          printf 'Published immutable accepted Worker: %s\nConfig image ID: %s\nRevision: %s\n' "$immutable" "$actual" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          config="$(cat "$RUNNER_TEMP/accepted-worker/config-sha256.txt")"
+          mkdir -p "$RUNNER_TEMP/worker-receipt"
+          python3 tests/approve_worker_identity.py "$RUNNER_TEMP/accepted-worker/worker.tar" "$immutable" "$expected" "$config" "$GITHUB_SHA" "$RUNNER_TEMP/worker-receipt/acceptance.json"
+          printf 'Published immutable accepted Worker: %s\nDaemon image ID: %s\nConfig SHA256: %s\nRevision: %s\n' "$immutable" "$expected" "$config" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve Worker publication receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: worker-publication-receipt
+          path: ${{ runner.temp }}/worker-receipt/acceptance.json
+          if-no-files-found: warn
+          retention-days: 30
 
   # Read-only recovery of the already uploaded and accepted PR #39 Worker.
   # A dedicated explicit main marker is required; no rebuild, push or deployment.
@@ -281,5 +293,17 @@ jobs:
           test "$(docker image inspect ashare-worker:minimal-eval --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE_SHA"
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          actual="$(python3 tests/verify_worker_manifest.py "$IMMUTABLE" "$expected")"
-          printf 'Verified existing immutable Worker: %s\nConfig image ID: %s\nSource revision: %s\n' "$IMMUTABLE" "$actual" "$SOURCE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          # Historical artifact predates config-sha256.txt. Pin the actual archive
+          # config independently from the accepted daemon ID and verify both.
+          config='sha256:b6e48efa642c36d74ada3d3107cb212ada9c5c16694512d020e855bd20bf8952'
+          mkdir -p "$RUNNER_TEMP/worker-receipt"
+          python3 tests/approve_worker_identity.py "$dir/worker.tar" "$IMMUTABLE" "$expected" "$config" "$SOURCE_SHA" "$RUNNER_TEMP/worker-receipt/acceptance.json"
+          printf 'Verified existing immutable Worker: %s\nDaemon image ID: %s\nConfig SHA256: %s\nSource revision: %s\n' "$IMMUTABLE" "$expected" "$config" "$SOURCE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve original Worker acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: worker-recovery-acceptance
+          path: ${{ runner.temp }}/worker-receipt/acceptance.json
+          if-no-files-found: warn
+          retention-days: 30

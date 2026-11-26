@@ -1,8 +1,7 @@
-"""Verify the registry's immutable linux/amd64 image against accepted config ID."""
+"""Resolve the registry config digest of an immutable linux/amd64 image."""
 import json
 import re
 import subprocess
-import sys
 
 DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
 IMAGE_MANIFEST = {"application/vnd.oci.image.manifest.v1+json",
@@ -39,18 +38,3 @@ def fetch_manifest(ref):
     return json.loads(subprocess.check_output(
         ["docker", "buildx", "imagetools", "inspect", "--raw", ref]))
 
-def main():
-    ref, expected = sys.argv[1:]
-    actual = config_digest(ref, fetch_manifest)
-    if actual != require_digest(expected):
-        raise SystemExit("Remote config identity differs from accepted image")
-    # Check actual OS/architecture and image ID using registry pull, not tag lookup.
-    subprocess.run(["docker", "pull", "--platform", "linux/amd64", ref], check=True,
-                   stdout=sys.stderr)
-    image = json.loads(subprocess.check_output(["docker", "image", "inspect", ref]))[0]
-    if (image["Os"], image["Architecture"], image["Id"]) != ("linux", "amd64", expected):
-        raise SystemExit("Pulled image identity or platform mismatch")
-    print(actual)
-
-if __name__ == "__main__":
-    main()
