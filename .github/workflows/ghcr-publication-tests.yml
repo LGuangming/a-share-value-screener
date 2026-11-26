@@ -1,0 +1,27 @@
+name: GHCR publication safety tests (no registry)
+on:
+  push:
+    branches: [fix/ghcr-publish-recovery-11e16d]
+    paths:
+      - 'tests/ghcr_publish_pair.py'
+      - 'tests/test_ghcr_publish_pair.py'
+      - '.github/workflows/ghcr-test-images.yml'
+      - '.github/workflows/ghcr-publication-tests.yml'
+  pull_request:
+    paths:
+      - 'tests/ghcr_publish_pair.py'
+      - 'tests/test_ghcr_publish_pair.py'
+      - '.github/workflows/ghcr-test-images.yml'
+      - '.github/workflows/ghcr-publication-tests.yml'
+permissions:
+  contents: read
+jobs:
+  publication-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Offline publisher, recovery provenance and registry HTTP contract tests
+        run: python3 -m unittest discover -s tests -p test_ghcr_publish_pair.py -v

@@ -113,3 +113,53 @@ the tag, OCI revision and pair receipt always identify the exact integrated SHA.
 Require a fresh successful read-only pair review on this PR27 commit before
 final main integration preparation. No publication, deployment, production
 connection, main update, or change to the original integration branch.
+
+
+## 11E-16D — failed publication recovery (draft preparation)
+
+Run 45741563355: both builds, isolated functional tests, scans, save/load and
+write-job revalidation passed. Web push returned
+sha256:04d24373966809820ad6a5547eb3b16882f6969aa1c8ce5a08204256ca1fdab2.
+Exit 255 immediately after push, before observed pull/Worker push. The prior
+shell pipeline and temporary DOCKER_CONFIG are suspects, not proven causes.
+No complete receipt. Do not delete or deploy either package.
+
+The new publisher uses direct authenticated HTTPS GHCR pull-scope token and
+manifest GET, with no redirects, bounded bodies, explicit error codes and
+SHA-256 of returned bytes matched to Docker-Content-Digest. No Buildx or
+early-exit awk pipeline in the write path. Both tag and immutable digest,
+private linked package identity, pulled config ID/arch/UID/revision and
+independent anonymous HTTP denial are required. Explicit MANIFEST_UNKNOWN
+or NAME_UNKNOWN only permits new tag; mixed auth errors/unknown status block.
+Record atomic publication-progress.json before each stage, including push
+attempt and returned digest, upload even on failure. Raw command output and
+tokens are not printed. Complete pair-release.json only after both verified
+and final privacy/tag checks. No overwrite, delete, rollback or auto retry.
+GitHub Actions write permission is only in main owner first-attempt dispatch
+with exact confirmation; reviewed source checkout is separate from publisher
+control checkout. Prior read-only review and scans are unchanged.
+
+One-time recovery is deliberately pinned to failed run 45741563355, attempt 1,
+artifact 15080908340 (accepted-pair-45741563355-a1, 179945528 bytes),
+ZIP sha256:3ab4407eedf26621cc5bc8e40871254bfb0d5a181a1f5ece1d724f272617d7fd,
+expiry 2026-11-27T02:24:43Z. No arbitrary run/artifact/digest inputs. Separate
+owner approval + new main dispatch with RECOVER-PR28-45741563355; original
+run/job/step provenance, artifact ID/repo/SHA/time/digest and actual ZIP bytes
+checked before extraction; strict allowed filenames and complete checksums.
+Re-evaluate all original raw vulnerability gates using pinned source at
+current clock; retain existing Web only if its original tag AND immutable
+digest equal the recorded push and authenticated pull matches accepted
+image config, privacy, platform, UID, revision and anonymous denial. Require
+Worker original tag absent before any write; only push accepted Worker,
+same original tag, verify both. Receipt records current dispatch ID and
+original accepted run/attempt. No rebuild in recovery or write job.
+If original artifact expires, is unavailable, changes, or either tag is
+ambiguous, stop; no silent fallback. A separately authorized normal
+PUBLISH-PR28-TEST dispatch rebuilds/rechecks a new pair under new tags;
+the incomplete old pair remains quarantined. Additional partial recovery
+would require separate reviewed pins; never infer a new retained digest.
+
+Offline CI tests fake Registry, HTTP fixtures, provenance, ZIP digest,
+authorization, partial receipts, recovery and exact file checks. Actual
+GHCR token/manifest behavior, artifact download and resumed push are not
+executed in this draft. No publication, main merge or deployment authorized.
