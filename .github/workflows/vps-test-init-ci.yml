@@ -1,15 +1,23 @@
 name: VPS test initializer safety (disposable runner only)
 on:
   push:
-    branches: [feature/vps-test-init-11e17b]
+    branches: [main]
     paths:
       - 'deploy/vps_test_init.py'
       - 'tests/test_vps_test_init.py'
+      - 'compose*.yaml'
+      - 'deploy/*.env.example'
+      - 'database/**'
+      - 'tests/fixtures/m12-acl.sql'
       - '.github/workflows/vps-test-init-ci.yml'
   pull_request:
     paths:
       - 'deploy/vps_test_init.py'
       - 'tests/test_vps_test_init.py'
+      - 'compose*.yaml'
+      - 'deploy/*.env.example'
+      - 'database/**'
+      - 'tests/fixtures/m12-acl.sql'
       - '.github/workflows/vps-test-init-ci.yml'
 permissions:
   contents: read

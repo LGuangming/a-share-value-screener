@@ -1,26 +1,16 @@
 name: Tests and Build
 on:
   push:
-    paths-ignore:
-      - '.github/one-shot/**'
   pull_request:
 permissions:
   contents: read
 jobs:
-  # Explicit same-revision Docker CI for reviewed application branches and main.
-  # No inherited secrets, registry permissions, publication or deployment.
+  # Full read-only candidate acceptance on every PR and main push.
   docker-pr28:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/feature/vps-image-security' || github.ref == 'refs/heads/integration/vps-11e15a' || github.ref == 'refs/heads/integration/vps-11e15d' || github.ref == 'refs/heads/integration/ghcr-11e16c' || github.ref == 'refs/heads/main')
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     uses: ./.github/workflows/docker-ci.yml
     permissions:
       contents: read
-  # Explicit no-package-permission review of the GHCR workflow and final integration branches.
-  ghcr-pr27-review:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/feature/ghcr-test-publish' || github.ref == 'refs/heads/integration/vps-11e15d')
-    uses: ./.github/workflows/ghcr-reviewed-pair.yml
-    permissions:
-      contents: read
-      actions: read
   python-tests:
     runs-on: ubuntu-latest
     strategy:
@@ -41,6 +31,14 @@ jobs:
           python -m unittest discover -s tests -p test_verify_worker_manifest.py -v
           python -m unittest discover -s tests -p test_diagnose_worker_identity.py -v
           python -m unittest discover -s tests -p test_approve_worker_identity.py -v
+      - name: Archived GHCR safety contracts (offline only)
+        env:
+          TEST_LOCAL_SCRATCH: '1'
+        run: |
+          python -m unittest discover -s tests -p test_ghcr_private_bootstrap.py -v
+          python -m unittest discover -s tests -p test_ghcr_package_readiness.py -v
+          python -m unittest discover -s tests -p test_ghcr_publish_pair.py -v
+          python -m unittest discover -s tests -p test_workflow_retirement.py -v
   python-local-integration:
     runs-on: ubuntu-latest
     strategy:
@@ -226,84 +224,6 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: worker-publication-receipt
-          path: ${{ runner.temp }}/worker-receipt/acceptance.json
-          if-no-files-found: warn
-          retention-days: 30
-
-  # Read-only recovery of the already uploaded and accepted PR #39 Worker.
-  # A dedicated explicit main marker is required; no rebuild, push or deployment.
-  verify-existing-worker:
-    if: github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[verify-worker-aca1c37]')
-    needs: [python-tests, python-local-integration, next-build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      actions: read
-      packages: read
-    env:
-      SOURCE_RUN: '45761576076'
-      SOURCE_SHA: 'aca1c37bf348d396ef4c4305b95d71e4e5fbf902'
-      IMMUTABLE: 'ghcr.io/lguangming/a-share-value-screener-worker-test-pr28@sha256:0eff99f41d06b444a623f0a6bad776cb71ee141e022b98708c4189c803380139'
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Verify original run and all acceptance jobs
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/source-run.json"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/attempts/1/jobs?per_page=100" > "$RUNNER_TEMP/source-jobs.json"
-          python3 - <<'PY'
-          import json,os,pathlib
-          p=pathlib.Path(os.environ["RUNNER_TEMP"])
-          run=json.loads((p/"source-run.json").read_text())
-          assert run["head_sha"]==os.environ["SOURCE_SHA"]
-          assert run["event"]=="push" and run["head_branch"]=="main"
-          assert run["status"]=="completed" and run["run_attempt"]==1
-          jobs={j["name"]:j for j in json.loads((p/"source-jobs.json").read_text())["jobs"]}
-          for name in ("python-tests (3.13)","python-local-integration (postgres:18.7-alpine)",
-                       "next-build (postgres:18.7-alpine)","docker-pr28 / resolve-base-images",
-                       "docker-pr28 / Release candidate Web + Minimal (postgres:18.7-alpine)",
-                       "docker-pr28 / Release candidate acceptance (no publication)"):
-              assert jobs[name]["conclusion"]=="success",name
-          steps={s["name"]:s["conclusion"] for s in jobs["publish-worker"]["steps"]}
-          assert steps["Verify candidate provenance before authenticating"]=="success"
-          PY
-      - name: Download original accepted artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: accepted-worker-aca1c37bf348d396ef4c4305b95d71e4e5fbf902-a1
-          run-id: 45761576076
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/accepted-worker
-      - name: Verify original archive and registry identity (read only)
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          dir="$RUNNER_TEMP/accepted-worker"
-          (cd "$dir"; sha256sum -c SHA256SUMS)
-          test "$(cat "$dir/revision.txt")" = "$SOURCE_SHA"
-          expected="$(cat "$dir/image-id.txt")"
-          docker load -i "$dir/worker.tar"
-          test "$(docker image inspect ashare-worker:minimal-eval --format '{{.Id}}')" = "$expected"
-          test "$(docker image inspect ashare-worker:minimal-eval --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE_SHA"
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          # Historical artifact predates config-sha256.txt. Pin the actual archive
-          # config independently from the accepted daemon ID and verify both.
-          config='sha256:b6e48efa642c36d74ada3d3107cb212ada9c5c16694512d020e855bd20bf8952'
-          mkdir -p "$RUNNER_TEMP/worker-receipt"
-          python3 tests/approve_worker_identity.py "$dir/worker.tar" "$IMMUTABLE" "$expected" "$config" "$SOURCE_SHA" "$RUNNER_TEMP/worker-receipt/acceptance.json"
-          printf 'Verified existing immutable Worker: %s\nDaemon image ID: %s\nConfig SHA256: %s\nSource revision: %s\n' "$IMMUTABLE" "$expected" "$config" "$SOURCE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Preserve original Worker acceptance receipt
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: worker-recovery-acceptance
           path: ${{ runner.temp }}/worker-receipt/acceptance.json
           if-no-files-found: warn
           retention-days: 30
