@@ -11,15 +11,13 @@ function render(next:string,error="",status=200,configured=true){
   </style></head><body><main class="gate"><header class="brand"><strong>价值雷达</strong><small>A 股多策略研究</small></header><div class="body"><h1>网站访问验证</h1><p>${configured?"请输入访问密码。":"网站访问验证尚未配置，请联系网站管理员。"}</p>${configured?`<form method="post" action="/login"><input type="hidden" name="next" value="${escape(next)}"><label for="password">访问密码</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="512" autofocus placeholder="请输入访问密码">${error?`<p class="error" role="alert">${escape(error)}</p>`:""}<button type="submit">进入网站</button></form>`:""}</div><footer class="foot">A-share Multi-Strategy Research · 私有研究工作台</footer></main></body></html>`;
   return new NextResponse(html,{status,headers});
 }
-function redirect(request:NextRequest,next:string){
-  const url=request.nextUrl.clone(),target=new URL(next,"https://internal.invalid");
-  url.pathname=target.pathname;url.search=target.search;
-  return NextResponse.redirect(url,{status:303,headers:PRIVATE_HEADERS});
+function redirect(next:string){
+  return new NextResponse(null,{status:303,headers:{...PRIVATE_HEADERS,Location:safeReturnPath(next)}});
 }
 export async function GET(request:NextRequest){
   const next=safeReturnPath(request.nextUrl.searchParams.get("next")),config=accessConfig();
   if(!config)return render("/", "",503,false);
-  if(validSession(request.cookies.get(COOKIE_NAME)?.value,config))return redirect(request,next);
+  if(validSession(request.cookies.get(COOKIE_NAME)?.value,config))return redirect(next);
   return render(next);
 }
 async function boundedForm(request:Request){
@@ -51,7 +49,7 @@ export async function POST(request:NextRequest){
     await new Promise(resolve=>setTimeout(resolve,700));
     return render(next,"访问密码错误，请重试。",401);
   }
-  const response=redirect(request,next);
+  const response=redirect(next);
   response.cookies.set(sessionCookie(issueSession(config)));
   return response;
 }
