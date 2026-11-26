@@ -34,6 +34,10 @@ jobs:
           set -euo pipefail
           test "$GITHUB_ACTIONS" = true
           test ! -e /opt/ashare
+          # Hosted disposable runner /opt may be group-writable; retain the
+          # initializer trust check and normalize only this synthetic host.
+          sudo chown root:root /opt
+          sudo chmod 0755 /opt
           sudo install -d -m 0755 /opt/ashare /opt/ashare/archive
           sudo install -d -m 0750 /opt/ashare/test
           docker pull --platform linux/amd64 postgres:18.7-alpine
