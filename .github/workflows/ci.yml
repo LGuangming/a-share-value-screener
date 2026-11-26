@@ -1,17 +1,63 @@
 name: Tests and Build
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+# Only supersede old PR runs. Never cancel or coalesce a main release run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
-  # Full read-only candidate acceptance on every PR and main push.
-  docker-pr28:
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+  scope:
+    name: CI scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      python: ${{ steps.scope.outputs.python }}
+      integration: ${{ steps.scope.outputs.integration }}
+      web: ${{ steps.scope.outputs.web }}
+      quick_web: ${{ steps.scope.outputs.quick_web }}
+      docker: ${{ steps.scope.outputs.docker }}
+      registry: ${{ steps.scope.outputs.registry }}
+      release: ${{ steps.scope.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test routing and workflow contracts
+        run: |
+          python3 -m unittest discover -s tests -p test_ci_scope.py -v
+          python3 -m unittest discover -s tests -p test_workflow_retirement.py -v
+      - name: Classify changed paths
+        id: scope
+        run: python3 tests/ci_scope.py
+  docker-validation:
+    needs: scope
+    if: needs.scope.outputs.docker == 'true'
     uses: ./.github/workflows/docker-ci.yml
     permissions:
       contents: read
+  next-quick:
+    needs: scope
+    if: needs.scope.outputs.quick_web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
   python-tests:
+    needs: scope
+    if: needs.scope.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,19 +73,22 @@ jobs:
           PYTHONPATH: backend
         run: python -m unittest discover -s backend/tests -v
       - name: Registry manifest verification regression tests
+        if: needs.scope.outputs.registry == 'true'
         run: |
           python -m unittest discover -s tests -p test_verify_worker_manifest.py -v
           python -m unittest discover -s tests -p test_diagnose_worker_identity.py -v
           python -m unittest discover -s tests -p test_approve_worker_identity.py -v
       - name: Archived GHCR safety contracts (offline only)
+        if: needs.scope.outputs.registry == 'true'
         env:
           TEST_LOCAL_SCRATCH: '1'
         run: |
           python -m unittest discover -s tests -p test_ghcr_private_bootstrap.py -v
           python -m unittest discover -s tests -p test_ghcr_package_readiness.py -v
           python -m unittest discover -s tests -p test_ghcr_publish_pair.py -v
-          python -m unittest discover -s tests -p test_workflow_retirement.py -v
   python-local-integration:
+    needs: scope
+    if: needs.scope.outputs.integration == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -74,6 +123,8 @@ jobs:
           TEST_PIPELINE_DATABASE_URL: postgresql://fixture_admin:fixture_only@127.0.0.1:5432/ashare_pipeline_test
         run: python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
   next-build:
+    needs: scope
+    if: needs.scope.outputs.web == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -98,6 +149,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
+          cache: npm
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Fundamental review classification tests
@@ -133,7 +185,7 @@ jobs:
   # A normal push, PR or old test marker never publishes.
   publish-production:
     if: github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-production]')
-    needs: [python-tests, python-local-integration, next-build, docker-pr28]
+    needs: [scope, python-tests, python-local-integration, next-build, docker-validation]
     runs-on: ubuntu-latest
     timeout-minutes: 35
     permissions:
@@ -226,3 +278,33 @@ jobs:
           path: ${{ runner.temp }}/production-receipt/release.json
           if-no-files-found: error
           retention-days: 90
+
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [scope, python-tests, python-local-integration, next-quick, next-build, docker-validation, publish-production]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require each selected job to succeed and unselected jobs to skip
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          n = json.loads(os.environ["NEEDS_JSON"])
+          if n["scope"]["result"] != "success":
+              raise SystemExit("CI scope failed")
+          flags = n["scope"]["outputs"]
+          for job, flag in {
+              "python-tests":"python", "python-local-integration":"integration",
+              "next-quick":"quick_web", "next-build":"web",
+              "docker-validation":"docker", "publish-production":"release",
+          }.items():
+              if flags.get(flag) not in ("true", "false"):
+                  raise SystemExit("Missing scope output: "+flag)
+              expected = "success" if flags[flag] == "true" else "skipped"
+              if n[job]["result"] != expected:
+                  raise SystemExit(f"{job}: expected {expected}, got {n[job]['result']}")
+          print("PASS: selected CI jobs and release gate")
+          PY

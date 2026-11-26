@@ -29,7 +29,7 @@ class RetirementTests(unittest.TestCase):
         for marker in ("[publish-test-web]", "[publish-worker]", "-test-pr28"):
             self.assertNotIn(marker, ci)
         self.assertIn("uses: ./.github/workflows/docker-ci.yml", ci)
-        self.assertIn("needs: [python-tests, python-local-integration, next-build, docker-pr28]", ci)
+        self.assertIn("needs: [scope, python-tests, python-local-integration, next-build, docker-validation]", ci)
         self.assertIn("sha256sum -c SHA256SUMS", ci)
         self.assertIn("verify_private web", ci)
         self.assertIn("verify_private worker", ci)
@@ -42,7 +42,11 @@ class RetirementTests(unittest.TestCase):
         self.assertIn("Save exact accepted production pair", docker)
         self.assertIn("accepted-production-", ci)
         self.assertIn("accepted-production-", docker)
-        self.assertIn("github.event_name == 'pull_request' ||", ci)
+        self.assertIn("branches: [main]", ci)
+        self.assertIn("name: CI result", ci)
+        self.assertIn("if: always()", ci)
+        self.assertIn("needs.scope.outputs.docker", ci)
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", ci)
 
 if __name__ == "__main__":
     unittest.main()
