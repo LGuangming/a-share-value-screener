@@ -116,6 +116,30 @@ class LocalPipelineIntegration(unittest.TestCase):
                 row=conn.execute("SELECT count(*) AS n FROM screen_results WHERE trade_date=%s",(day,)).fetchone()
                 self.assertEqual(row["n"],1)
                 self.assertEqual(conn.execute("SELECT ncav_yuan FROM screen_results WHERE ts_code=%s",(code,)).fetchone()["ncav_yuan"],2500000)
+            # Real migrated-schema diagnosis: all connections default to read-only;
+            # compare business table contents before/after, not just row counts.
+            from contextlib import redirect_stdout
+            from io import StringIO
+            from value_screener import financial_gap_diagnosis
+            from psycopg.conninfo import make_conninfo
+            def snapshot():
+                with store.connect() as conn:
+                    return {table:conn.execute(
+                        "SELECT md5(coalesce(string_agg(to_jsonb(t)::text,'|' ORDER BY to_jsonb(t)::text),'')) AS hash FROM "+table+" t"
+                    ).fetchone()["hash"] for table in ("stocks","daily_prices","financial_reports",
+                        "financial_fetch_log","job_runs","price_history","price_history_fetches","screen_results")}
+            before=snapshot()
+            archive_before=storage_state(s,b)
+            with Store(make_conninfo(url,options="-c default_transaction_read_only=on")).connect() as conn:
+                self.assertEqual(conn.execute("SHOW transaction_read_only").fetchone()["transaction_read_only"],"on")
+            output=StringIO()
+            with redirect_stdout(output):
+                financial_gap_diagnosis.run()
+            summary=json.loads(next(line.split(" ",1)[1] for line in output.getvalue().splitlines()
+                if line.startswith("FIN_DIAG_SUMMARY ")))
+            self.assertEqual((summary["pending"],summary["data_gap"],summary["database_writes"],summary["tushare_calls"]),(0,0,0,0))
+            self.assertEqual(snapshot(),before)
+            self.assertEqual(storage_state(s,b),archive_before)
             with self.assertRaises(NotReady):retention_cutoffs(day,[day])
             with patch("sys.argv",["raw_maintenance","--apply"]):
                 from value_screener.raw_maintenance import main
