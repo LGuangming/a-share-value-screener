@@ -36,6 +36,8 @@ TABLES = ("stocks","daily_prices","financial_reports","financial_fetch_log","job
 DELETES = ("daily_prices","price_history","price_history_fetches","screen_results")
 ROLES = ("screener_reader","screener_writer")
 PRIVS = ("SELECT","INSERT","UPDATE","DELETE","TRUNCATE","REFERENCES","TRIGGER")
+# The reviewed PostgreSQL 18 Alpine image uses postgres UID/GID 70.
+PG_OWNER = (70,70,0o700)
 DIRS = {"app":(0,0,0o750), "config":(0,0,0o700), "archive":(10002,10010,0o2750),
         "cache":(0,0,0o750), "cache/nextjs":(10001,10010,0o750),
         "tmp":(10002,10010,0o750), "tmp/duckdb":(10002,10010,0o750),
@@ -307,25 +309,33 @@ def verify_container(s,image_id,network_id):
 
 
 def psql(sql,role="fixture_admin",password=None):
-    args=["psql","-X","-qAt","-v","ON_ERROR_STOP=1","-U",role,"-d","ashare_test"]
+    args=["psql","-w","-X","-qAt","-v","ON_ERROR_STOP=1","-U",role,"-d","ashare_test"]
     if password is None:
         return docker("exec","-i",DB,*args,data=sql,timeout=60).strip()
     # Password goes through stdin, not argv, stdout, or Docker exec env metadata.
     return docker("exec","-i",DB,"sh","-c",
-        'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$1" -d ashare_test',
+        'IFS= read -r PGPASSWORD; export PGPASSWORD; exec psql -w -X -qAt -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$1" -d ashare_test',
         "ashare-auth",role,data=password+"\n"+sql,timeout=60).strip()
 
 
 def wait_db(s):
     for _ in range(45):
+        state=read_json("container",DB)["State"]
+        need(state.get("Running") is True,
+             "test PostgreSQL stopped (exit %d, OOM %s)" %
+             (int(state.get("ExitCode",0)),bool(state.get("OOMKilled",False))))
+        try:
+            docker("exec",DB,"pg_isready","-q","-h","127.0.0.1","-U","fixture_admin","-d","ashare_test",timeout=5)
+        except Blocked:
+            time.sleep(2)
+            continue
         try:
             out=psql("SELECT current_database()||'|'||current_user||'|'||current_setting('server_version_num');",password=s["admin"])
-            need(out=="ashare_test|fixture_admin|180007","database identity/version mismatch")
-            return
-        except Blocked as e:
-            if str(e)=="database identity/version mismatch": raise
-            time.sleep(2)
-    raise Blocked("test PostgreSQL did not become ready")
+        except Blocked:
+            raise Blocked("test PostgreSQL accepts TCP connections but admin authentication/query failed") from None
+        need(out=="ashare_test|fixture_admin|180007","database identity/version mismatch")
+        return
+    raise Blocked("test PostgreSQL TCP readiness timed out")
 
 
 def init_sql(files,s):
@@ -414,13 +424,19 @@ def make_dirs():
         safe_dir(p,(uid,gid,mode))
     p=ROOT/"postgres"
     if not exists(p): p.mkdir(mode=0o700)
+    st=safe_dir(p)
+    # The PG18 image entrypoint chowns PGDATA, not its mounted parent.
+    # Only prepare a root-owned, empty directory; never repair existing data.
+    if (st.st_uid,st.st_gid,stat.S_IMODE(st.st_mode))==(0,0,0o700) and not any(p.iterdir()):
+        os.chown(p,PG_OWNER[0],PG_OWNER[1])
+    safe_dir(p,PG_OWNER)
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode",choices=("plan","init"),default="plan")
     parser.add_argument("--source-dir",type=Path,required=True)
-    parser.add_argument("--postgres-pin",required=True)
+    parser.add_argument("--postgres-pin",required=True,help="Preloaded official PostgreSQL 18.7 Alpine digest (UID/GID 70)")
     parser.add_argument("--confirm",default="")
     args=parser.parse_args()
     os.umask(0o077)
