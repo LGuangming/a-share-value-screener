@@ -1,0 +1,61 @@
+name: VPS test initializer safety (disposable runner only)
+on:
+  push:
+    branches: [feature/vps-test-init-11e17b]
+    paths:
+      - 'deploy/vps_test_init.py'
+      - 'tests/test_vps_test_init.py'
+      - '.github/workflows/vps-test-init-ci.yml'
+  pull_request:
+    paths:
+      - 'deploy/vps_test_init.py'
+      - 'tests/test_vps_test_init.py'
+      - '.github/workflows/vps-test-init-ci.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest discover -s tests -p test_vps_test_init.py -v
+  disposable-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Provision disposable fixture host and immutable public PostgreSQL image
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test ! -e /opt/ashare
+          sudo install -d -m 0755 /opt/ashare /opt/ashare/archive
+          sudo install -d -m 0750 /opt/ashare/test
+          docker pull --platform linux/amd64 postgres:18.7-alpine
+          pin="$(docker image inspect postgres:18.7-alpine --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -E '^(docker.io/library/)?postgres@sha256:[0-9a-f]{64}$' | head -n1)"
+          test -n "$pin"
+          echo "PG_PIN=$pin" >> "$GITHUB_ENV"
+          docker network create --internal ashare-db
+          docker run -d --pull never --network ashare-db --name ashare-postgres --entrypoint sleep "$pin" 600
+      - name: Plan only, then initialize and resume exact same database (disposable runner)
+        run: |
+          set -euo pipefail
+          sudo python3 deploy/vps_test_init.py --source-dir "$PWD" --postgres-pin "$PG_PIN"
+          test ! -e /opt/ashare/test/config
+          sudo python3 deploy/vps_test_init.py --mode init --confirm INIT-ASHARE-TEST-11E17B --source-dir "$PWD" --postgres-pin "$PG_PIN"
+          before="$(docker inspect --format '{{.Id}}' ashare-test-postgres)"
+          sum="$(sudo sha256sum /opt/ashare/test/config/.init-state.json)"
+          sudo python3 deploy/vps_test_init.py --mode init --confirm INIT-ASHARE-TEST-11E17B --source-dir "$PWD" --postgres-pin "$PG_PIN"
+          test "$before" = "$(docker inspect --format '{{.Id}}' ashare-test-postgres)"
+          test "$sum" = "$(sudo sha256sum /opt/ashare/test/config/.init-state.json)"
+          test "$(docker ps --format '{{.Names}}' | sort | paste -sd, -)" = ashare-postgres,ashare-test-postgres
+          sudo python3 -c 'import json; p=json.load(open("/opt/ashare/test/evidence/init-receipt.json")); assert p["complete"] and p["acl_assertions"]==112 and not p["application_started"] and not p["production_accessed"]'
+          sudo install -m 0600 /dev/null /opt/ashare/test/archive/unowned
+          if sudo python3 deploy/vps_test_init.py --mode init --confirm INIT-ASHARE-TEST-11E17B --source-dir "$PWD" --postgres-pin "$PG_PIN"; then exit 1; fi
+          test "$before" = "$(docker inspect --format '{{.Id}}' ashare-test-postgres)"
+          echo 'PASS: real PostgreSQL, repeat safety, existing-data refusal, no application launch'
