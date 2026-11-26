@@ -126,3 +126,37 @@ jobs:
         run: npm run build
       - name: Website password gate HTTP smoke tests
         run: node tests/site-access-smoke.cjs
+  # Explicit opt-in on a main merge commit; never publish for ordinary PRs.
+  publish-test-web:
+    if: github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-test-web]')
+    needs: [python-tests, python-local-integration, next-build, docker-pr28]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build exact tested Web revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          source deploy/base-images.lock
+          image="ghcr.io/lguangming/a-share-value-screener-web-test-pr28:sha-$GITHUB_SHA"
+          docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" -f Dockerfile.web -t "$image" .
+      - name: Publish only the test Web image and record digest
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/lguangming/a-share-value-screener-web-test-pr28:sha-$GITHUB_SHA"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker push "$image"
+          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+          printf 'Published immutable test Web image: %s@%s\n' "${image%:*}" "$digest" | tee -a "$GITHUB_STEP_SUMMARY"

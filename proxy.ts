@@ -14,6 +14,7 @@ export function proxy(request:NextRequest){
   }
   if(path.startsWith("/api/")||path==="/api"||path.startsWith("/_next/")||!["GET","HEAD"].includes(request.method))
     return NextResponse.json({error:"需要网站访问密码"},{status:401,headers:PRIVATE_HEADERS});
+  // Next.js Proxy requires an absolute redirect internally and serializes same-host redirects.
   const login=request.nextUrl.clone();
   login.pathname="/login";login.search="";
   login.searchParams.set("next",safeReturnPath(path+request.nextUrl.search));

@@ -15,9 +15,10 @@ async function main(){
   const cookie=login.headers.get("set-cookie")||"";
   assert(/^__Host-value-radar-access=/.test(cookie)&&/;\s*Secure/i.test(cookie)&&/;\s*HttpOnly/i.test(cookie)&&/;\s*SameSite=Lax/i.test(cookie)&&/;\s*Path=\//i.test(cookie));
   assert(!/;\s*Domain=/i.test(cookie));
+  assert.equal(login.headers.get("location"),"/methodology");
   const destination=new URL(login.headers.get("location"),base);
   assert.equal(destination.pathname,"/methodology");
-  if(u.protocol==="https:")assert.equal(destination.origin,base);
+  assert.equal(destination.origin,base);
   const headers={cookie:cookie.split(";")[0]};
   const search=await req("/api/research/search?q="+encodeURIComponent(query),{headers});
   assert.equal(search.status,200);assert((await search.json()).stocks.some(x=>x.ts_code===code));

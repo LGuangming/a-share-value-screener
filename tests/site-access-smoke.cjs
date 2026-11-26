@@ -36,6 +36,7 @@ const post=(path,fields,extra={})=>req(path,{method:"POST",headers:{"content-typ
     assert.match(await login.text(),/type="password"/);
     assert.equal(login.headers.get("referrer-policy"),"same-origin");
     const gate=await req("/research?code=000001.SZ");assert.equal(gate.status,307);
+    assert.equal(gate.headers.get("location"),"/login?next=%2Fresearch%3Fcode%3D000001.SZ");
     assert.equal(new URL(gate.headers.get("location"),base).pathname,"/login");
     assert.equal(new URL(gate.headers.get("location"),base).searchParams.get("next"),"/research?code=000001.SZ");
     for(const path of ["/api/research/search","/api/quotes/000001.SZ?year=2025","/api/research/000001.SZ/financial"])assert.equal((await req(path)).status,401);
@@ -50,15 +51,24 @@ const post=(path,fields,extra={})=>req(path,{method:"POST",headers:{"content-typ
     assert.equal(opaque.status,401);
     const correct=await post("/login",{password,next:"/methodology"},{origin:"https://stock.guangming.blog","sec-fetch-site":"same-origin"});
     assert.equal(correct.status,303);
-    assert.equal(new URL(correct.headers.get("location"),base).pathname,"/methodology");
+    assert.equal(correct.headers.get("location"),"/methodology");
+    assert.equal(new URL(correct.headers.get("location"),"https://stock.guangming.blog").origin,"https://stock.guangming.blog");
+    const ssh=await post("/login",{password,next:"/methodology?from=ssh"},{origin:base,"sec-fetch-site":"same-origin"});
+    assert.equal(ssh.status,303);assert.equal(ssh.headers.get("location"),"/methodology?from=ssh");
+    for(const next of ["//external.invalid","/a/..//external.invalid","/a/%2e%2e//external.invalid","/a/..//%65xternal.invalid","https://external.invalid"]){
+      const blocked=await post("/login",{password,next});
+      assert.equal(blocked.status,303);assert.equal(blocked.headers.get("location"),"/");
+    }
     const setCookie=correct.headers.get("set-cookie");assert.ok(setCookie);
     assert.match(setCookie,/HttpOnly/i);assert.match(setCookie,/Secure/i);assert.match(setCookie,/SameSite=Lax/i);
     const cookie=setCookie.split(";")[0];
+    const resumed=await req("/login?next=%2Fmethodology",{headers:{cookie}});
+    assert.equal(resumed.status,303);assert.equal(resumed.headers.get("location"),"/methodology");
     const allowed=await req("/api/research/search",{headers:{cookie}});assert.equal(allowed.status,200);
     assert.match(allowed.headers.get("cache-control")||"",/no-store/);
     assert.equal((await req("/methodology",{headers:{cookie}})).status,200);
     const logout=await post("/api/access/logout",{}, {cookie,origin:"null","sec-fetch-site":"same-origin"});
-    assert.equal(logout.status,303);assert.match(logout.headers.get("set-cookie")||"",/Max-Age=0/i);
+    assert.equal(logout.status,303);assert.equal(logout.headers.get("location"),"/login");assert.match(logout.headers.get("set-cookie")||"",/Max-Age=0/i);
     assert.equal((await req("/api/research/search")).status,401);
   });
   console.log("Site access HTTP smoke tests passed");
