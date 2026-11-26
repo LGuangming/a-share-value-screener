@@ -124,6 +124,7 @@ jobs:
         run: |
           python -m unittest discover -s backend/tests -p test_local_pipeline_integration.py -v
           python -m unittest discover -s backend/tests -p test_backtest_dataset.py -v
+          python -m unittest discover -s backend/tests -p test_backtest_financial_daily.py -v
   next-build:
     needs: scope
     if: needs.scope.outputs.web == 'true'
