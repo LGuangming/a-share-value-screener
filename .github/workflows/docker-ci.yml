@@ -155,7 +155,7 @@ jobs:
         env:
           NODE_BASE: ${{ needs.resolve-base-images.outputs.node }}
           WEB_RUNTIME_BASE: ${{ needs.resolve-base-images.outputs.web_runtime }}
-        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" -f Dockerfile.web -t ashare-web:ci .
+        run: docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" -f Dockerfile.web -t ashare-web:ci .
       - name: Verify final Web zstd payload, shell-free runtime and identity
         shell: bash
         run: |
@@ -388,34 +388,37 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      # Only export the exact scanned image on an explicitly authorized main run.
-      - name: Save exact accepted Worker candidate for separate publication
-        if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-worker]')
+      # Transfer exact scanned images; the publishing job never rebuilds.
+      - name: Save exact accepted production pair
+        if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-production]')
         shell: bash
         run: |
           set -euo pipefail
-          dir="$RUNNER_TEMP/accepted-worker"
+          dir="$RUNNER_TEMP/accepted-production"
           mkdir -p "$dir"
-          docker image inspect ashare-worker:minimal-eval --format '{{.Id}}' > "$dir/image-id.txt"
-          test "$(docker image inspect ashare-worker:minimal-eval --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > "$dir/revision.txt"
-          docker save -o "$dir/worker.tar" ashare-worker:minimal-eval
+          for item in 'web ashare-web:ci' 'worker ashare-worker:minimal-eval'; do
+            read -r kind local <<< "$item"
+            docker image inspect "$local" --format '{{.Id}}' > "$dir/$kind-id.txt"
+            test "$(docker image inspect "$local" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+            docker save -o "$dir/$kind.tar" "$local"
+          done
           PYTHONPATH=tests python3 - "$dir" <<'PY'
           import pathlib,sys
           from diagnose_worker_identity import archive_info
           root=pathlib.Path(sys.argv[1])
-          info=archive_info(root/"worker.tar")
-          if not info["all_layers_verified"]:
-              raise SystemExit("Saved candidate layer integrity failed")
-          (root/"config-sha256.txt").write_text(info["config_sha"]+"\n")
+          for kind in ("web","worker"):
+              info=archive_info(root/(kind+".tar"))
+              if not info["all_layers_verified"]:
+                  raise SystemExit("Saved candidate layer integrity failed: "+kind)
           PY
-          (cd "$dir"; sha256sum worker.tar image-id.txt config-sha256.txt revision.txt > SHA256SUMS)
-      - name: Transfer accepted Worker artifact (no registry permission)
-        if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-worker]')
+          (cd "$dir"; sha256sum web.tar worker.tar web-id.txt worker-id.txt revision.txt > SHA256SUMS)
+      - name: Transfer accepted production pair (no registry permission)
+        if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-production]')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: accepted-worker-${{ github.sha }}-a${{ github.run_attempt }}
-          path: ${{ runner.temp }}/accepted-worker/
+          name: accepted-production-${{ github.sha }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accepted-production/
           retention-days: 7
           if-no-files-found: error
           compression-level: 0

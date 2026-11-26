@@ -129,12 +129,13 @@ jobs:
         run: npm run build
       - name: Website password gate HTTP smoke tests
         run: node tests/site-access-smoke.cjs
-  # Explicit opt-in on a main merge commit; never publish for ordinary PRs.
-  publish-test-web:
-    if: github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-test-web]')
+  # Publish only the exact same-run accepted Web + Minimal Worker pair.
+  # A normal push, PR or old test marker never publishes.
+  publish-production:
+    if: github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-production]')
     needs: [python-tests, python-local-integration, next-build, docker-pr28]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     permissions:
       contents: read
       packages: write
@@ -142,88 +143,77 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Build exact tested Web revision
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          source deploy/base-images.lock
-          image="ghcr.io/lguangming/a-share-value-screener-web-test-pr28:sha-$GITHUB_SHA"
-          docker build --pull --platform linux/amd64 --build-arg NODE_BASE="$NODE_BASE" --build-arg WEB_RUNTIME_BASE="$WEB_RUNTIME_BASE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" -f Dockerfile.web -t "$image" .
-      - name: Publish only the test Web image and record digest
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          image="ghcr.io/lguangming/a-share-value-screener-web-test-pr28:sha-$GITHUB_SHA"
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          docker push "$image"
-          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          printf 'Published immutable test Web image: %s@%s\n' "${image%:*}" "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
-
-  # Publish the exact scanned Minimal image, never rebuild in a privileged job.
-  publish-worker:
-    if: github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-worker]')
-    needs: [python-tests, python-local-integration, next-build, docker-pr28]
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          persist-credentials: false
-      - name: Download same-run accepted Worker candidate
+      - name: Download same-run accepted production candidates
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: accepted-worker-${{ github.sha }}-a${{ github.run_attempt }}
-          path: ${{ runner.temp }}/accepted-worker
-      - name: Verify candidate provenance before authenticating
+          name: accepted-production-${{ github.sha }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accepted-production
+      - name: Verify accepted pair before registry authentication
         shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/accepted-worker"
+          cd "$RUNNER_TEMP/accepted-production"
           sha256sum -c SHA256SUMS
           test "$(cat revision.txt)" = "$GITHUB_SHA"
-          [[ "$(cat image-id.txt)" =~ ^sha256:[a-f0-9]{64}$ ]]
-          docker load -i worker.tar
-          test "$(docker image inspect ashare-worker:minimal-eval --format '{{.Id}}')" = "$(cat image-id.txt)"
-          test "$(docker image inspect ashare-worker:minimal-eval --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
-          docker image inspect ashare-worker:minimal-eval | python3 -c '
-          import json, sys
-          cfg=json.load(sys.stdin)[0]
-          assert cfg["Architecture"]=="amd64" and cfg["Os"]=="linux"
-          assert cfg["Config"]["User"]=="10002:10010"
-          assert cfg["Config"]["Entrypoint"]==["/usr/local/bin/python3","-m","value_screener.local_pipeline"]
-          '
-      - name: Publish accepted Worker and independently verify remote config identity
+          for kind in web worker; do
+            [[ "$(cat "$kind-id.txt")" =~ ^sha256:[a-f0-9]{64}$ ]]
+            docker load -i "$kind.tar"
+          done
+          for item in 'web ashare-web:ci 10001:10010' 'worker ashare-worker:minimal-eval 10002:10010'; do
+            read -r kind local user <<< "$item"
+            test "$(docker image inspect "$local" --format '{{.Id}}')" = "$(cat "$kind-id.txt")"
+            test "$(docker image inspect "$local" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+            test "$(docker image inspect "$local" --format '{{.Os}}/{{.Architecture}} {{.Config.User}}')" = "linux/amd64 $user"
+          done
+          test "$(docker image inspect ashare-worker:minimal-eval --format '{{json .Config.Entrypoint}}')" = '["/usr/local/bin/python3","-m","value_screener.local_pipeline"]'
+      - name: Publish and verify both private production images
         env:
-          GHCR_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          image="ghcr.io/lguangming/a-share-value-screener-worker-test-pr28:sha-$GITHUB_SHA"
-          expected="$(cat "$RUNNER_TEMP/accepted-worker/image-id.txt")"
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          cd "$RUNNER_TEMP/accepted-production"
+          # Fail closed before any push unless BOTH formal packages already exist,
+          # are private, and are associated with this repository.
+          verify_private() {
+            local kind="$1"
+            gh api "users/lguangming/packages/container/a-share-value-screener-$kind" |
+              jq -e --arg name "a-share-value-screener-$kind" --arg repo "$GITHUB_REPOSITORY" '
+                .name == $name and .package_type == "container" and
+                .visibility == "private" and (.owner.login | ascii_downcase) == "lguangming" and
+                (.repository.full_name | ascii_downcase) == ($repo | ascii_downcase)
+              ' >/dev/null
+          }
+          verify_private web
+          verify_private worker
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          docker tag ashare-worker:minimal-eval "$image"
-          docker push "$image"
-          digest="$(docker buildx imagetools inspect "$image" | awk '/^Digest:/ && !found {print $2; found=1}')"
-          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
-          immutable="${image%:*}@$digest"
-          config="$(cat "$RUNNER_TEMP/accepted-worker/config-sha256.txt")"
-          mkdir -p "$RUNNER_TEMP/worker-receipt"
-          python3 tests/approve_worker_identity.py "$RUNNER_TEMP/accepted-worker/worker.tar" "$immutable" "$expected" "$config" "$GITHUB_SHA" "$RUNNER_TEMP/worker-receipt/acceptance.json"
-          printf 'Published immutable accepted Worker: %s\nDaemon image ID: %s\nConfig SHA256: %s\nRevision: %s\n' "$immutable" "$expected" "$config" "$GITHUB_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Preserve Worker publication receipt
-        if: always()
+          tag="sha-$GITHUB_SHA-run-$GITHUB_RUN_ID-a$GITHUB_RUN_ATTEMPT"
+          # Each run has a separate tag; never publish a mutable latest tag.
+          for item in 'web ashare-web:ci' 'worker ashare-worker:minimal-eval'; do
+            read -r kind local <<< "$item"
+            package="ghcr.io/lguangming/a-share-value-screener-$kind"
+            docker tag "$local" "$package:$tag"
+            docker push "$package:$tag"
+            digest="$(docker buildx imagetools inspect "$package:$tag" | awk '/^Digest:/ && !found {print $2; found=1}')"
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
+            pin="$package@$digest"
+            docker pull --platform linux/amd64 "$pin"
+            test "$(docker image inspect "$pin" --format '{{.Id}}')" = "$(cat "$kind-id.txt")"
+            test "$(docker image inspect "$pin" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+            verify_private "$kind"
+            printf '%s\n' "$pin" > "$kind-pin.txt"
+          done
+          mkdir -p "$RUNNER_TEMP/production-receipt"
+          jq -n --arg revision "$GITHUB_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg web "$(cat web-pin.txt)" --arg worker "$(cat worker-pin.txt)" \
+            '{revision:$revision,run_id:$run,attempt:$attempt,web_image:$web,worker_image:$worker,complete:true,deployment_authorized:false}' \
+            > "$RUNNER_TEMP/production-receipt/release.json"
+          printf 'Verified production image pair (not deployed):\nWEB_IMAGE=%s\nWORKER_IMAGE=%s\n' "$(cat web-pin.txt)" "$(cat worker-pin.txt)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Preserve complete production publication receipt
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: worker-publication-receipt
-          path: ${{ runner.temp }}/worker-receipt/acceptance.json
-          if-no-files-found: warn
-          retention-days: 30
+          name: production-release-receipt
+          path: ${{ runner.temp }}/production-receipt/release.json
+          if-no-files-found: error
+          retention-days: 90

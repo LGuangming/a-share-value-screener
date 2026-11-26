@@ -25,11 +25,21 @@ class RetirementTests(unittest.TestCase):
             self.assertNotIn("refs/heads/integration/", content, p.name)
             self.assertNotIn("refs/heads/feature/", content, p.name)
         ci = (ACTIVE / "ci.yml").read_text()
-        for marker in ("[publish-test-web]", "[publish-worker]"):
-            self.assertIn(marker, ci)
+        self.assertIn("[publish-production]", ci)
+        for marker in ("[publish-test-web]", "[publish-worker]", "-test-pr28"):
+            self.assertNotIn(marker, ci)
         self.assertIn("uses: ./.github/workflows/docker-ci.yml", ci)
         self.assertIn("needs: [python-tests, python-local-integration, next-build, docker-pr28]", ci)
-        self.assertIn("tests/approve_worker_identity.py", ci)
+        self.assertIn("sha256sum -c SHA256SUMS", ci)
+        self.assertIn("verify_private web", ci)
+        self.assertIn("verify_private worker", ci)
+        self.assertIn("deployment_authorized:false", ci)
+        self.assertNotIn("docker build --pull", ci)
+        docker = (ACTIVE / "docker-ci.yml").read_text()
+        self.assertIn("[publish-production]", docker)
+        self.assertIn("Save exact accepted production pair", docker)
+        self.assertIn("accepted-production-", ci)
+        self.assertIn("accepted-production-", docker)
         self.assertIn("github.event_name == 'pull_request' ||", ci)
 
 if __name__ == "__main__":
