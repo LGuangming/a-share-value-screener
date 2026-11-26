@@ -14,7 +14,7 @@ class DatasetTests(unittest.TestCase):
             root=Path(tmp)
             db=duckdb.connect()
             sqls={
-                "daily_prices":"SELECT '600001.SH' ts_code, DATE '2025-01-02' trade_date, 10.0 open, 11.0 high, 9.0 low, 10.0 close, 100.0 vol, 1000.0 amount",
+                "daily_prices":"SELECT '600001.SH' ts_code, DATE '2025-01-02' trade_date, 10.0 AS open, 11.0 AS high, 9.0 AS low, 10.0 AS \"close\", 100.0 AS vol, 1000.0 AS amount",
                 "adj_factor":"SELECT '600001.SH' ts_code, DATE '2025-01-02' trade_date, 2.0 adj_factor",
                 "daily_basic":"SELECT '600001.SH' ts_code, DATE '2025-01-02' trade_date, 200.0 total_mv, 100.0 circ_mv, 20.0 total_share, 10.0 float_share, 8.0 free_share, 1.0 turnover_rate, 1.0 pb, 10.0 pe_ttm",
                 "stk_limit":"SELECT '600001.SH' ts_code, DATE '2025-01-02' trade_date, 11.0 up_limit, 9.0 down_limit",
@@ -37,6 +37,14 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(doc["quality"]["suspension_event_rows"],2)
             self.assertEqual(db.execute("SELECT factor_scaled_close,total_mv_cny FROM market").fetchone(),(20,2000000))
             self.assertEqual(bt.write_partition(db,sources,out,2025,1)[1],"reused")
+            from datetime import date
+            daily={k:v for k,v in sources.items() if k!="historical_st"}
+            # Day-mode explicitly emits no ST evidence, never NORMAL by default.
+            result=bt.build_table(db,daily,2025,1,date(2025,1,2))
+            self.assertEqual(result["mainboard_missing_st_keys"],1)
+            self.assertEqual(db.execute("SELECT is_st, st_normal_evidence FROM market").fetchone(),(None,False))
+            with self.assertRaisesRegex(ValueError,"Source count/key mismatch"):
+                bt.build_table(db,daily,2025,1,date(2025,1,3))
             path=out/"year=2025"/"month=01"/doc["outputs"]["market"]["file"]
             path.write_bytes(b"corrupt")
             with self.assertRaisesRegex(ValueError,"Corrupt existing output"):

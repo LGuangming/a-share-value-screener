@@ -30,3 +30,12 @@ versions, historical universe validation, exact suspension semantics,
 corporate actions and dividend cash accounting, formal backtests, result
 publication, and actual VPS resource/coverage acceptance. No strategy
 performance may be published from this dataset alone.
+
+## Incremental market stage (2026+)
+
+Use --incremental --start-year 2026 --end-year 2026, optionally --day YYYY-MM-DD.
+Only committed day records with matching five source manifests and open calendar evidence
+are read; do not consume monthly reader snapshots. Each completed day has its own
+immutable output directory. ST columns remain NULL and the manifest explicitly blocks
+formal strategy use; no current-name backfill. Historical annual partitions remain unchanged.
+This is not a scheduler or a completeness proof against an independent calendar.
