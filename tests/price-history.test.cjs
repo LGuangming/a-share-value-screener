@@ -8,7 +8,7 @@ const stockPage = fs.readFileSync(path.join(__dirname, "../app/stocks/[code]/pag
 const chart = fs.readFileSync(path.join(__dirname, "../components/market-chart.tsx"), "utf8");
 const archive = fs.readFileSync(path.join(__dirname, "../lib/archive-quotes.ts"), "utf8");
 const schema = fs.readFileSync(path.join(__dirname, "../database/neon-schema.sql"), "utf8");
-const workflow = fs.readFileSync(path.join(__dirname, "../.github/workflows/recent-price-history.yml"), "utf8");
+const workflow = fs.readFileSync(path.join(__dirname, "../docs/legacy-cloud-workflows/recent-price-history.yml"), "utf8");
 
 test("stock detail combines compact historical closes and daily quotes", () => {
   const detail = data.slice(data.indexOf("export async function stockDetail"));
@@ -47,7 +47,7 @@ test("Neon schema contains the compact price history table", () => {
   assert.match(schema, /primary key\(ts_code, trade_date\)/);
 });
 
-test("one-off history workflow defaults to 160 total calendar days", () => {
+test("archived one-off history workflow retains its original 160-day default", () => {
   assert.match(workflow, /default: '160'/);
   assert.match(workflow, /HISTORY_DAYS:.*'160'/);
   assert.match(workflow, /bootstrap-prices --days/);
@@ -138,4 +138,19 @@ test("recent window follows market sessions across years without inventing suspe
   const shifted=recentWindow([...bars,{day:next,open:10,high:11,low:9,close:10}], [...dates,next]);
   assert.equal(shifted.from,dates[11]);
   assert.equal(shifted.to,next);
+});
+
+test("legacy cloud data workflows remain archived and inactive", () => {
+  const retired = [
+    "daily-scan", "financial-refresh", "raw-market-incremental",
+    "raw-data-maintenance", "recalculate-ncav", "recent-price-history",
+    "history-parquet-prototype", "phase2-historical-st", "financial-gap-diagnosis"
+  ];
+  for (const name of retired) {
+    const file = name + ".yml";
+    assert.equal(fs.existsSync(path.join(__dirname, "../.github/workflows", file)), false, file);
+    assert.equal(fs.existsSync(path.join(__dirname, "../docs/legacy-cloud-workflows", file)), true, file);
+  }
+  const markers = path.join(__dirname, "../.github/one-shot");
+  assert.equal(fs.existsSync(markers) ? fs.readdirSync(markers).length : 0, 0);
 });
