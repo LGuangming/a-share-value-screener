@@ -198,9 +198,18 @@ jobs:
             digest="$(docker buildx imagetools inspect "$package:$tag" | awk '/^Digest:/ && !found {print $2; found=1}')"
             [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]
             pin="$package@$digest"
+            # Independently resolve the remote manifest config, in addition to
+            # checking the actual authenticated pull and the original archive.
+            PYTHONPATH="$GITHUB_WORKSPACE/tests" python3 - "$pin" "$(cat "$kind-config.txt")" <<'PY'
+          import sys
+          from verify_worker_manifest import config_digest, fetch_manifest
+          if config_digest(sys.argv[1], fetch_manifest) != sys.argv[2]:
+              raise SystemExit("Registry manifest config differs from accepted archive")
+          PY
             docker pull --platform linux/amd64 "$pin"
             test "$(docker image inspect "$pin" --format '{{.Id}}')" = "$(cat "$kind-id.txt")"
             test "$(docker image inspect "$pin" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+            test "$(docker image inspect "$pin" --format '{{.Os}}/{{.Architecture}}')" = "linux/amd64"
             verify_private "$kind"
             printf '%s\n' "$pin" > "$kind-pin.txt"
           done

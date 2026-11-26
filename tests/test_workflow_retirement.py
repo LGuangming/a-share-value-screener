@@ -33,6 +33,8 @@ class RetirementTests(unittest.TestCase):
         self.assertIn("sha256sum -c SHA256SUMS", ci)
         self.assertIn("verify_private web", ci)
         self.assertIn("verify_private worker", ci)
+        self.assertIn("from verify_worker_manifest import config_digest, fetch_manifest", ci)
+        self.assertIn("web-config.txt worker-config.txt", (ACTIVE / "docker-ci.yml").read_text())
         self.assertIn("deployment_authorized:false", ci)
         self.assertNotIn("docker build --pull", ci)
         docker = (ACTIVE / "docker-ci.yml").read_text()

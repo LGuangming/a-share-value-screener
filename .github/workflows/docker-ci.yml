@@ -411,8 +411,9 @@ jobs:
               info=archive_info(root/(kind+".tar"))
               if not info["all_layers_verified"]:
                   raise SystemExit("Saved candidate layer integrity failed: "+kind)
+              (root/(kind+"-config.txt")).write_text(info["config_sha"]+"\n")
           PY
-          (cd "$dir"; sha256sum web.tar worker.tar web-id.txt worker-id.txt revision.txt > SHA256SUMS)
+          (cd "$dir"; sha256sum web.tar worker.tar web-id.txt worker-id.txt web-config.txt worker-config.txt revision.txt > SHA256SUMS)
       - name: Transfer accepted production pair (no registry permission)
         if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-production]')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
