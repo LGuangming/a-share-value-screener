@@ -245,7 +245,7 @@ class ArtifactTests(unittest.TestCase):
             (root/"pair.json").write_bytes(b"bad")
             with self.assertRaises(p.Blocked): p.verify_files(root)
     def test_workflow_safety(self):
-        w=(pathlib.Path(__file__).resolve().parents[1]/".github/workflows/ghcr-test-images.yml").read_text()
+        w=(pathlib.Path(__file__).resolve().parents[1]/"docs/legacy-ghcr-workflows/ghcr-test-images.yml").read_text()
         for t in ("github.event_name == 'workflow_dispatch'","refs/heads/main","github.run_attempt == '1'",
                   "needs.reviewed-pair.result == 'success'","needs.reviewed-pair.result == 'skipped'","packages: write",
                   "reviewed-source/tests/candidate_vulnerability_gate.py","publication-progress.json","pair-release.json",

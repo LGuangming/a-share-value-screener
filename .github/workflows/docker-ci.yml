@@ -1,23 +1,6 @@
 name: Docker Images and Compose
 on:
   workflow_call:
-  pull_request:
-  push:
-    branches: [feature/vps-docker-compose]
-    paths:
-      - 'Dockerfile.*'
-      - 'compose*.yaml'
-      - '.dockerignore'
-      - 'package*.json'
-      - 'app/**'
-      - 'components/**'
-      - 'lib/**'
-      - 'backend/**'
-      - 'tests/**'
-      - 'deploy/**'
-      - 'docs/**'
-      - 'next.config.ts'
-      - '.github/workflows/docker-ci.yml'
 permissions:
   contents: read
 jobs:

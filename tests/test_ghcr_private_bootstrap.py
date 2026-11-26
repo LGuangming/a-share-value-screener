@@ -251,7 +251,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(r.inspect(r.local, (b.UNLINKED_LABELS,)), image_id)
     def test_workflow_is_manual_and_read_only(self):
         root = pathlib.Path(__file__).resolve().parents[1]
-        wf = (root / ".github/workflows/ghcr-package-bootstrap.yml").read_text()
+        wf = (root / "docs/legacy-ghcr-workflows/ghcr-package-bootstrap.yml").read_text()
         self.assertIn("workflow_dispatch:", wf)
         self.assertNotIn("\n  push:", wf)
         self.assertNotIn("\n  pull_request:", wf)

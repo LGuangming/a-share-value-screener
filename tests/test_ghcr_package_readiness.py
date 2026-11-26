@@ -11,7 +11,7 @@ import urllib.error
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".github/workflows/ghcr-package-readiness.yml"
+WORKFLOW = ROOT / "docs/legacy-ghcr-workflows/ghcr-package-readiness.yml"
 PREFIX = "https://api.github.com/users/lguangming/packages/container/"
 NAMES = ["a-share-value-screener-web-test-pr28", "a-share-value-screener-worker-test-pr28"]
 VERSION_SUFFIX = "/versions?per_page=1"
