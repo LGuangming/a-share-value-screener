@@ -116,6 +116,7 @@ def create_once(p, data, mode=0o600):
     try:
         fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,mode)
         with os.fdopen(fd,"wb") as f:
+            os.fchmod(f.fileno(),mode)
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
@@ -286,10 +287,16 @@ def verify_container(s,image_id,network_id):
     cfg=d["Config"]; host=d["HostConfig"]
     need(d.get("Name")=="/"+DB and (cfg.get("Labels") or {}).get(LABEL)==s["owner_id"] and d.get("Image")==image_id,"unowned or changed test database container")
     net=d["NetworkSettings"]["Networks"]
-    need(set(net)=={NET} and net[NET]["NetworkID"]==network_id and "postgres" in (net[NET].get("Aliases") or []),"test DB network/alias mismatch")
+    need(set(net)=={NET} and "postgres" in (net[NET].get("Aliases") or []),"test DB network/alias mismatch")
+    # Docker may defer endpoint ID assignment until start; require the explicit
+    # network mode and exact endpoint on running containers.
+    running=d.get("State",{}).get("Running",False)
+    need(host.get("NetworkMode") in (NET,network_id) and (net[NET]["NetworkID"]==network_id or
+         (not running and net[NET]["NetworkID"] in ("",None))),"test DB endpoint mismatch")
     need(not host.get("Privileged") and not host.get("PublishAllPorts") and not host.get("PortBindings")
          and host.get("Memory")==512*1024**2 and host.get("NanoCpus")==1000000000
-         and host.get("RestartPolicy",{}).get("Name") in ("no",""),"test DB resource or security configuration mismatch")
+         and host.get("RestartPolicy",{}).get("Name") in ("no","")
+         and "no-new-privileges:true" in (host.get("SecurityOpt") or []),"test DB resource or security configuration mismatch")
     mounts=d["Mounts"]
     need(len(mounts)==1 and mounts[0]["Type"]=="bind" and mounts[0]["Source"]==str(ROOT/"postgres")
          and mounts[0]["Destination"]=="/var/lib/postgresql" and mounts[0]["RW"],"test DB mount mismatch")

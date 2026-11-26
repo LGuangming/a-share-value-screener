@@ -84,7 +84,8 @@ class Tests(unittest.TestCase):
         d={"Name":"/"+m.DB,"Image":iid,"Config":{"Labels":{m.LABEL:s["owner_id"]},
             "Env":["POSTGRES_USER=fixture_admin","POSTGRES_DB=ashare_test","POSTGRES_PASSWORD="+s["admin"]],
             "Entrypoint":["docker-entrypoint.sh"],"Cmd":["postgres"]},
-            "HostConfig":{"Memory":512*1024**2,"NanoCpus":1000000000,"RestartPolicy":{"Name":"no"}},
+            "HostConfig":{"Memory":512*1024**2,"NanoCpus":1000000000,"RestartPolicy":{"Name":"no"},
+                          "NetworkMode":m.NET,"SecurityOpt":["no-new-privileges:true"]},
             "NetworkSettings":{"Networks":{m.NET:{"NetworkID":"n","Aliases":["postgres"]}}},
             "Mounts":[{"Type":"bind","Source":str(m.ROOT/"postgres"),"Destination":"/var/lib/postgresql","RW":True}]}
         with patch.object(m,"read_json",return_value=d):m.verify_container(s,iid,"n")
@@ -104,6 +105,12 @@ class Tests(unittest.TestCase):
                 m.create_once(p,b"initial")
                 with self.assertRaises(m.Blocked):m.create_once(p,b"changed")
             self.assertEqual(p.read_bytes(),b"initial")
+            q=pathlib.Path(d)/"compose"
+            import os,stat
+            old=os.umask(0o077)
+            try: m.create_once(q,b"compose",0o644)
+            finally: os.umask(old)
+            self.assertEqual(stat.S_IMODE(q.stat().st_mode),0o644)
     def test_symlink_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             p=pathlib.Path(d)/"link";p.symlink_to("/tmp")
