@@ -16,6 +16,11 @@ on:
       end_date:
         description: Optional last date YYYY-MM-DD
         type: string
+  push:
+    branches: [main]
+    paths:
+      - '.github/one-shot/raw-incremental-start-20261124.txt'
+      - '.github/one-shot/raw-2026-backfill-20261124.txt'
 permissions:
   contents: read
 concurrency:

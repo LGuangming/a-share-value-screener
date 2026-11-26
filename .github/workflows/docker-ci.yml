@@ -114,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p eval-reports
-          docker build --progress=plain --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" -f Dockerfile.worker -t ashare-worker:minimal-eval . 2>&1 | tee eval-reports/minimal-build.log
+          docker build --progress=plain --pull --platform linux/amd64 --build-arg PYTHON_BASE="$PYTHON_BASE" --build-arg MINIMAL_RUNTIME_BASE="$MINIMAL_RUNTIME_BASE" --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" -f Dockerfile.worker -t ashare-worker:minimal-eval . 2>&1 | tee eval-reports/minimal-build.log
       - name: Verify default Worker entrypoint and identity
         shell: bash
         run: |
@@ -404,6 +404,38 @@ jobs:
           path: eval-reports/
           retention-days: 14
           if-no-files-found: error
+
+      # Only export the exact scanned image on an explicitly authorized main run.
+      - name: Save exact accepted Worker candidate for separate publication
+        if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-worker]')
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/accepted-worker"
+          mkdir -p "$dir"
+          docker image inspect ashare-worker:minimal-eval --format '{{.Id}}' > "$dir/image-id.txt"
+          test "$(docker image inspect ashare-worker:minimal-eval --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$GITHUB_SHA"
+          printf '%s\n' "$GITHUB_SHA" > "$dir/revision.txt"
+          docker save -o "$dir/worker.tar" ashare-worker:minimal-eval
+          PYTHONPATH=tests python3 - "$dir" <<'PY'
+          import pathlib,sys
+          from diagnose_worker_identity import archive_info
+          root=pathlib.Path(sys.argv[1])
+          info=archive_info(root/"worker.tar")
+          if not info["all_layers_verified"]:
+              raise SystemExit("Saved candidate layer integrity failed")
+          (root/"config-sha256.txt").write_text(info["config_sha"]+"\n")
+          PY
+          (cd "$dir"; sha256sum worker.tar image-id.txt config-sha256.txt revision.txt > SHA256SUMS)
+      - name: Transfer accepted Worker artifact (no registry permission)
+        if: success() && github.repository == 'LGuangming/a-share-value-screener' && github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-worker]')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: accepted-worker-${{ github.sha }}-a${{ github.run_attempt }}
+          path: ${{ runner.temp }}/accepted-worker/
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 0
 
   release-candidate-gate:
     name: Release candidate acceptance (no publication)
