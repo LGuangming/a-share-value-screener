@@ -200,8 +200,8 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         # Checkpoint each calendar month, even when the incremental source is daily.
         months={}
         for i,(rel,days) in enumerate(groups):
-            selected=[d for d in days if d<=args.end]
-            if selected:months.setdefault(selected[0].strftime("%Y-%m"),[]).append((i,selected))
+            selected_days=[d for d in days if d<=args.end]
+            if selected_days:months.setdefault(selected_days[0].strftime("%Y-%m"),[]).append((i,selected_days))
         portfolios={k:Portfolio(cfg,fees,actions) for k in selected}
         ages={};previous_hash=None;completed=0;rows_seen=0;checkpoint_refs=[]
         for month,parts in months.items():
