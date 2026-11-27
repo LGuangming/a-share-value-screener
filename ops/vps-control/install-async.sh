@@ -33,7 +33,7 @@ for lane in research collection; do
   fi
   install -m 0644 "$root/ashare-$lane-worker.service" "$root/ashare-$lane-worker.timer" /etc/systemd/system/
 done
-install -o root -g root -m 0644 "$root/worker.py" "$root/collection_runner.py" /opt/ashare-control/
+install -o root -g root -m 0644 "$root/worker.py" "$root/collection_runner.py" "$root/maintenance_runner.py" "$root/runtime_slots.py" /opt/ashare-control/
 for stage in reference dividend; do
   name="collect-$stage"
   if ! test -e "/opt/ashare-control/profiles/$name" && ! test -L "/opt/ashare-control/profiles/$name"; then
@@ -42,6 +42,20 @@ for stage in reference dividend; do
     install -o root -g root -m 0755 "$tmp" "/opt/ashare-control/profiles/$name"
     rm -f "$tmp"
   fi
+done
+# Install fixed research-only wrappers. No profile is enabled here.
+for name in bt03-maintain runtime-activate runtime-rollback; do
+  if test -e "/opt/ashare-control/profiles/$name" || test -L "/opt/ashare-control/profiles/$name"; then
+    continue
+  fi
+  tmp="$(mktemp)"
+  case "$name" in
+    bt03-maintain) printf '#!/bin/sh\nexec /usr/bin/python3 -I /opt/ashare-control/maintenance_runner.py\n' > "$tmp" ;;
+    runtime-activate) printf '#!/bin/sh\nexec /usr/bin/python3 -I /opt/ashare-control/runtime_slots.py candidate\n' > "$tmp" ;;
+    runtime-rollback) printf '#!/bin/sh\nexec /usr/bin/python3 -I /opt/ashare-control/runtime_slots.py baseline\n' > "$tmp" ;;
+  esac
+  install -o root -g root -m 0755 "$tmp" "/opt/ashare-control/profiles/$name"
+  rm -f "$tmp"
 done
 install -d -o root -g root -m 0755 /etc/systemd/system/ashare-vps-control.service.d
 cat > /etc/systemd/system/ashare-vps-control.service.d/async-spool.conf <<'EOF'
