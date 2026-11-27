@@ -34,7 +34,7 @@ VERSION=4  # V2.2 feature generation; wire protocol remains v1
 LANES={"research","collection"}
 SPOOL=Path("/var/lib/ashare-control-spool")
 READ_TASKS={"capabilities","data_inventory","backtest_status","task_status","task_logs","docker_status","deployment_status","maintenance_status"}
-REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment","maintenance","runtime"}
+REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment","maintenance","runtime","security_audit"}
 INVENTORY_KINDS={"market","security","dividend","reference"}
 MAX_REPORT_BYTES=4*1024*1024
 MAX_ENTRIES=20000
@@ -279,6 +279,16 @@ def clean_report(kind,doc):
         out["state"]=doc["status"]
         if doc.get("stage") in ("reference","dividend","preflight","signals","portfolio","walk"):out["stage"]=doc["stage"]
         out.update(numeric(doc,("completed","total","elapsed_seconds","exit_code","peak_rss_kib")))
+    elif kind=="security_audit":
+        if doc.get("status")!="BT03_SECURITY_AUDIT_V1" or doc.get("state") not in ("running","completed","failed"):
+            raise ValueError("Invalid security audit")
+        counts=("checked_partitions","verified_partitions","failed_partitions","missing_partitions")
+        out["state"]=doc["state"]
+        out.update(numeric(doc,counts+("expected_partitions","elapsed_seconds")))
+        fields=counts+("market_rows","security_rows","mainboard_rows","provisional_eligible_rows",
+                 "st_unresolved_rows","st_unknown_rows","listing_anomaly_rows","invalid_factor_rows",
+                 "invalid_limit_rows","duplicate_keys","key_mismatch_rows","invalid_evidence_rows")
+        out["years"]={str(y):numeric(doc["years"][str(y)],fields) for y in range(2020,2026)}
     elif kind=="maintenance":
         if doc.get("status")!="BT03_LOCAL_MAINTENANCE_V1":raise ValueError("Unexpected maintenance report")
         if doc.get("state") not in ("running","completed","failed","no_pending_batch"):raise ValueError("Invalid maintenance state")
@@ -337,7 +347,7 @@ def diagnostics(doc,cfg,state):
     spec=cfg.get("reports",{}).get(doc["report"])
     allowed={"backtest_status":{"preflight","signals","portfolio","walk"},"task_logs":{"progress"},
              "docker_status":{"containers"},"deployment_status":{"deployment"},
-             "maintenance_status":{"maintenance","runtime"}}[task]
+             "maintenance_status":{"maintenance","runtime","security_audit"}}[task]
     if not spec or spec["kind"] not in allowed:return {"status":"rejected","reason":"report_not_locally_enabled"}
     try:
         snapshot=clean_report(spec["kind"],bounded_json(spec["file"]))
