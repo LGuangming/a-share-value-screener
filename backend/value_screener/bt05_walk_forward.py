@@ -13,7 +13,7 @@ import json
 from math import isfinite,sqrt
 from pathlib import Path
 from types import SimpleNamespace
-from . import bt04_research as bt04,bt05_research as bt05
+from . import bt04_research as bt04,bt05_research as bt05,bt05_grid,bt05_portfolio,bt05_actions,technical_strategies,backtest_engine,technical_research
 from .bt05_grid import put,select
 from .technical_strategies import TechnicalConfig
 from .backtest_engine import BacktestConfig
@@ -75,6 +75,8 @@ def comparison(directory,result,strategy,levels,sessions,initial):
         equity.extend((date.fromisoformat(x["equity"]["day"]),x["equity"]["equity"])
                       for x in body["records"][strategy])
     if [d for d,v in equity]!=sessions:raise ValueError("Portfolio/benchmark session mismatch")
+    if not isfinite(initial) or initial<=0 or not equity or abs(equity[0][1]-initial)>1e-6 or any(not isfinite(v) or v<0 for _,v in equity):
+        raise ValueError("Invalid independent portfolio baseline")
     first=levels[sessions[0]];base=initial;prior=first;peak=1.;drawdown=0.;excess=[]
     curve=[]
     for d,v in equity:
@@ -113,7 +115,7 @@ def run(a):
     inputs_by_partition={x["partition"]:x for x in inputs}
     contract={"status":STATUS,"formal_backtest_ready":False,"inputs":inputs,
         "file_hashes":hashes,"benchmark":bench,"shards":a.shards,
-        "code_sha256":{Path(p).name:sha256(Path(p)) for p in (__file__,bt04.__file__,bt05.__file__)},
+        "code_sha256":{Path(p).name:sha256(Path(p)) for p in (__file__,bt04.__file__,bt05.__file__,bt05_grid.__file__,bt05_portfolio.__file__,bt05_actions.__file__,technical_strategies.__file__,backtest_engine.__file__,technical_research.__file__)},
         "selection":"training_total_return_then_smaller_drawdown_then_config_id",
         "limitations":["independent_reset_each_test_fold","no_compounded_cross_fold_return",
             "benchmark_operator_evidence_not_certified","provisional_universe_and_company_actions",
@@ -181,6 +183,7 @@ def run(a):
             rows=[f["results"][k] for f in results if f["results"][k] is not None]
             x=[v["comparison"]["excess_return_difference"] for v in rows]
             aggregates[k]={"total_folds":len(results),"selected_folds":len(rows),
+                "unselected_folds":len(results)-len(rows),
                 "positive_excess_folds":sum(v>0 for v in x),
                 "mean_fold_excess_return":sum(x)/len(x) if x else None}
         result={"status":STATUS,"formal_backtest_ready":False,"experiment_id":bt05.identity(contract),
@@ -194,6 +197,7 @@ def main():
         p.add_argument("--"+k,type=Path,required=True)
     p.add_argument("--fees",type=Path);p.add_argument("--actions",type=Path)
     p.add_argument("--shards",type=int,default=8)
-    if not p.parse_args().plan.is_file():p.error("Plan file required")
-    print(json.dumps(run(p.parse_args()),ensure_ascii=False))
+    args=p.parse_args()
+    if not args.plan.is_file():p.error("Plan file required")
+    print(json.dumps(run(args),ensure_ascii=False))
 if __name__=="__main__":main()
