@@ -84,6 +84,9 @@ def atomic(path,doc):
     p=path.with_suffix(".tmp")
     with p.open("w") as f:json.dump(doc,f,sort_keys=True);f.flush();os.fsync(f.fileno())
     os.replace(p,path)
+    fd=os.open(path.parent,os.O_DIRECTORY|os.O_RDONLY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
 
 def run(stage,doc):
     work=BASE/doc["run_name"]
