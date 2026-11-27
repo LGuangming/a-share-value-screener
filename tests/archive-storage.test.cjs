@@ -89,7 +89,7 @@ test("real Parquet and financial fixtures: local/Neon transport parity and integ
   execFileSync("python",[path.join(__dirname,"fixtures","generate-archive.py"),dir],{stdio:"inherit"});
   const backing=local.createLocalStorage(dir);
   const sdk=require("@aws-sdk/client-s3");
-  let requests=0;
+  let requests=0,parquetReads=0,parquetBytes=0;
   class MockS3{
     constructor(config){assert.equal(config.forcePathStyle,true);}
     async send(cmd){
@@ -97,6 +97,7 @@ test("real Parquet and financial fixtures: local/Neon transport parity and integ
       if(cmd instanceof sdk.GetObjectCommand){
         const bytes=await backing.get(cmd.input.Key,32*1024*1024);
         if(bytes===null)throw Object.assign(Error("missing"),{name:"NoSuchKey"});
+        if(cmd.input.Key.endsWith(".parquet")){parquetReads++;parquetBytes+=bytes.length;}
         return {ContentLength:bytes.length,Body:Readable.from([Buffer.from(bytes)])};
       }
       if(cmd instanceof sdk.ListObjectsV2Command){
@@ -138,7 +139,35 @@ test("real Parquet and financial fixtures: local/Neon transport parity and integ
   assert.ok(requests>0);
   assert.ok(cacheKeys.some(x=>x.keys[1]?.startsWith("local:")));
   assert.ok(cacheKeys.some(x=>x.keys[1]?.startsWith("neon:")));
+  // Compare real Parquet file/byte counts on the same uncached fixture transport.
+  const perf=async(fn)=>{
+    const reads=parquetReads,bytes=parquetBytes,start=performance.now();
+    const value=await fn();
+    return {value,reads:parquetReads-reads,bytes:parquetBytes-bytes,ms:performance.now()-start};
+  };
+  const annualPerf=await perf(()=>q.archivedQuotes(code,2025));
+  const monthlyPerf=await perf(()=>q.rangeQuotes(code,"2025-02-05","2025-02-20"));
+  assert.equal(annualPerf.reads,12);assert.equal(monthlyPerf.reads,1);
+  assert.ok(monthlyPerf.bytes<annualPerf.bytes);
+  assert.deepEqual(monthlyPerf.value.bars,annualPerf.value.filter(b=>b.day>="2025-02-05"&&b.day<="2025-02-20"));
+  const factorPerf=await perf(()=>q.rangeFactors(code,"2025-02-05","2025-02-20"));
+  assert.equal(factorPerf.reads,1);
+  assert.deepEqual(factorPerf.value,expected.factors.filter(f=>f.day>="2025-02-05"&&f.day<="2025-02-20"));
+  const cross=await perf(()=>q.rangeQuotes(code,"2025-12-29","2026-01-05"));
+  assert.equal(cross.reads,2);
+  assert.deepEqual(cross.value.bars,[...expected.annual,...expected.current.bars].filter(b=>b.day>="2025-12-29"&&b.day<="2026-01-05"));
+  assert.equal(cross.value.coverage.partial,false);
+  const crossFactors=await q.rangeFactors(code,"2025-12-29","2026-01-05");
+  assert.deepEqual(crossFactors,[...expected.factors,...expected.currentFactors.factors].filter(f=>f.day>="2025-12-29"&&f.day<="2026-01-05"));
+  assert.deepEqual((await q.rangeQuotes(code,"2025-02-08","2025-02-09")).bars,[]);
+  assert.throws(()=>q.boundedHistoryMonths("2025-01-01","2025-04-01"),/最多三个月/);
+  assert.throws(()=>q.boundedHistoryMonths("2025-02-30","2025-03-01"));
+  assert.ok(cacheKeys.some(x=>x.keys[0]==="market-quote-month-v1"&&x.opts.revalidate===86400));
+  assert.ok(cacheKeys.some(x=>x.keys[0]==="market-incremental-quote-month-v1"&&x.opts.revalidate===60));
+  console.log("Monthly range fixture performance:",JSON.stringify({annual:{reads:annualPerf.reads,bytes:annualPerf.bytes,ms:annualPerf.ms},monthly:{reads:monthlyPerf.reads,bytes:monthlyPerf.bytes,ms:monthlyPerf.ms},crossYear:{reads:cross.reads,bytes:cross.bytes,ms:cross.ms}}));
   process.env.ARCHIVE_STORAGE_DRIVER="local";
+  assert.deepEqual(await q.rangeQuotes(code,"2025-12-29","2026-01-05"),cross.value);
+  assert.deepEqual(await q.rangeFactors(code,"2025-12-29","2026-01-05"),crossFactors);
   const manifest=prefix+"/daily_prices/year=2025/manifest.json";
   const raw=await backing.get(manifest,128*1024);
   const doc=JSON.parse(Buffer.from(raw));
@@ -147,6 +176,8 @@ test("real Parquet and financial fixtures: local/Neon transport parity and integ
   const bad=Buffer.from(bytes);bad[0]^=1;
   await write(dir,file,bad);
   await assert.rejects(q.archivedQuotes(code,2025),/Archive checksum mismatch/);
+  await assert.rejects(q.rangeQuotes(code,"2025-01-01","2025-01-31"),/Archive checksum mismatch/);
+  assert.deepEqual((await q.rangeQuotes(code,"2025-02-05","2025-02-20")).bars,monthlyPerf.value.bars);
   await write(dir,file,bytes);
   doc.partition_files[0].rows++;
   await write(dir,manifest,JSON.stringify(doc));

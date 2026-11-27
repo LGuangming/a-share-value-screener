@@ -102,8 +102,8 @@ test("indicators use genuine OHLC and omit insufficient lookback",()=>{
   assert.deepEqual(kdj(flat.map(b=>({day:b.day,close:b.close}))),[]);
   assert.deepEqual(macd(flat.slice(0,20)),[]);
 });
-test("V4 chart requests yearly archives in bounded batches and checks factor integrity",()=>{
-  assert.match(chart,/i<years.length;i\+=2/);
+test("chart requests monthly archives in bounded batches and checks factor integrity",()=>{
+  assert.match(chart,/i<chunks.length;i\+=2/);
   assert.match(chart,/mergeArchivedBars\(all\)/);
   assert.match(chart,/adjustBars\(rawDaily,factors.values,adjustment\)/);
   assert.match(archive,/Factor checksum mismatch/);
@@ -153,4 +153,74 @@ test("legacy cloud data workflows remain archived and inactive", () => {
   }
   const markers = path.join(__dirname, "../.github/one-shot");
   assert.equal(fs.existsSync(markers) ? fs.readdirSync(markers).length : 0, 0);
+});
+
+
+test("custom calendar periods enumerate only intersecting years and reject invalid dates",()=>{
+  const {historyYears}=barModule.exports;
+  assert.deepEqual(historyYears("2022-01-01","2024-12-31","2026-11-27"),[2022,2023,2024]);
+  assert.deepEqual(historyYears("2024-02-29","2024-02-29","2026-11-27"),[2024]);
+  for(const [from,to] of [["2025-02-29","2025-03-01"],["2019-12-31","2020-01-01"],["2025-01-02","2025-01-01"],["2026-11-27","2026-11-28"],["","2026-11-27"]]){
+    assert.throws(()=>historyYears(from,to,"2026-11-27"),/有效的行情期间/);
+  }
+});
+test("custom period includes both date boundaries and uses selected interval adjustment anchors",()=>{
+  const {mergeArchivedBars,filterHistoryRange,adjustBars}=barModule.exports;
+  const dates=["2024-12-30","2024-12-31","2025-01-02","2025-01-03"];
+  const points=dates.map(day=>({day,open:10,high:11,low:9,close:10,volume:100}));
+  const selected=filterHistoryRange(mergeArchivedBars([points.slice(2),points.slice(0,2)]),"2024-12-31","2025-01-02");
+  assert.deepEqual(selected.map(b=>b.day),dates.slice(1,3));
+  const factors=dates.map((day,i)=>({day,factor:i+1}));
+  assert.equal(adjustBars(selected,factors,"forward").at(-1).close,10);
+  assert.equal(adjustBars(selected,factors,"backward")[0].close,10);
+  assert.deepEqual(filterHistoryRange(points,"2025-01-04","2025-01-05"),[]);
+});
+test("chart exposes exactly two range modes and applies dates before adjustment and aggregation",()=>{
+  assert.match(chart,/option value="recent">最近行情/);
+  assert.match(chart,/option value="custom">指定期间行情/);
+  assert.doesNotMatch(chart,/年归档<\/option>|连续行情<\/option>/);
+  assert.match(chart,/mergeArchivedBars\(all\)/);
+  assert.match(chart,/historyChunks\(range.from,range.to,TODAY\)/);
+  assert.match(chart,/applyRange\(draft.from,draft.to\)/);
+  assert.match(chart,/range.from\+":"\+range.to/);
+});
+
+test("monthly chunks cover an arbitrary date range exactly, including across years",()=>{
+  const {historyChunks,historyMonths,previousDay}=barModule.exports;
+  const max="2026-11-27";
+  assert.deepEqual(historyChunks("2024-11-15","2025-02-15",max),[{from:"2024-11-15",to:"2025-01-31"},{from:"2025-02-01",to:"2025-02-15"}]);
+  assert.equal(historyMonths("2025-02-01","2025-02-28",max).length,1);
+  const chunks=historyChunks("2020-01-01",max,max);
+  assert.equal(chunks[0].from,"2020-01-01");
+  assert.equal(chunks.at(-1).to,max);
+  for(let i=0;i<chunks.length;i++){
+    const c=chunks[i];assert.ok(historyMonths(c.from,c.to,max).length<=3);
+    if(i)assert.equal(previousDay(c.from),chunks[i-1].to);
+  }
+  assert.throws(()=>historyChunks("2025-02-29","2025-03-01",max));
+});
+test("warmup stays before displayed calendar buckets and preserves visible adjustment anchors",()=>{
+  const {priorHistoryEnd,previousHistoryChunk,indicatorLookback,adjustBars,movingAverage}=barModule.exports;
+  assert.equal(priorHistoryEnd("2025-01-08","D"),"2025-01-07");
+  assert.equal(priorHistoryEnd("2025-01-08","W"),"2025-01-05");
+  assert.equal(priorHistoryEnd("2025-01-08","M"),"2024-12-31");
+  assert.deepEqual(previousHistoryChunk("2020-02-10"),{from:"2020-01-01",to:"2020-02-10"});
+  assert.equal(previousHistoryChunk("2019-12-31"),null);
+  assert.equal(indicatorLookback([20,50],false,"none"),49);
+  assert.equal(indicatorLookback([250],true,"macd"),249);
+  assert.equal(indicatorLookback([],false,"rsi"),100);
+  const day1="2024-12-31",day2="2025-01-02";
+  const before={day:day1,open:10,high:12,low:9,close:10},visible={...before,day:day2,open:5,high:6,low:4.5,close:5};
+  const factors=[{day:day1,factor:1},{day:day2,factor:2}];
+  const prior=adjustBars([before],factors,"backward",day2);
+  const shown=adjustBars([visible],factors,"backward");
+  assert.equal(prior[0].close,5);assert.equal(shown[0].close,5);
+  assert.deepEqual(movingAverage([...prior,...shown],2).filter(p=>p.time===day2),[{time:day2,value:5}]);
+  assert.throws(()=>adjustBars([before],factors,"forward","2025-01-03"),/锚点缺失/);
+});
+test("warmup is never rendered as visible candles or indicator points",()=>{
+  assert.match(chart,/const bars=useMemo\(\(\)=>aggregateBars\(daily,period\)/);
+  assert.match(chart,/movingAverage\(indicatorBars,ma.period\).filter\(p=>visibleDays.has\(p.time\)\)/);
+  assert.match(chart,/priorHistoryEnd\(visibleFrom!,period\)/);
+  assert.match(chart,/adjustBars\(previous,\[\.\.\.precedingFactors,\.\.\.factors!.values\],adjustment,anchor\)/);
 });
