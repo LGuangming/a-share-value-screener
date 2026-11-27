@@ -144,7 +144,8 @@ def _performance(curve: list[EquityPoint], trades: list[Trade],
 
 
 def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
-                 cfg: BacktestConfig = BacktestConfig()) -> dict:
+                 cfg: BacktestConfig = BacktestConfig(),
+                 *, entry_eligible: Mapping[date, set[str]] | None = None) -> dict:
     """Run a long-only cash portfolio. Signal date is CLOSE; fill at NEXT OPEN.
 
     A blocked sell is retried at subsequent opens, including after hold expiry.
@@ -201,6 +202,8 @@ def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
             candidates=list(dict.fromkeys(close_signals.get(prev_day,[])))
             for code in candidates:
                 if code in holdings or len(holdings)>=cfg.max_positions:
+                    continue
+                if entry_eligible is not None and code not in entry_eligible.get(day,set()):
                     continue
                 bar=today.get(code)
                 if not _tradable(bar,cfg,"buy"):
