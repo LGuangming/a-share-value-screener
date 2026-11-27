@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
+from .backtest_bulk import insert_columns, progress
 
 from .archive_paths import RAW_PREFIX
 from .backtest_dataset import atomic_json, digest, read_json, incremental_inputs, sync_dir, MAIN
@@ -120,15 +122,55 @@ def collect(archive, evidence_dir, day, budget, client):
         "mainboard_symbols":len(codes),"new_captures":processed,"budget":budget}),flush=True)
 
 
+def historical_security_rows(db,market_path,snapshot):
+    """One vectorized join for historical listing and ST evidence."""
+    db.execute("""CREATE OR REPLACE TEMP TABLE listing_snapshot(
+       ts_code VARCHAR,listed DATE,delisted DATE,valid BOOLEAN)""")
+    records=[]
+    for code,record in snapshot.items():
+        if not record:
+            continue
+        start=parsed(record.get("list_date"))
+        end=parsed(record.get("delist_date"))
+        valid=bool(start and not (record.get("delist_date") not in (None,"") and not end)
+                   and not (end and end<start))
+        records.append((code,start,end,valid))
+    insert_columns(db,"listing_snapshot",("VARCHAR","DATE","DATE","BOOLEAN"),records)
+    db.execute("""INSERT INTO security_daily
+      SELECT m.ts_code,m.trade_date,
+        CASE WHEN s.ts_code IS NULL THEN 'snapshot_missing'
+             WHEN NOT s.valid THEN 'snapshot_invalid_dates'
+             WHEN m.trade_date<s.listed THEN 'before_snapshot_listing_date'
+             WHEN m.trade_date>=s.delisted THEN 'at_or_after_snapshot_delisting_date'
+             ELSE 'within_snapshot_listing_dates_not_certified' END,
+        m.st_type,
+        CASE WHEN m.st_ann_date IS NULL OR m.st_ann_date>=m.trade_date
+             THEN 'historical_announcement_unresolved_or_same_day'
+             WHEN m.st_type IS NOT NULL AND m.st_type<>'' THEN 'historical_merged_not_certified'
+             ELSE 'historical_ST_unknown' END,
+        false,NULL::VARCHAR
+      FROM read_parquet(?,hive_partitioning=false) m
+      LEFT JOIN listing_snapshot s USING(ts_code)""",[str(market_path)])
+
+
 def security_rows(db, market_path, snapshot, evidence_dir, capture):
     # One standardized partition at a time, including all market rows.
     db.execute("""CREATE OR REPLACE TEMP TABLE security_daily (
       ts_code VARCHAR,trade_date DATE,listing_evidence VARCHAR,
       historical_st_type VARCHAR,st_evidence VARCHAR,st_certified BOOLEAN,
       namechange_source_sha256 VARCHAR)""")
+    count,last=db.execute("SELECT count(*),max(trade_date) FROM read_parquet(?,hive_partitioning=false)",[str(market_path)]).fetchone()
+    if last is None or last.year<2026:
+        historical_security_rows(db,market_path,snapshot)
+        n,u=db.execute("SELECT count(*),count(DISTINCT(ts_code,trade_date)) FROM security_daily").fetchone()
+        if n!=u or n!=count:
+            raise ValueError("Security join grain mismatch")
+        stats=dict(db.execute("SELECT st_evidence,count(*) FROM security_daily GROUP BY st_evidence").fetchall())
+        return {"rows":n,"st_evidence_counts":stats},{}
     q="""SELECT ts_code,trade_date,st_type,st_ann_date,st_resolution,is_mainboard_code
          FROM read_parquet(?,hive_partitioning=false) ORDER BY ts_code,trade_date"""
     rows=db.execute(q,[str(market_path)]).fetchall()
+    types=("VARCHAR","DATE","VARCHAR","VARCHAR","VARCHAR","BOOLEAN","VARCHAR")
     batch=[]
     cache={}
     source_hashes={}
@@ -160,10 +202,10 @@ def security_rows(db, market_path, snapshot, evidence_dir, capture):
             status="historical_announcement_unresolved_or_same_day"
         batch.append((code,day,listing,state,status,False,h))
         if len(batch)>=5000:
-            db.executemany("INSERT INTO security_daily VALUES (?,?,?,?,?,?,?)",batch)
+            insert_columns(db,"security_daily",types,batch)
             batch.clear()
     if batch:
-        db.executemany("INSERT INTO security_daily VALUES (?,?,?,?,?,?,?)",batch)
+        insert_columns(db,"security_daily",types,batch)
     n,u=db.execute("SELECT count(*),count(DISTINCT(ts_code,trade_date)) FROM security_daily").fetchone()
     if n!=u or n!=len(rows):
         raise ValueError("Security join grain mismatch")
@@ -189,7 +231,10 @@ def build(archive, market, evidence_dir, output, scratch, year, month, capture):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         db=duckdb.connect(config={"threads":"1","memory_limit":"512MB","temp_directory":str(scratch)})
         try:
-            for marker in markers:
+            started=time.monotonic()
+            for index,marker in enumerate(markers,1):
+                partition_started=time.monotonic()
+                progress("BT03_SECURITY_PARTITION_START",started,partition=index,total=len(markers),path=str(marker.parent))
                 meta=read_json(marker)
                 item=meta["outputs"]["market"]
                 src=marker.parent/item["file"]
@@ -198,19 +243,34 @@ def build(archive, market, evidence_dir, output, scratch, year, month, capture):
                     or item["file"]!=f"market-{item['sha256']}.parquet" or src.is_symlink()
                     or src.stat().st_size!=item["bytes"] or digest(src)!=item["sha256"]):
                     raise ValueError("Invalid market receipt")
+                target=output/marker.parent.relative_to(market)
+                target.mkdir(parents=True,exist_ok=True)
+                receipt=target/"manifest.json"
+                # Historical partitions do not depend on namechange captures.
+                # Validate unchanged inputs/output before doing any row computation.
+                if year<2026 and receipt.exists():
+                    old=read_json(receipt)
+                    fingerprint={"market_sha256":item["sha256"],"snapshot_sha256":snapshot_sha,
+                        "capture_day":capture.isoformat() if capture else None,"namechange_hashes":{}}
+                    if (old.get("version")!=1 or old.get("status")!="security_evidence_not_certified"
+                        or old["inputs"]!=fingerprint or old["quality"]["rows"]!=meta["quality"]["rows"]
+                        or old["file"]!=f"security-{old['sha256']}.parquet"
+                        or (target/old["file"]).is_symlink()
+                        or digest(target/old["file"])!=old["sha256"] or digest(snapshot_path)!=snapshot_sha):
+                        raise ValueError("Existing security partition differs; use a new output version")
+                    progress("BT03_SECURITY_REUSED",partition_started,path=str(target))
+                    continue
                 stats,hashes=security_rows(db,src,snapshot,evidence_dir,capture)
                 if stats["rows"]!=meta["quality"]["rows"] or digest(src)!=item["sha256"] or digest(snapshot_path)!=snapshot_sha:
                     raise ValueError("Security input changed or row count mismatch")
                 fingerprint={"market_sha256":item["sha256"],"snapshot_sha256":snapshot_sha,
                     "capture_day":capture.isoformat() if capture else None,"namechange_hashes":hashes}
-                target=output/marker.parent.relative_to(market)
-                target.mkdir(parents=True,exist_ok=True)
-                receipt=target/"manifest.json"
                 if receipt.exists():
                     old=read_json(receipt)
                     if (old["inputs"]!=fingerprint or old["file"]!=f"security-{old['sha256']}.parquet"
                         or digest(target/old["file"])!=old["sha256"]):
                         raise ValueError("Existing security partition differs; use a new output version")
+                    progress("BT03_SECURITY_REUSED",partition_started,path=str(target))
                     continue
                 with tempfile.TemporaryDirectory(dir=target) as tmp:
                     p=Path(tmp)/"data.parquet"
@@ -221,7 +281,7 @@ def build(archive, market, evidence_dir, output, scratch, year, month, capture):
                     os.replace(p,target/name);sync_dir(target)
                 atomic_json(receipt,{"version":1,"status":"security_evidence_not_certified","inputs":fingerprint,
                     "file":name,"sha256":h,"quality":stats})
-                print("BT03_SECURITY_PARTITION "+json.dumps(stats,sort_keys=True),flush=True)
+                progress("BT03_SECURITY_PARTITION",partition_started,**stats)
         finally:
             db.close()
 

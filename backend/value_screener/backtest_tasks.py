@@ -5,6 +5,8 @@ from datetime import date
 import fcntl
 from pathlib import Path
 import sys
+import time
+from .backtest_bulk import progress
 
 from . import backtest_dataset, backtest_financial_daily, backtest_financial_evidence, backtest_security_evidence, backtest_quality
 
@@ -17,7 +19,10 @@ def main():
     market.add_argument("--end-year",type=int,default=2025)
     market.add_argument("--month",type=int,choices=range(1,13))
     update=sub.add_parser("update")
-    update.add_argument("--day",type=date.fromisoformat,required=True)
+    selection=update.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--day",type=date.fromisoformat)
+    selection.add_argument("--year",type=int)
+    update.add_argument("--month",type=int,choices=range(1,13))
     fin=sub.add_parser("financial")
     fin.add_argument("--year",type=int,required=True,choices=range(2020,2026))
     fin.add_argument("--month",type=int,choices=range(1,13))
@@ -37,8 +42,13 @@ def main():
               "--start-year",str(a.start_year),"--end-year",str(a.end_year)]
     elif a.task=="update":
         fn=backtest_dataset.main
+        if a.day and a.month is not None:
+            p.error("--month requires --year")
+        year=a.day.year if a.day else a.year
         argv=["--archive","/data/archive","--output","/market","--scratch","/scratch",
-              "--incremental","--start-year",str(a.day.year),"--end-year",str(a.day.year),"--day",a.day.isoformat()]
+              "--incremental","--start-year",str(year),"--end-year",str(year)]
+        if a.day:
+            argv+=["--day",a.day.isoformat()]
     elif a.task=="financial":
         fn=backtest_financial_daily.main
         argv=["--archive","/data/archive","--market","/market","--output","/financial","--scratch","/scratch","--year",str(a.year)]
@@ -66,7 +76,14 @@ def main():
     with open("/scratch/.backtest-task.lock","a") as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         sys.argv=[sys.argv[0],*argv]
-        fn()
+        started=time.monotonic()
+        progress("BT03_TASK_START",started,task=a.task)
+        try:
+            fn()
+        except BaseException:
+            progress("BT03_TASK_ERROR",started,task=a.task)
+            raise
+        progress("BT03_TASK_DONE",started,task=a.task)
 
 
 if __name__=="__main__":

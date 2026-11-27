@@ -102,3 +102,41 @@ then full 2020–2025 and committed 2026 days. Confirm source archive hashes
 unchanged and no production DB/registry/deployment operations. Do not publish
 strategy performance until universe, revisions, corporate actions and actual
 execution semantics have been certified. 
+
+## BT03-H performance optimization
+
+VPS acceptance baseline (operator log, revision 29d1df5, January 2025):
+96,779 market rows, 56,999 mainboard rows, 55,002 mainboard NCAV candidates,
+0 future disclosures, 0 duplicate keys; security evidence counts 96,749 merged
+and 30 unresolved/same-day. Market 2.549s, financial audit 17.912s, financial
+daily build 636.260s, security build 51.066s, market resume 1.170s.
+Those are wall times, not measured peak resource usage.
+
+- Financial event selection sweeps disclosure/release events rather than scanning
+  all versions on each event day. A regression test compares the original
+  selector with the sweep including conflicts, missing dates and missing values.
+- Typed, bounded vector inserts replace per-row executemany; historical security
+  uses a SQL join with parsed listing dates. Incremental unknown ST remains NULL.
+- Financial output/.event-cache/<content identity>/manifest.json is persistent
+  across years. Source payloads AND manifests are rehashed before cache reuse;
+  cache files have independent hash/size/key/count checks. Changed input creates
+  a new cache identity. Corrupt cache fails closed; do not delete automatically.
+  Event cache version is separate from the research output version. Bump the
+  event cache version for any future change in event calculation semantics.
+- Historical security reuse validates unchanged fingerprint and hash before
+  computing rows. Existing v1 partitions are still valid if inputs match.
+- Progress emits batch/partition events and elapsed seconds / Linux process
+  peak RSS in KiB, not container peak. Docker cgroup metrics are still needed.
+- update --year 2026 [--month 11] processes all committed days, verifying/reusing
+  existing partitions and ignoring uncommitted reader snapshots. No scheduler.
+
+Performance acceptance: use a NEW isolated output root with the same raw data
+and reviewed runtime. Build the identical January 2025 market, financial and
+security partitions and compare all columns via bidirectional EXCEPT ALL to
+29d1df5 (file hashes may differ due to Parquet encoding). Verify counts, nulls,
+date constraints and NCAV coverage. Run a second financial month or year with
+the same cache, then repeat January to measure cache and resume. Record wall
+time and process peak RSS; separately sample container peak memory. Do not
+overwrite the original acceptance output. Do not promote on CI alone.
+No timing target or semantic equivalence on real data is claimed before
+operator acceptance. No production changes or actual ST capture.
