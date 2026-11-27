@@ -30,7 +30,9 @@ PROFILE=re.compile(r"[a-z][a-z0-9_-]{0,39}\Z")
 REPO=re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_RESPONSE=2_000_000
 TTL=900
-VERSION=2
+VERSION=3
+LANES={"research","collection"}
+SPOOL=Path("/var/lib/ashare-control-spool")
 READ_TASKS={"capabilities","data_inventory","backtest_status","task_status","task_logs","docker_status","deployment_status"}
 REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment"}
 INVENTORY_KINDS={"market","security","dividend","reference"}
@@ -63,7 +65,7 @@ def trusted_file(path, executable=False):
 def config(path):
     doc=strict_json(trusted_file(path).read_text())
     required={"repository","repository_id","actor_ids","profiles"}
-    if not required<=set(doc) or set(doc)-required-{"inventory","reports"}:
+    if not required<=set(doc) or set(doc)-required-{"inventory","reports","async_profiles"}:
         raise ValueError("Invalid config fields")
     if (not REPO.fullmatch(doc["repository"]) or type(doc["repository_id"]) is not int or doc["repository_id"]<=0
         or not isinstance(doc["actor_ids"],list) or not doc["actor_ids"]
@@ -76,6 +78,9 @@ def config(path):
         script=trusted_file(p["script"],True)
         if not script.is_relative_to(Path("/opt/ashare-control/profiles")):
             raise ValueError("Profile outside trusted directory")
+    async_profiles=doc.get("async_profiles",{})
+    if not isinstance(async_profiles,dict) or len(async_profiles)>16 or any(not PROFILE.fullmatch(k) or v not in LANES or k in doc["profiles"] for k,v in async_profiles.items()):
+        raise ValueError("Invalid asynchronous profile mapping")
     for name,root in doc.get("inventory",{}).items():
         if name not in INVENTORY_KINDS:raise ValueError("Invalid inventory alias")
         local_path(root)
@@ -291,7 +296,7 @@ def diagnostics(doc,cfg,state):
     if task=="capabilities":
         return {"status":"completed","bridge_version":VERSION,"inventory":sorted(cfg.get("inventory",{})),
                 "reports":{k:v["kind"] for k,v in cfg.get("reports",{}).items()},
-                "profiles":sorted(cfg["profiles"]),"raw_logs":False,"remote_shell":False}
+                "profiles":sorted(cfg["profiles"]),"async_profiles":cfg.get("async_profiles",{}),"async_execution":bool(cfg.get("async_profiles")),"raw_logs":False,"remote_shell":False}
     if task=="data_inventory":
         result={}
         for kind,root in sorted(cfg.get("inventory",{}).items()):
@@ -308,10 +313,12 @@ def diagnostics(doc,cfg,state):
             previous=item.get("result") or {}
             value=previous.get("status")
             if item.get("delivery")=="running":continue
-            if value not in ("completed","failed","timeout","rejected","unavailable","interrupted_unknown_do_not_retry"):value="unknown"
+            if item.get("delivery")=="queued":
+                value=queue_status(item)
+            if value not in ("completed","failed","timeout","rejected","unavailable","interrupted_unknown_do_not_retry","queued","running"):value="unknown"
             result.append({"issue_number":item["issue_number"],"status":value,
                            **numeric(previous,("exit_code","elapsed_seconds"))})
-        return {"status":"completed","recent_tasks":result,"running_jobs_observable_while_busy":False}
+        return {"status":"completed","recent_tasks":result,"running_jobs_observable_while_busy":bool(cfg.get("async_profiles"))}
     spec=cfg.get("reports",{}).get(doc["report"])
     allowed={"backtest_status":{"preflight","signals","portfolio","walk"},"task_logs":{"progress"},
              "docker_status":{"containers"},"deployment_status":{"deployment"}}[task]
@@ -352,17 +359,68 @@ def save(path,doc):
     try:os.fsync(fd)
     finally:os.close(fd)
 
+def spool_path(lane,kind,iid):
+    if lane not in LANES or kind not in ("requests","results") or type(iid) is not int or iid<=0:
+        raise ValueError("Invalid spool identity")
+    return SPOOL/lane/kind/f"issue-{iid}.json"
+
+def publish_queue(old):
+    path=spool_path(old["lane"],"requests",old["issue_id"])
+    doc={"schema":"ashare-local-job-v1","repository_id":old["repository_id"],"issue_id":old["issue_id"],
+         "profile":old["profile"],"request_sha256":old["request_sha256"],"lane":old["lane"]}
+    if path.exists():
+        if bounded_json(path)!=doc:raise ValueError("Queue identity changed")
+        return
+    # Setgid inbox gives worker read-only group access. Publish last; never
+    # overwrite an existing request or recycle an issue identity.
+    tmp=path.with_suffix(".tmp")
+    if tmp.exists():tmp.unlink()
+    with tmp.open("x") as f:
+        f.write(dump(doc));f.flush();os.fchmod(f.fileno(),0o640);os.fsync(f.fileno())
+    os.link(tmp,path);tmp.unlink()
+    fd=os.open(path.parent,os.O_DIRECTORY|os.O_RDONLY)
+    try:os.fsync(fd)
+    finally:os.close(fd)
+
+def queue_result(old):
+    path=spool_path(old["lane"],"results",old["issue_id"])
+    try:doc=bounded_json(path)
+    except FileNotFoundError:return None
+    for k in ("repository_id","issue_id","profile","request_sha256","lane"):
+        if doc.get(k)!=old[k]:raise ValueError("Worker result identity mismatch")
+    if doc.get("schema")!="ashare-local-result-v1":raise ValueError("Worker result schema mismatch")
+    state=doc.get("status")
+    if state not in ("running","completed","failed","timeout","rejected","interrupted_unknown_do_not_retry"):
+        raise ValueError("Invalid worker status")
+    # Never transfer arbitrary worker output, errors, metadata, paths or secrets.
+    result={"status":state,"profile":old["profile"],**numeric(doc,("exit_code","elapsed_seconds"))}
+    if state=="running":return result
+    return result
+
+def queue_status(old):
+    try:
+        result=queue_result(old)
+        return result["status"] if result else "queued"
+    except (OSError,ValueError,TypeError,KeyError):return "unknown"
+
 def run(cfg,gh,state,now,executor=execute):
     gh.verify_repo(cfg["repository_id"])
     lock=state/"poll.lock"
     with lock.open("a") as handle:
         fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        active=False
         # Recover report delivery separately from execution. A crash after
         # starting a task is uncertain, never automatically rerun the task.
         for p in sorted(state.glob("issue-*.json")):
             old=strict_json(p.read_text())
             if old["repository_id"]!=cfg["repository_id"]:raise ValueError("State repository mismatch")
             if old["delivery"]=="closed":continue
+            if old["delivery"]=="queued":
+                publish_queue(old)
+                result=queue_result(old)
+                if result is None or result["status"]=="running":
+                    active=True;continue
+                old["result"]=result;old["delivery"]="pending";save(p,old)
             if old["delivery"]=="running":
                 old["result"]={"status":"interrupted_unknown_do_not_retry"};old["delivery"]="pending";save(p,old)
             deliver(gh,p,old)
@@ -372,11 +430,17 @@ def run(cfg,gh,state,now,executor=execute):
             if req is None:continue
             n,iid,doc,h=req;p=state/f"issue-{iid}.json"
             if p.exists():continue
+            if active and doc["task"]=="run_profile":continue
             # Fetch current issue and require exact request match before execution.
             latest=gh.call(f"/issues/{n}")
             if parse_request(latest,set(cfg["actor_ids"]),now)!=req:continue
             old={"repository_id":cfg["repository_id"],"issue_number":n,"issue_id":iid,
                  "request_sha256":h,"delivery":"running","result":None}
+            if doc["task"]=="run_profile" and doc["profile"] in cfg.get("async_profiles",{}):
+                old.update(delivery="queued",profile=doc["profile"],lane=cfg["async_profiles"][doc["profile"]])
+                save(p,old)
+                publish_queue(old)
+                return
             save(p,old)
             try:
                 result=diagnostics(doc,cfg,state) if doc["task"] in READ_TASKS else executor(doc,cfg["profiles"])
