@@ -1,0 +1,10 @@
+{
+  "python": "/opt/ashare-research-runtime/bin/python",
+  "backend": "/opt/ashare-research-source/backend",
+  "start": "2025-01-01",
+  "end": "2025-01-31",
+  "calendar": null,
+  "reference_budget": 1,
+  "dividend_budget": 1,
+  "daily_budget": 10
+}
