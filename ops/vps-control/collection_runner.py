@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 from research_runner import trusted,local_input,atomic
 
 BASE=Path("/var/lib/ashare-collection-work")
