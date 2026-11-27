@@ -15,6 +15,8 @@ import re
 import subprocess
 import sys
 import time
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+import runtime_slots
 
 BASE=Path(os.environ.get("ASHARE_RESEARCH_WORK","/var/lib/ashare-control-work"))
 if BASE not in (Path("/var/lib/ashare-control-work"),Path("/var/lib/ashare-research-work")):
@@ -42,7 +44,9 @@ def load(path=CONFIG):
     doc=json.loads(trusted(path).read_text())
     fields={"python","backend","market","security","dividend","calendar","benchmark","actions","fees",
             "warmup","start","end","run_name","shards","execution_config","walk_plan"}
-    if set(doc)!=fields:raise ValueError("Invalid research config keys")
+    if not fields<=set(doc) or set(doc)-fields-{"use_approved_runtime"}:raise ValueError("Invalid research config keys")
+    if "use_approved_runtime" in doc and type(doc["use_approved_runtime"]) is not bool:raise ValueError("Invalid runtime opt-in")
+    doc=runtime_slots.resolve(doc)
     py=trusted(doc["python"]);backend=trusted(doc["backend"],True)
     if not os.access(py,os.X_OK):raise ValueError("Python not executable")
     # The complete checkout/runtime and all imported code must be locally reviewed.
