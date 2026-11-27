@@ -154,3 +154,33 @@ test("legacy cloud data workflows remain archived and inactive", () => {
   const markers = path.join(__dirname, "../.github/one-shot");
   assert.equal(fs.existsSync(markers) ? fs.readdirSync(markers).length : 0, 0);
 });
+
+
+test("custom calendar periods enumerate only intersecting years and reject invalid dates",()=>{
+  const {historyYears}=barModule.exports;
+  assert.deepEqual(historyYears("2022-01-01","2024-12-31","2026-11-27"),[2022,2023,2024]);
+  assert.deepEqual(historyYears("2024-02-29","2024-02-29","2026-11-27"),[2024]);
+  for(const [from,to] of [["2025-02-29","2025-03-01"],["2019-12-31","2020-01-01"],["2025-01-02","2025-01-01"],["2026-11-27","2026-11-28"],["","2026-11-27"]]){
+    assert.throws(()=>historyYears(from,to,"2026-11-27"),/有效的行情期间/);
+  }
+});
+test("custom period includes both date boundaries and uses selected interval adjustment anchors",()=>{
+  const {mergeArchivedBars,filterHistoryRange,adjustBars}=barModule.exports;
+  const dates=["2024-12-30","2024-12-31","2025-01-02","2025-01-03"];
+  const points=dates.map(day=>({day,open:10,high:11,low:9,close:10,volume:100}));
+  const selected=filterHistoryRange(mergeArchivedBars([points.slice(2),points.slice(0,2)]),"2024-12-31","2025-01-02");
+  assert.deepEqual(selected.map(b=>b.day),dates.slice(1,3));
+  const factors=dates.map((day,i)=>({day,factor:i+1}));
+  assert.equal(adjustBars(selected,factors,"forward").at(-1).close,10);
+  assert.equal(adjustBars(selected,factors,"backward")[0].close,10);
+  assert.deepEqual(filterHistoryRange(points,"2025-01-04","2025-01-05"),[]);
+});
+test("chart exposes exactly two range modes and applies dates before adjustment and aggregation",()=>{
+  assert.match(chart,/option value="recent">最近行情/);
+  assert.match(chart,/option value="custom">指定期间行情/);
+  assert.doesNotMatch(chart,/年归档<\/option>|连续行情<\/option>/);
+  assert.match(chart,/filterHistoryRange\(mergeArchivedBars\(all\),range.from,range.to\)/);
+  assert.match(chart,/historyYears\(range.from,range.to,TODAY\)/);
+  assert.match(chart,/applyRange\(draft.from,draft.to\)/);
+  assert.match(chart,/range.from\+":"\+range.to/);
+});
