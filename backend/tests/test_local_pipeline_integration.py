@@ -320,8 +320,23 @@ class BT04ParquetIntegration(unittest.TestCase):
             self.assertEqual(ledger_candidates["counts"]["factor_changes"],0)
             self.assertEqual(ledger_candidates["events"],[])
             self.assertEqual(len(ledger_candidates["dividend_inputs"]),15)
+            from value_screener import bt05_preflight as pf
+            reviewed_calendar=root/"reviewed-calendar.json"
+            reviewed_calendar.write_text(json.dumps({**json.loads(calendar.read_text()),
+                "status":"OPERATOR_REVIEWED_CALENDAR_NOT_CERTIFIED"}))
+            reviewed_actions=root/"reviewed-actions.json"
+            reviewed_actions.write_text(json.dumps({**json.loads(action_file.read_text()),
+                "candidate_sha256":"fixture","review_sha256":"fixture"}))
+            pa=SimpleNamespace(market=market,security=security,dividend=raw_div,scratch=scratch,
+                calendar=reviewed_calendar,benchmark=bench,actions=reviewed_actions,
+                warmup=sessions[119],start=sessions[120],end=sessions[-1])
+            pre=pf.run(pa)
+            self.assertTrue(pre["research_preflight_pass"],pre["checks"])
+            self.assertFalse(pre["formal_backtest_ready"])
+            self.assertEqual(pre["checks"]["market_security"]["mainboard_rows"],30)
             missing=dc.folder(raw_div,sessions[-1])/"manifest.json"
             missing.unlink()
+            self.assertIn("dividend_capture",pf.run(pa)["blockers"])
             with self.assertRaisesRegex(ValueError,"capture incomplete"):
                 dr.build(market,security,raw_div,scratch,calendar,sessions[119],
                          sessions[120],sessions[-1],.2)
