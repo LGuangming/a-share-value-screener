@@ -307,7 +307,8 @@ def diagnostics(doc,cfg,state):
             if item.get("repository_id")!=cfg["repository_id"]:continue
             previous=item.get("result") or {}
             value=previous.get("status")
-            if value not in ("completed","failed","timeout","rejected","interrupted_unknown_do_not_retry"):value="unknown"
+            if item.get("delivery")=="running":continue
+            if value not in ("completed","failed","timeout","rejected","unavailable","interrupted_unknown_do_not_retry"):value="unknown"
             result.append({"issue_number":item["issue_number"],"status":value,
                            **numeric(previous,("exit_code","elapsed_seconds"))})
         return {"status":"completed","recent_tasks":result,"running_jobs_observable_while_busy":False}
