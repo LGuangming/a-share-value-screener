@@ -33,6 +33,7 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_ci_scope.py -v
           python3 -m unittest discover -s tests -p test_workflow_retirement.py -v
+          python3 -m unittest discover -s ops/vps-control -p 'test_*.py' -v
       - name: Classify changed paths
         id: scope
         run: python3 tests/ci_scope.py
