@@ -6,6 +6,7 @@ arguments, Python imports or credentials. No network-dependent tasks here.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 from datetime import date
 import json
 import os
@@ -86,6 +87,11 @@ def run(stage,doc):
     work=BASE/doc["run_name"]
     if work.resolve()!=work:raise ValueError("Invalid work path")
     work.mkdir(mode=0o700,exist_ok=True)
+    identity={"config":doc,"evidence_sha256":{k:hashlib.sha256(Path(doc[k]).read_bytes()).hexdigest() for k in ("calendar","benchmark","actions","fees","execution_config","walk_plan") if doc[k] is not None}}
+    marker=work/"local-run-contract.json"
+    if marker.exists():
+        if json.loads(marker.read_text())!=identity:raise ValueError("Run inputs changed; choose new run_name")
+    else:atomic(marker,identity)
     for k in ("scratch","signals","portfolio","walk"):
         p=work/k
         if p.resolve()!=p:raise ValueError("Symlink work path")
