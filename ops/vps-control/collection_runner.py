@@ -10,6 +10,8 @@ import subprocess
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from research_runner import trusted,local_input,atomic
+import bridge
+from worker import store
 
 BASE=Path("/var/lib/ashare-collection-work")
 CONFIG=Path("/etc/ashare-control/collection.json")
@@ -53,6 +55,48 @@ def command(stage,d,base):
         args+=["--calendar",d["calendar"]]
     return args
 
+def reference_capture(d,token):
+    # Import only the locally pinned, root-owned backend; never a remote path.
+    sys.path.insert(0,d["backend"])
+    from value_screener import bt05_reference_capture as ref
+    from value_screener.tushare_client import TushareClient
+    start,end=map(date.fromisoformat,(d["start"],d["end"]))
+    root=BASE/"reference"
+    expected=[(kind,key,lo,hi) for lo,hi in ref.slices(start,end)
+              for kind,key in [("calendar","SSE"),("calendar","SZSE")]+[("index",c) for c in ref.INDEXES]]
+    def verified():
+        return sum(ref.read_slice(root,*item) is not None for item in expected)
+    def publish(state,n,requests=0):
+        store(bridge.SPOOL/"collection"/"results"/"bt05-reference.json",
+              {"status":"BT05_REFERENCE_CAPTURE_V1","state":state,"expected_slices":len(expected),
+               "verified_slices":n,"new_requests":requests,"formal_backtest_ready":False})
+    n=verified()
+    publish("running",n)
+    # First real invocation uses exactly one request. A later explicit task
+    # can collect the remainder under the fixed local daily budget.
+    budget=min(1 if n==0 else d["reference_budget"],len(expected)-n)
+    try:
+        used=0
+        if budget:
+            reserve(BASE,budget,d["daily_budget"],datetime.now(timezone.utc))
+            result=ref.capture(root,start,end,ref.INDEXES,TushareClient(token,api_source="official"),budget)
+            used=result["new_requests"]
+        n=verified()
+        if n==len(expected):
+            candidate=BASE/"reference-candidate.json"
+            doc=ref.build(root,start,end,ref.INDEXES)
+            if candidate.exists():
+                if json.loads(candidate.read_text())!=doc:raise ValueError("Existing candidate differs")
+            else:ref.write_new(candidate,doc)
+            publish("candidate_ready",n,used)
+        else:publish("partial",n,used)
+        return 0
+    except Exception:
+        # Never expose provider response, credentials or raw exception.
+        try:publish("failed",verified())
+        except Exception:publish("failed",n)
+        return 2
+
 def main():
     p=argparse.ArgumentParser();p.add_argument("stage",choices=("reference","dividend"))
     a=p.parse_args()
@@ -64,6 +108,7 @@ def main():
     out.mkdir(mode=0o700,exist_ok=True)
     with (BASE/"collection.lock").open("a") as f:
         fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if a.stage=="reference":raise SystemExit(reference_capture(d,token))
         args=command(a.stage,d,BASE)
         reserve(BASE,d[a.stage+"_budget"],d["daily_budget"],datetime.now(timezone.utc))
         # Deliberately suppress raw provider errors/output to avoid token leakage.
