@@ -20,6 +20,7 @@ from .backtest_engine import Bar, BacktestConfig, run_backtest
 from .technical_strategies import (Observation, TechnicalConfig, MAINBOARD, TREND,
                                    REVERSAL, generate_signals, signal_record)
 from .technical_research import sha256, write_new
+from . import technical_strategies, backtest_engine, technical_research
 
 VERSION = 1
 STATUS = "BT04_RESEARCH_ONLY_NOT_CERTIFIED"
@@ -232,11 +233,16 @@ def prepare(args):
     db=connect(scratch)
     try:
         market_files,security_files,identities=receipts(db,market,security,sessions)
+        actual=[r[0] for r in db.execute("""SELECT DISTINCT trade_date FROM read_parquet(?)
+            WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date""",[market_files,args.warmup,args.end]).fetchall()]
+        if actual!=sessions:
+            raise ValueError("Selected market dates do not reconcile to calendar")
         contract={"version":VERSION,"status":STATUS,"formal_backtest_ready":False,
                   "calendar_sha256":calendar_hash,"warmup":args.warmup.isoformat(),
                   "start":args.start.isoformat(),"end":args.end.isoformat(),
                   "shards":args.shards,"eligibility_policy":"provisional_evidence" if args.provisional else "strict_uncertified_blocked",
                   "technical_config":asdict(cfg),"inputs":identities,
+                  "code_sha256":{Path(p).name:sha256(Path(p)) for p in (__file__,technical_strategies.__file__,backtest_engine.__file__,technical_research.__file__)},
                   "limitations":["calendar_supplied_by_operator_not_independently_certified",
                     "BT03_ST_and_listing_evidence_not_certified","listing_age_observed_bar_lower_bound",
                     "suspension_event_absence_not_certified","corporate_actions_not_accounted"]}
@@ -251,6 +257,68 @@ def prepare(args):
         return db,folder,cfg,sessions,market_files,security_files,identity
     except BaseException:
         db.close();raise
+
+def execute_window(db, folder, identity, cfg, sessions, mf, sf, args, docs):
+    start,end=args.execute_start,args.execute_end
+    if not args.provisional or not args.start<=start<=end<=args.end or args.shard is not None:
+        raise ValueError("Execution requires explicit provisional mode, all shards and a bounded subinterval")
+    if args.max_rows<1 or args.max_rows>250000:
+        raise ValueError("Execution row cap must be 1..250000")
+    wanted=[d for d in sessions if start<=d<=end]
+    if len(wanted)<2:
+        raise ValueError("Execution needs at least two market sessions")
+    # Preflight before allocating Python objects. All portfolio candidates compete
+    # for one shared cash balance, never combine independent shard portfolios.
+    n=db.execute("""SELECT count(*) FROM read_parquet(?)
+        WHERE regexp_full_match(ts_code,?) AND trade_date BETWEEN ? AND ?""",
+        [mf,MAIN_SQL,start,end]).fetchone()[0]
+    if n>args.max_rows:
+        raise ValueError(f"Execution window has {n} rows; cap is {args.max_rows}. Choose a shorter window.")
+    by_strategy={TREND:{},REVERSAL:{}}
+    for doc in docs:
+        p=folder/doc["file"]
+        if sha256(p)!=doc["sha256"]:
+            raise ValueError("Shard output changed before execution")
+        seen={TREND:0,REVERSAL:0}
+        with p.open(encoding="utf-8") as f:
+            for line in f:
+                row=json.loads(line);d=date.fromisoformat(row["day"]);k=row["strategy_id"]
+                seen[k]+=1
+                if start<=d<=end:
+                    by_strategy[k].setdefault(d,[]).append((row["score"],row["ts_code"]))
+        if seen!=doc["signal_counts"]:
+            raise ValueError("Shard signal counts mismatch")
+    ranked={k:{d:[code for score,code in sorted(rows,key=lambda x:(-x[0],x[1]))]
+               for d,rows in by_day.items()} for k,by_day in by_strategy.items()}
+    bars=[];eligible={}
+    for shard in range(args.shards):
+        for row in query(db,mf,sf,sessions,shard,args.shards,args.warmup,end,args.provisional):
+            if start<=row.bar.day<=end:
+                bars.append(row.bar)
+                # Age includes current traded bar; subtract it for open-time entry.
+                prior_age=row.listing_sessions-(0 if row.bar.suspended else 1)
+                if row.eligible is True and prior_age>=cfg.min_listing_sessions:
+                    eligible.setdefault(row.bar.day,set()).add(row.bar.ts_code)
+    if len(bars)!=n or sorted({b.day for b in bars})!=wanted:
+        raise ValueError("Execution calendar or row counts mismatch")
+    bc=BacktestConfig(holding_sessions=args.holding,stop_loss_rate=args.stop)
+    result={"run_id":identity,"status":STATUS,"formal_backtest_ready":False,
+            "start":start.isoformat(),"end":end.isoformat(),"rows":n,
+            "config":asdict(bc),
+            "limitations":["raw_execution_prices_no_corporate_action_accounting",
+                           "provisional_universe_and_suspension_evidence",
+                           "fixed_assumed_fees_not_historical_schedule",
+                           "independent_window_initial_cash_no_carryover"],
+            "results":{k:run_backtest(bars,ranked[k],bc,entry_eligible=eligible)
+                       for k in (TREND,REVERSAL)}}
+    dest=folder/("execution-"+start.isoformat()+"-"+end.isoformat()
+                 +"-h"+str(args.holding)+"-s"+str(args.stop)+".json")
+    if dest.exists():
+        if json_file(dest)!=result:
+            raise ValueError("Existing engineering execution differs")
+    else:
+        write_new(dest,result)
+    print("BT04_EXECUTION "+json.dumps({"status":STATUS,"file":dest.name,"rows":n}),flush=True)
 
 def run(args):
     folder=args.output.resolve(strict=True)
@@ -271,6 +339,10 @@ def run(args):
                 doc=append_shard(db,folder,identity,shard,rows,cfg,args.start,args.end)
                 docs.append(doc)
                 print("BT04_SHARD "+json.dumps(doc,sort_keys=True),flush=True)
+            # Recheck source hashes and receipts before declaring a complete run.
+            _,_,verified=receipts(db,args.market.resolve(),args.security.resolve(),sessions)
+            if verified!=json_file(folder/"run.json")["inputs"]:
+                raise ValueError("BT03 inputs changed during run")
             if args.shard is None:
                 summary={"run_id":identity,"status":STATUS,"shards_completed":len(docs),
                          "rows":sum(d["rows"] for d in docs),
@@ -280,6 +352,8 @@ def run(args):
                     if json_file(p)!=summary: raise ValueError("Summary mismatch")
                 else: write_new(p,summary)
                 print("BT04_SUMMARY "+json.dumps(summary),flush=True)
+                if args.execute_start is not None:
+                    execute_window(db,folder,identity,cfg,sessions,mf,sf,args,docs)
         finally:
             db.close()
 
@@ -293,7 +367,17 @@ def main():
     p.add_argument("--shard",type=int)
     p.add_argument("--config",type=Path)
     p.add_argument("--provisional",action="store_true",help="Explicit research-only use of non-certified historical evidence")
-    run(p.parse_args())
+    p.add_argument("--execute-start",type=date.fromisoformat)
+    p.add_argument("--execute-end",type=date.fromisoformat)
+    p.add_argument("--holding",type=int,default=10)
+    p.add_argument("--stop",type=float)
+    p.add_argument("--max-rows",type=int,default=250000)
+    a=p.parse_args()
+    if (a.execute_start is None)!=(a.execute_end is None):
+        p.error("Both execution dates are required")
+    if a.execute_start is not None and (a.shard is not None or not a.provisional):
+        p.error("Engineering execution needs all shards and explicit provisional mode")
+    run(a)
 
 if __name__=="__main__":
     main()
