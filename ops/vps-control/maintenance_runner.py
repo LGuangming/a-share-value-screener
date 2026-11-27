@@ -21,10 +21,14 @@ CONFIG=Path("/etc/ashare-control/maintenance.json")
 MAX_BATCHES=180
 
 def validate(d):
-    if set(d)!={"python","backend","archive","evidence","dataset","batches"}:
+    required={"python","backend","archive","evidence","dataset","batches"}
+    if not required<=set(d) or set(d)-required-{"existing_market"}:
         raise ValueError("Invalid maintenance configuration fields")
     if not isinstance(d["dataset"],str) or not re.fullmatch(r"bt03-[a-z0-9][a-z0-9_-]{0,30}",d["dataset"]):
         raise ValueError("Invalid local dataset identity")
+    if "existing_market" in d:
+        p=Path(d["existing_market"])
+        if not p.is_absolute() or p==Path("/") or ".." in p.parts:raise ValueError("Invalid existing market root")
     batches=d["batches"]
     if not isinstance(batches,list) or not 1<=len(batches)<=MAX_BATCHES:
         raise ValueError("Invalid batch count")
@@ -32,6 +36,7 @@ def validate(d):
     for b in batches:
         if not isinstance(b,dict) or b.get("stage") not in ("market","security","incremental"):
             raise ValueError("Invalid stage")
+        if "existing_market" in d and b["stage"]!="security":raise ValueError("Existing market is read-only; only security batches permitted")
         if b["stage"]=="incremental":
             if set(b)!={"stage","day"}:raise ValueError("Invalid incremental batch")
             day=date.fromisoformat(b["day"])
@@ -39,7 +44,7 @@ def validate(d):
         else:
             if set(b)!={"stage","year","month"} or type(b["year"]) is not int or not 2020<=b["year"]<=2025 or type(b["month"]) is not int or not 1<=b["month"]<=12:
                 raise ValueError("Invalid historical batch")
-            if b["stage"]=="security" and bridge.dump({"stage":"market","year":b["year"],"month":b["month"]}) not in seen:
+            if b["stage"]=="security" and "existing_market" not in d and bridge.dump({"stage":"market","year":b["year"],"month":b["month"]}) not in seen:
                 raise ValueError("A matching market batch must precede the security batch")
         h=bridge.dump(b)
         if h in seen:raise ValueError("Duplicate batch")
@@ -52,12 +57,12 @@ def load(path=CONFIG):
     d=validate(runtime_slots.resolve(raw))
     trusted(d["python"]);trusted(d["backend"],True)
     if not os.access(d["python"],os.X_OK):raise ValueError("Runtime not executable")
-    for k in ("archive","evidence"):
+    for k in ("archive","evidence")+(("existing_market",) if "existing_market" in d else ()):
         p=Path(d[k])
         if not p.is_absolute() or p.resolve()!=p or not p.is_dir() or p==Path("/") or BASE.is_relative_to(p) or p.is_relative_to(BASE):
             raise ValueError("Inputs must be disjoint, existing read-only directories")
-    a,e=Path(d["archive"]),Path(d["evidence"])
-    if a.is_relative_to(e) or e.is_relative_to(a):raise ValueError("Overlapping evidence and archive")
+    roots=[Path(d[k]) for k in ("archive","evidence")+(("existing_market",) if "existing_market" in d else ())]
+    if any(a.is_relative_to(b) or b.is_relative_to(a) for i,a in enumerate(roots) for b in roots[i+1:]):raise ValueError("Overlapping maintenance inputs")
     return d
 
 def command(d,b,work):
@@ -65,7 +70,7 @@ def command(d,b,work):
     p=[d["python"],"-P","-m"]
     if b["stage"]=="security":
         return p+["value_screener.backtest_security_evidence","build",
-            "--archive",d["archive"],"--market",str(w/"market"),"--evidence",d["evidence"],
+            "--archive",d["archive"],"--market",d.get("existing_market",str(w/"market")),"--evidence",d["evidence"],
             "--output",str(w/"security"),"--scratch",str(w/"scratch"),
             "--year",str(b["year"]),"--month",str(b["month"])]
     p+=["value_screener.backtest_dataset","--archive",d["archive"],"--output",str(w/"market"),
