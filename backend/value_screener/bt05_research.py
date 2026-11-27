@@ -151,6 +151,9 @@ def run(args):
         return run_locked(args,market,security,signals,scratch,out,cfg)
 
 def run_locked(args,market,security,signals,scratch,out,cfg):
+    selected=tuple(getattr(args,"strategies",None) or STRATEGIES)
+    if not selected or len(set(selected))!=len(selected) or not set(selected)<=set(STRATEGIES):
+        raise ValueError("Invalid strategy subset")
     source_hash=sha256(signals/"run.json");summary_hash=sha256(signals/"summary.json")
     source=bt04.json_file(signals/"run.json")
     if (source.get("status")!=bt04.STATUS or source.get("eligibility_policy")!="provisional_evidence"
@@ -180,7 +183,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         hashes=signal_store(db,signals,source,sessions)
         contract={"version":1,"status":STATUS,"formal_backtest_ready":False,
             "bt04_run_id":source["run_id"],"signals":hashes,"inputs":inputs,
-            "start":args.start.isoformat(),"end":args.end.isoformat(),"config":asdict(cfg),
+            "start":args.start.isoformat(),"end":args.end.isoformat(),"config":asdict(cfg),"strategies":list(selected),
             "fee_periods":fees.record(),"fee_input_sha256":fee_hash,
             "action_input_sha256":action_hash,"action_policy":"explicit_net_cash_and_integer_shares_only" if action_path else "factor_gate_only",
             "code_sha256":{Path(p).name:sha256(Path(p)) for p in
@@ -199,7 +202,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         for i,(rel,days) in enumerate(groups):
             selected=[d for d in days if d<=args.end]
             if selected:months.setdefault(selected[0].strftime("%Y-%m"),[]).append((i,selected))
-        portfolios={k:Portfolio(cfg,fees,actions) for k in STRATEGIES}
+        portfolios={k:Portfolio(cfg,fees,actions) for k in selected}
         ages={};previous_hash=None;completed=0;rows_seen=0;checkpoint_refs=[]
         for month,parts in months.items():
             marker=out/f"month-{month}.json"
@@ -210,7 +213,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
                 if body["month"]!=month or body["sessions"]!=[d.isoformat() for d in exec_days]:
                     raise ValueError("Checkpoint period mismatch")
                 ages=dict(body["ages"])
-                portfolios={k:Portfolio.restore(cfg,fees,body["portfolios"][k],actions) for k in STRATEGIES}
+                portfolios={k:Portfolio.restore(cfg,fees,body["portfolios"][k],actions) for k in selected}
                 rows_seen=body["rows_seen"]
                 if any(p.index+1!=completed+len(exec_days) for p in portfolios.values()):
                     raise ValueError("Checkpoint session count mismatch")
@@ -218,7 +221,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
                 # Later checkpoints cannot be reused after a missing predecessor.
                 if any(p.name>marker.name for p in out.glob("month-*.json")):
                     raise ValueError("Missing earlier checkpoint")
-                started=time.monotonic();records={k:[] for k in STRATEGIES}
+                started=time.monotonic();records={k:[] for k in selected}
                 ranked=rankings(db,days[0],days[-1])
                 for i,ds in parts:
                     for day,bars,eligible,factors in partition_days(db,mf[i],sf[i],ds,ages,
@@ -267,6 +270,7 @@ def main():
     p.add_argument("--config",type=Path)
     p.add_argument("--fees",type=Path)
     p.add_argument("--actions",type=Path)
+    p.add_argument("--strategies",nargs="+",choices=STRATEGIES)
     run(p.parse_args())
 
 if __name__=="__main__":main()
