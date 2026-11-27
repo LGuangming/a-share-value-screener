@@ -1,8 +1,12 @@
 """Independent technical strategy tests using deterministic synthetic prices."""
 import unittest
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from dataclasses import replace
 from datetime import date, timedelta
 from value_screener.backtest_engine import Bar, BacktestConfig, run_backtest
+from value_screener.technical_research import evaluate, write_new
 from value_screener.technical_strategies import (
     Observation, TechnicalConfig, FactorState, TREND, REVERSAL,
     generate_signals, ranked_close_signals,
@@ -80,6 +84,28 @@ class TechnicalTests(unittest.TestCase):
         self.assertIsNone(points[48].ma_slow)
         self.assertEqual(points[49].ma_slow,10.)
 
+    def test_offline_runner_uses_warmup_and_never_overwrites(self):
+        with TemporaryDirectory() as tmp:
+            path=Path(tmp)/"input.jsonl"
+            output=Path(tmp)/"result.json"
+            rows=[]
+            for x in reversal():
+                b=x.bar
+                rows.append(dict(ts_code=b.ts_code,trade_date=b.day.isoformat(),open=b.open,
+                                 high=b.high,low=b.low,close=b.close,volume=b.volume,
+                                 up_limit=b.up_limit,down_limit=b.down_limit,suspended=b.suspended,
+                                 adj_factor=x.factor,amount_yuan=x.amount_yuan,eligible=x.eligible,
+                                 listing_sessions=x.listing_sessions,session=x.session))
+            path.write_text("\n".join(json.dumps(x) for x in rows))
+            result=evaluate(path,TechnicalConfig(),START+timedelta(days=120),START+timedelta(days=120))
+            self.assertEqual(result["status"],"RESEARCH_ONLY_NOT_CERTIFIED")
+            self.assertEqual(result["signal_counts"][REVERSAL],1)
+            self.assertNotIn("engineering_execution",result)
+            write_new(output,result)
+            self.assertEqual(json.loads(output.read_text()),result)
+            with self.assertRaises(FileExistsError):
+                write_new(output,result)
+
     def test_deterministic_cross_section_ranking(self):
         s=next(x for x in generate_signals(trend()) if x.strategy_id==TREND)
         ranked=ranked_close_signals([replace(s,ts_code="600001.SH",score=2),
@@ -98,6 +124,13 @@ class ExecutionTests(unittest.TestCase):
             return [f for f in run_backtest(bars,signals,cfg)["fills"] if f["side"]=="BUY"]
         self.assertEqual(buys(rows),buys(alt))
         self.assertEqual(len(buys(rows)),2)
+
+    def test_entry_requires_next_open_eligibility_when_supplied(self):
+        rows=[obs(i,10.).bar for i in range(3)]
+        signals={START:["000001.SZ"]}
+        self.assertEqual(run_backtest(rows,signals,entry_eligible={})["fills"],[])
+        allowed={START+timedelta(days=1):{"000001.SZ"}}
+        self.assertEqual(len(run_backtest(rows,signals,entry_eligible=allowed)["fills"]),1)
 
     def test_stop_at_close_executes_next_open_and_retries_blocked_sell(self):
         rows=[obs(i,10.).bar for i in range(5)]
