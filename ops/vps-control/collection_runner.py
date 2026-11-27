@@ -21,7 +21,10 @@ def load(path=CONFIG):
     trusted(d["python"]);trusted(d["backend"],True)
     start,end=map(date.fromisoformat,(d["start"],d["end"]))
     if not date(2020,1,1)<=start<=end<=date.today():raise ValueError("Invalid collection dates")
-    if d["calendar"] is not None:local_input(d["calendar"])
+    if d["calendar"] is not None:
+        calendar=local_input(d["calendar"])
+        if calendar.is_relative_to(BASE) or json.loads(calendar.read_text()).get("status")!="OPERATOR_REVIEWED_CALENDAR_NOT_CERTIFIED":
+            raise ValueError("Independent reviewed calendar required")
     for k,cap in (("reference_budget",30),("dividend_budget",50),("daily_budget",100)):
         if type(d[k]) is not int or not 1<=d[k]<=cap:raise ValueError("Invalid local request budget")
     return d
