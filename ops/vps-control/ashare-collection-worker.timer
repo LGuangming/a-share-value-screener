@@ -1,0 +1,9 @@
+[Unit]
+Description=Poll local official data capture queue
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=10s
+AccuracySec=2s
+Unit=ashare-collection-worker.service
+[Install]
+WantedBy=timers.target

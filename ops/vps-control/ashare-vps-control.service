@@ -1,0 +1,30 @@
+[Unit]
+Description=A-Share private GitHub task bridge (one request)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ashare-control
+Group=ashare-control
+UMask=0077
+StateDirectory=ashare-control ashare-control-work
+StateDirectoryMode=0700
+LoadCredential=github-token:/etc/ashare-control/github-token
+ExecStart=/usr/bin/python3 -I /opt/ashare-control/bridge.py --config /etc/ashare-control/config.json --state /var/lib/ashare-control --credential %d/github-token
+TimeoutStartSec=7500
+KillMode=control-group
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=1G
+CPUQuota=100%
+TasksMax=64

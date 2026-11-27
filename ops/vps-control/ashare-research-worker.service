@@ -1,0 +1,27 @@
+[Unit]
+Description=A-Share offline research queue worker
+[Service]
+Type=oneshot
+User=ashare-research
+Group=ashare-control-research
+UMask=0077
+ExecStart=/usr/bin/python3 -I /opt/ashare-control/worker.py --lane research --config /etc/ashare-control/research-worker.json
+StateDirectory=ashare-research-work
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/ashare-control-spool/research/results
+PrivateNetwork=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+TimeoutStartSec=7500
+KillMode=control-group
+MemoryMax=1G
+CPUQuota=100%
+TasksMax=64

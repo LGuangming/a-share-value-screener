@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll private A-Share task repository
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=30s
+AccuracySec=5s
+Unit=ashare-vps-control.service
+
+[Install]
+WantedBy=timers.target
