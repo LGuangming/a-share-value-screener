@@ -9,11 +9,13 @@ from collections import deque
 from dataclasses import dataclass, asdict
 from datetime import date
 from math import isfinite
+import re
 from typing import Iterable, Iterator
 from .backtest_engine import Bar
 
 TREND = "ma_trend_research_v0"
 REVERSAL = "oversold_reversion_v0"
+MAINBOARD = re.compile(r"(?:(?:600|601|603|605)\d{3}\.SH|(?:000|001|002|003)\d{3}\.SZ)\Z")
 
 @dataclass(frozen=True)
 class Observation:
@@ -163,7 +165,7 @@ def generate_signals(observations: Iterable[Observation],
         point=state.push(obs)
         if point is None:
             state=FactorState(cfg);history.clear();continue
-        if (obs.eligible is True and type(obs.listing_sessions) is int and
+        if (MAINBOARD.fullmatch(code) and obs.eligible is True and type(obs.listing_sessions) is int and
                 obs.listing_sessions>=cfg.min_listing_sessions and
                 point.amount20 is not None and point.amount20>=cfg.min_amount_yuan and history):
             prior=history[-1]
