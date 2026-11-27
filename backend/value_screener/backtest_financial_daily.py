@@ -14,6 +14,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
+from .backtest_bulk import insert_columns, progress
 
 from .archive_paths import RAW_PREFIX
 from .backtest_dataset import atomic_json, digest, read_json, sync_dir
@@ -25,6 +27,7 @@ METRICS = {"balancesheet": ("total_cur_assets","total_liab"),
            "income": ("n_income","n_income_attr_p"),
            "cashflow": ("n_cashflow_act",)}
 VERSION = 1
+EVENT_CACHE_VERSION = 1
 
 
 def disclosure_evidence(raw):
@@ -73,15 +76,43 @@ def candidate_events(rows, kind, calendar):
     Calendar corroboration checks actual date; never uses scheduled pre_date.
     """
     days = set()
+    releases = defaultdict(list)
+    unresolved_dates = defaultdict(list)
     for row in rows:
-        p,d,_ = evidence(row,kind)
+        p,d,status = evidence(row,kind)
         if p:
             days.add(p)
         if d and d < date.max:
             days.add(d+timedelta(days=1))
+        if not p or status == "non_consolidated_or_unknown":
+            continue
+        if not d:
+            unresolved_dates[p].append(p)
+        elif d < date.max:
+            releases[d+timedelta(days=1)].append(((p,d),canonical(row),row,status))
     previous = None
+    latest = None
+    versions = {}
+    unresolved = None
     for day in sorted(days):
-        row,status = select_candidate(rows,kind,day)
+        for p in unresolved_dates.get(day,()):
+            unresolved = max(unresolved,p) if unresolved else p
+        for key,signature,record,record_status in releases.get(day,()):
+            if latest is None or key>latest:
+                latest,versions=key,{}
+            if key==latest:
+                versions[signature]=(record,record_status)
+        row=None
+        if latest is None:
+            status="no_eligible_report"
+        elif unresolved is not None and unresolved>=latest[0]:
+            status="unresolved_disclosure_version"
+        elif len(versions)!=1:
+            status="conflicting_latest_version"
+        else:
+            record,status=next(iter(versions.values()))
+            if status=="candidate_not_pit_certified":
+                row=record
         period = disclosed = version = None
         metrics = [None]*len(METRICS[kind])
         if row is not None:
@@ -101,6 +132,41 @@ def candidate_events(rows, kind, calendar):
             previous = state
 
 
+def event_types(kind):
+    return ("VARCHAR","DATE","DATE","DATE","VARCHAR","VARCHAR",*("DOUBLE" for _ in METRICS[kind]))
+
+
+def source_identity(raw):
+    """Hash actual source bytes AND manifests before trusting a cached event set.
+
+    Enumerate exactly the same frozen universe and periods as the cold reader.
+    No mtime-only shortcuts. Cache invalidation also covers metadata-only edits.
+    """
+    snapshot=raw/"stock_basic"/"stock_basic_snapshot.json"
+    doc=read_json(snapshot)
+    if doc.get("status")!="current_snapshot_not_historical":
+        raise ValueError("Invalid frozen universe")
+    codes=sorted({r["ts_code"] for r in doc["records"]})
+    if not codes:
+        raise ValueError("Empty frozen universe")
+    paths=[snapshot]
+    markers=sorted((raw/"disclosures").glob("period=*.manifest.json"))
+    if not markers:
+        raise ValueError("No disclosure manifests")
+    for marker in markers:
+        paths.extend((marker,marker.with_name(marker.name.removesuffix(".manifest.json")+".jsonl.gz")))
+    for kind in KINDS:
+        for start in range(0,len(codes),BATCH):
+            stem=raw/"financial"/kind/f"start={start:05d}_count={BATCH:03d}"
+            paths.extend((stem.with_suffix(".manifest.json"),stem.with_suffix(".jsonl.gz")))
+    identity={}
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("Missing or symlink financial source: "+str(path))
+        identity[path.relative_to(raw).as_posix()]=digest(path)
+    return identity
+
+
 def load_events(db, raw):
     calendar, provenance = disclosure_evidence(raw)
     snapshot = raw/"stock_basic"/"stock_basic_snapshot.json"
@@ -112,6 +178,9 @@ def load_events(db, raw):
     if not codes:
         raise ValueError("Empty universe")
     sources = {"disclosures":provenance,"universe_sha256":snapshot_sha,"financial":{}}
+    started=time.monotonic()
+    total=len(KINDS)*((len(codes)+BATCH-1)//BATCH)
+    done=0
     for kind in KINDS:
         columns = ",".join(f"{k} DOUBLE" for k in METRICS[kind])
         db.execute(f"CREATE TEMP TABLE {kind}_events (ts_code VARCHAR, available DATE, period DATE, disclosed DATE, version VARCHAR, status VARCHAR,{columns})")
@@ -123,11 +192,63 @@ def load_events(db, raw):
                 grouped[row["ts_code"]].append(row)
             events = [(code,*event) for code,rs in grouped.items()
                       for event in candidate_events(rs,kind,calendar)]
-            if events:
-                placeholders = ",".join("?" for _ in events[0])
-                db.executemany(f"INSERT INTO {kind}_events VALUES ({placeholders})",events)
+            insert_columns(db,kind+"_events",event_types(kind),events)
+            done+=1
+            if done==1 or done%10==0 or done==total:
+                progress("BT03_FINANCIAL_EVENTS_PROGRESS",started,kind=kind,batches_done=done,batches_total=total)
     if digest(snapshot) != snapshot_sha:
         raise ValueError("Universe changed")
+    return sources
+
+
+def cached_events(db,raw,cache_root):
+    started=time.monotonic()
+    progress("BT03_FINANCIAL_SOURCE_CHECK",started)
+    identity=source_identity(raw)
+    cache_key=hashlib.sha256(json.dumps({"version":EVENT_CACHE_VERSION,"files":identity},
+        sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    cache=cache_root/cache_key
+    cache.mkdir(parents=True,exist_ok=True)
+    marker=cache/"manifest.json"
+    if marker.exists():
+        receipt=read_json(marker)
+        if receipt.get("version")!=EVENT_CACHE_VERSION or receipt.get("source_identity")!=identity:
+            raise ValueError("Event cache identity mismatch")
+        for kind in KINDS:
+            item=receipt["outputs"][kind]
+            path=cache/f"{kind}-{item['sha256']}.parquet"
+            if (item.get("file")!=path.name or path.is_symlink() or not path.is_file()
+                or path.stat().st_size!=item["bytes"] or digest(path)!=item["sha256"]):
+                raise ValueError("Corrupt event cache: "+str(path))
+            db.execute(f"CREATE TEMP TABLE {kind}_events AS SELECT * FROM read_parquet(?,hive_partitioning=false)",[str(path)])
+            n,u=db.execute(f"SELECT count(*),count(DISTINCT(ts_code,available)) FROM {kind}_events").fetchone()
+            if n!=u or n!=item["rows"]:
+                raise ValueError("Event cache row/key mismatch")
+        if source_identity(raw)!=identity:
+            raise ValueError("Financial sources changed while reading cache")
+        progress("BT03_FINANCIAL_CACHE_REUSED",started,key=cache_key)
+        return receipt["financial_sources"]
+    sources=load_events(db,raw)
+    outputs={}
+    for kind in KINDS:
+        n,u=db.execute(f"SELECT count(*),count(DISTINCT(ts_code,available)) FROM {kind}_events").fetchone()
+        if n!=u:
+            raise ValueError("Duplicate financial event keys")
+        with tempfile.TemporaryDirectory(dir=cache) as tmp:
+            path=Path(tmp)/"events.parquet"
+            db.execute(f"COPY (SELECT * FROM {kind}_events ORDER BY ts_code,available) TO ? (FORMAT PARQUET,COMPRESSION ZSTD)",[str(path)])
+            with path.open("rb") as f:
+                os.fsync(f.fileno())
+            h=digest(path)
+            name=f"{kind}-{h}.parquet"
+            os.replace(path,cache/name)
+            sync_dir(cache)
+            outputs[kind]={"file":name,"sha256":h,"rows":n,"bytes":(cache/name).stat().st_size}
+    if source_identity(raw)!=identity:
+        raise ValueError("Financial sources changed during event build")
+    atomic_json(marker,{"version":EVENT_CACHE_VERSION,"source_identity":identity,
+                        "financial_sources":sources,"outputs":outputs})
+    progress("BT03_FINANCIAL_CACHE_BUILT",started,key=cache_key,events=sum(x["rows"] for x in outputs.values()))
     return sources
 
 
@@ -164,12 +285,14 @@ def build(raw, market, output, scratch, year, month):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         db = duckdb.connect(config={"threads":"1","memory_limit":"512MB","temp_directory":str(scratch)})
         try:
-            # Load compact change events once for the selected range.
-            sources = load_events(db,raw)
+            started=time.monotonic()
             markers = sorted(market.glob(f"year={year}/month={month:02d}/manifest.json" if month else f"year={year}/month=*/manifest.json"))
             if not markers or (month is None and len(markers)!=12):
                 raise ValueError("Incomplete standardized historical market partitions")
-            for marker in markers:
+            sources=cached_events(db,raw,output/".event-cache")
+            for index,marker in enumerate(markers,1):
+                partition_started=time.monotonic()
+                progress("BT03_FINANCIAL_PARTITION_START",started,partition=index,total=len(markers),month=marker.parent.name)
                 meta = read_json(marker)
                 item = meta["outputs"]["market"]
                 src = marker.parent / item["file"]
@@ -188,7 +311,7 @@ def build(raw, market, output, scratch, year, month):
                     if (old["inputs"]!=fingerprint or name!=f"financial-{old['sha256']}.parquet"
                         or digest(target/name)!=old["sha256"]):
                         raise ValueError("Existing financial output differs; use new version")
-                    print("BT03_FINANCIAL_REUSED "+str(target),flush=True)
+                    progress("BT03_FINANCIAL_REUSED",partition_started,path=str(target))
                     continue
                 stats=daily_join(db,src)
                 if stats["rows"]!=meta["quality"]["rows"] or digest(src)!=item["sha256"]:
@@ -203,7 +326,7 @@ def build(raw, market, output, scratch, year, month):
                 atomic_json(receipt,{"inputs":fingerprint,"file":name,"sha256":h,"quality":stats,
                     "status":"research_not_pit_certified","limitations":["historical_revision_completeness_unknown",
                     "no_certified_ROE","no_2026_disclosure_archive","income_cashflow_YTD_not_TTM"]})
-                print("BT03_FINANCIAL_PARTITION "+json.dumps(stats,sort_keys=True),flush=True)
+                progress("BT03_FINANCIAL_PARTITION",partition_started,**stats)
         finally:
             db.close()
 
