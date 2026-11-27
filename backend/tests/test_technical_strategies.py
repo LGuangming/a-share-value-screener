@@ -17,7 +17,7 @@ def obs(i,close,*,code="000001.SZ",factor=1.,vol=1000.,eligible=True,amount=60_0
     return Observation(b,factor,amount,eligible,120+i,i if session is None else session)
 
 def trend():
-    return [obs(i,100+i*.2) for i in range(125)]
+    return [obs(i,100+i*.2+(1.2 if i in (59,80,124) else 0)) for i in range(125)]
 
 def reversal():
     rows=[obs(i,100-i*.6) for i in range(120)]
