@@ -11,10 +11,11 @@ import json
 import os
 from dataclasses import asdict
 from datetime import date
+from math import isfinite
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from .backtest_engine import Bar, BacktestConfig, run_backtest
-from .technical_strategies import (Observation, TechnicalConfig, TREND, REVERSAL,
+from .technical_strategies import (Observation, TechnicalConfig, TREND, REVERSAL, MAINBOARD,
                                   generate_signals, ranked_close_signals, signal_record)
 
 def sha256(path: Path):
@@ -38,6 +39,11 @@ def normalized_observations(path: Path):
                 # Never silently treat missing suspension status as tradable.
                 if type(row["suspended"]) is not bool:
                     raise ValueError("Unknown suspension status")
+                for limit in (row["up_limit"],row["down_limit"]):
+                    if limit is not None and (type(limit) not in (int,float) or not isfinite(limit) or limit<=0):
+                        raise ValueError("Invalid price limit")
+                if row["up_limit"] is not None and row["down_limit"] is not None and row["up_limit"]<row["down_limit"]:
+                    raise ValueError("Inconsistent price limits")
                 day=date.fromisoformat(row["trade_date"])
                 bar=Bar(code,day,row["open"],row["high"],row["low"],row["close"],
                         row["volume"],row["up_limit"],row["down_limit"],row["suspended"])
@@ -54,6 +60,7 @@ def evaluate(path: Path, cfg: TechnicalConfig, start: date, end: date,
     signals=[]
     count=0
     bars=[]
+    entry_eligible={}
     day_sessions={}
     session_days={}
     def stream():
@@ -69,6 +76,9 @@ def evaluate(path: Path, cfg: TechnicalConfig, start: date, end: date,
                 if len(bars)>=max_rows:
                     raise ValueError("Engineering execution exceeds configured row cap")
                 bars.append(row.bar)
+                if (MAINBOARD.fullmatch(row.bar.ts_code) and row.eligible is True and
+                        type(row.listing_sessions) is int and row.listing_sessions>=cfg.min_listing_sessions):
+                    entry_eligible.setdefault(day,set()).add(row.bar.ts_code)
             yield row
     for signal in generate_signals(stream(),cfg):
         if start<=signal.day<=end:
@@ -87,7 +97,7 @@ def evaluate(path: Path, cfg: TechnicalConfig, start: date, end: date,
             raise ValueError("Missing market sessions in execution interval")
         bc=BacktestConfig(holding_sessions=holding,stop_loss_rate=stop)
         result["execution_config"]=asdict(bc)
-        result["engineering_execution"]={k:run_backtest(bars,ranked_close_signals(ordered,k),bc)
+        result["engineering_execution"]={k:run_backtest(bars,ranked_close_signals(ordered,k),bc,entry_eligible=entry_eligible)
                                           for k in (TREND,REVERSAL)}
         result["limitations"]="Raw execution prices; no certified corporate-action cash/share accounting, historical universe, or date-specific fees. Engineering results must not be published."
     return result
