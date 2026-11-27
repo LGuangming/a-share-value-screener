@@ -4,7 +4,7 @@ import {storage,requiredObject,archiveCache,ArchiveUnavailable} from "./archive-
 export {ArchiveUnavailable} from "./archive-storage";
 import { parquetReadObjects } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
-import { completeBar, recentWindow, recentMonthRange, RECENT_SESSIONS, type MarketBar, type Factor } from "./market-bars";
+import { completeBar, recentWindow, recentMonthRange, historyMonths, HISTORY_CHUNK_MONTHS, RECENT_SESSIONS, type MarketBar, type Factor } from "./market-bars";
 
 import { RAW_PREFIX as PREFIX } from "./archive-paths";
 function isoDay(value:unknown):string {
@@ -198,3 +198,47 @@ async function queryRecentFactors(code:string,from:string,to:string){
   return result;
 }
 export const recentFactors=archiveCache(queryRecentFactors,"market-recent-factors-v1",60);
+
+
+// Cache immutable verified monthly slices separately from mutable incremental
+// snapshots. Storage scope and credentials remain managed by archiveCache.
+const historicalQuoteMonth=archiveCache(async(code:string,year:number,month:string)=>{
+  const dates=new Set<string>(),bars=await queryYear(code,year,[month],dates);
+  return {bars,dates:[...dates].sort(),missingMonths:[] as string[],missingSessions:[] as string[]};
+},"market-quote-month-v1",86400);
+const historicalFactorMonth=archiveCache((code:string,year:number,month:string)=>queryFactors(code,year,[month]),"market-factor-month-v1",86400);
+const incrementalQuoteMonth=archiveCache((code:string,year:number,month:string)=>readIncremental(code,year,"daily_prices",[month]),"market-incremental-quote-month-v1",60);
+const incrementalFactorMonth=archiveCache((code:string,year:number,month:string)=>readIncremental(code,year,"adj_factor",[month]),"market-incremental-factor-month-v1",60);
+export function boundedHistoryMonths(from:string,to:string){
+  const today=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
+  const months=historyMonths(from,to,today);
+  if(months.length>HISTORY_CHUNK_MONTHS)throw Error("每次请求最多三个月");
+  return months;
+}
+export async function rangeQuotes(code:string,from:string,to:string){
+  const months=boundedHistoryMonths(from,to);
+  const bars:MarketBar[]=[],dates:string[]=[],missingMonths:string[]=[],missingSessions:string[]=[];
+  for(let i=0;i<months.length;i+=2){
+    const batch=await Promise.all(months.slice(i,i+2).map(async({year,month})=>{
+      if(year<2026)return historicalQuoteMonth(code,year,month);
+      const result=await incrementalQuoteMonth(code,year,month);
+      return {bars:result.bars,dates:result.dates,missingMonths:result.coverage.missingMonths.map(m=>year+"-"+m),missingSessions:result.coverage.missingSessions};
+    }));
+    for(const part of batch){bars.push(...part.bars);dates.push(...part.dates);missingMonths.push(...part.missingMonths);missingSessions.push(...part.missingSessions);}
+  }
+  const inside=(day:string)=>day>=from&&day<=to;
+  const sessions=[...new Set(dates.filter(inside))].sort(),gaps=missingSessions.filter(inside);
+  const result=bars.filter(b=>inside(b.day)).sort((a,b)=>a.day.localeCompare(b.day));
+  if(new Set(result.map(b=>b.day)).size!==result.length)throw Error("Duplicate range quote");
+  return {bars:result,coverage:{from,to,archivedSessions:sessions.length,latest:sessions.at(-1)??"",missingMonths,missingSessions:gaps,partial:!!(missingMonths.length||gaps.length)}};
+}
+export async function rangeFactors(code:string,from:string,to:string){
+  const months=boundedHistoryMonths(from,to),factors:Factor[]=[];
+  for(let i=0;i<months.length;i+=2){
+    const batch=await Promise.all(months.slice(i,i+2).map(async({year,month})=>year<2026?historicalFactorMonth(code,year,month):(await incrementalFactorMonth(code,year,month)).factors));
+    factors.push(...batch.flat());
+  }
+  const result=factors.filter(f=>f.day>=from&&f.day<=to).sort((a,b)=>a.day.localeCompare(b.day));
+  if(new Set(result.map(f=>f.day)).size!==result.length)throw Error("Duplicate range factor");
+  return result;
+}
