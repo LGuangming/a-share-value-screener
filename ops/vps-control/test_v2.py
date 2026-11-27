@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime,timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -31,6 +32,17 @@ class V2Tests(unittest.TestCase):
             with self.assertRaises(OSError):bounded_json(root/"fake.json")
             (root/"outside").symlink_to(p,target_is_directory=True)
             with self.assertRaises(OSError):bounded_json(root/"outside"/"manifest.json")
+    def test_traverse_only_ancestor(self):
+        with TemporaryDirectory() as tmp:
+            parent=Path(tmp)/"traverse";root=parent/"market"
+            part=root/"year=2025"/"month=01"
+            part.mkdir(parents=True);(part/"manifest.json").write_text("{}")
+            parent.chmod(0o100)
+            try:
+                self.assertEqual(inventory("market",root)["monthly_receipts"],1)
+                self.assertEqual(bounded_json(part/"manifest.json"),{})
+            finally:
+                parent.chmod(0o700)
     def test_sanitized_snapshots_and_alias_type(self):
         doc={"status":"BT05_PREFLIGHT_RESEARCH_ONLY","research_preflight_pass":False,
              "checks":{"calendar":{"ok":True,"sessions":3,"error":"SECRET"},
