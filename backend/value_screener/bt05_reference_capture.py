@@ -61,7 +61,7 @@ def validate(kind,key,start,end,rows):
 
 def slice_paths(root,kind,key,start,end):
     base=root/f"{kind}-{key}-{start.isoformat()}-{end.isoformat()}"
-    return base.with_suffix(base.suffix+".json"),base.with_suffix(base.suffix+".manifest.json")
+    return Path(str(base)+".json"),Path(str(base)+".manifest.json")
 
 def read_slice(root,kind,key,start,end):
     raw,marker=slice_paths(root,kind,key,start,end)
