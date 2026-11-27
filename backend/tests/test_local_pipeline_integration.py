@@ -269,6 +269,40 @@ class BT04ParquetIntegration(unittest.TestCase):
             with redirect_stdout(StringIO()):self.assertEqual(bt05_grid.run(g),gr)
             g.test_start=g.train_end
             with self.assertRaisesRegex(ValueError,"disjoint"):bt05_grid.run(g)
+            # Walk-forward: train and test independently, with two disjoint
+            # held-out windows. First fold has no qualifying synthetic signal.
+            from value_screener import bt05_walk_forward as wf
+            walk=root/"walk";walk.mkdir()
+            plan_path=root/"walk-plan.json"
+            plan_path.write_text(json.dumps({"warmup":sessions[0].isoformat(),
+                "folds":[{"train_start":sessions[50].isoformat(),"train_end":sessions[80].isoformat(),
+                          "test_start":sessions[81].isoformat(),"test_end":sessions[100].isoformat()},
+                         {"train_start":sessions[120].isoformat(),"train_end":sessions[129].isoformat(),
+                          "test_start":sessions[130].isoformat(),"test_end":sessions[-1].isoformat()}],
+                "signal_configs":[{},{"pullback_tolerance":.03}],
+                "execution_configs":[{"holding_sessions":1}],
+                "min_trades":1,"max_drawdown":.5}))
+            bench=root/"benchmark.json"
+            bench.write_text(json.dumps({"status":"OPERATOR_REVIEWED_BENCHMARK_NOT_CERTIFIED",
+                "kind":"price_index","code":"SYNTH","source_ref":"synthetic levels",
+                "levels":[{"date":day.isoformat(),"close":100+i} for i,day in enumerate(sessions)]}))
+            wa=SimpleNamespace(market=market,security=security,scratch=scratch,output=walk,
+                calendar=calendar,plan=plan_path,benchmark=bench,fees=None,actions=action_file,shards=2)
+            with redirect_stdout(StringIO()):wr=wf.run(wa)
+            self.assertEqual(len(wr["folds"]),2)
+            self.assertIsNone(wr["folds"][0]["results"][TREND])
+            picked=wr["folds"][1]["results"][TREND]
+            self.assertIsNotNone(picked)
+            self.assertEqual(picked["test_metrics"]["completed_sessions"],5)
+            self.assertAlmostEqual(picked["comparison"]["benchmark_return"],234/230-1)
+            self.assertEqual(wr["aggregate"][TREND]["selected_folds"],1)
+            selection=json.loads((walk/"fold-02"/"selection.json").read_text())
+            self.assertEqual(picked["id"],selection["selected"][TREND])
+            training_runs=list((walk/"fold-02"/"train"/"signals").glob("*/run.json"))
+            self.assertEqual(len(training_runs),2)
+            for runfile in training_runs:
+                self.assertEqual(json.loads(runfile.read_text())["end"],sessions[129].isoformat())
+            with redirect_stdout(StringIO()):self.assertEqual(wf.run(wa),wr)
             # Real Parquet dividend reconciliation against a complete synthetic
             # ex-date archive. Constant-factor prices must yield no actions.
             from value_screener import bt05_dividend_capture as dc,bt05_dividend_reconcile as dr
