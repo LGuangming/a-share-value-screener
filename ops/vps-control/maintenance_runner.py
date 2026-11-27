@@ -15,6 +15,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from research_runner import trusted,atomic
 import bridge
 import runtime_slots
+from worker import store
 
 BASE=Path("/var/lib/ashare-research-work")
 CONFIG=Path("/etc/ashare-control/maintenance.json")
@@ -91,17 +92,23 @@ def run(d,base=BASE,invoke=subprocess.call):
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         identity=hashlib.sha256(bridge.dump(d).encode()).hexdigest()
         state=work/"maintenance-state.json";report=work/"maintenance.json"
+        def publish(payload):
+            atomic(report,payload)
+            # Only the fixed sanitized progress schema crosses to the bridge.
+            # Keep all other research work files private to the research UID.
+            if Path(base)==BASE:
+                store(bridge.SPOOL/"research"/"results"/"bt03-maintenance.json",payload)
         doc=bridge.bounded_json(state) if state.exists() else {"plan_sha256":identity,"completed":0}
         if doc["plan_sha256"]!=identity:raise ValueError("Plan changed; new dataset identity required")
         n=doc["completed"];total=len(d["batches"])
         if type(n) is not int or not 0<=n<=total:raise ValueError("Invalid local checkpoint")
         base_report={"status":"BT03_LOCAL_MAINTENANCE_V1","completed_batches":n,"total_batches":total}
         if n==total:
-            atomic(report,{**base_report,"state":"no_pending_batch"});return 0
+            publish({**base_report,"state":"no_pending_batch"});return 0
         b=d["batches"][n]
         meta={**base_report,"stage":b["stage"],"year":b.get("year",int(b.get("day","2020")[:4])),
               "month":b.get("month",int(b.get("day","2020-01")[5:7]))}
-        atomic(report,{**meta,"state":"running"})
+        publish({**meta,"state":"running"})
         started=time.monotonic()
         env={"PATH":"/usr/bin:/bin","LANG":"C.UTF-8","PYTHONPATH":d["backend"],"PYTHONNOUSERSITE":"1",
              "PYTHONDONTWRITEBYTECODE":"1","TMPDIR":str(work/"scratch")}
@@ -111,7 +118,7 @@ def run(d,base=BASE,invoke=subprocess.call):
         # retries. A failed/interrupted batch is not advanced automatically.
         if code==0:
             doc["completed"]=n+1;atomic(state,doc)
-        atomic(report,{**meta,"completed_batches":doc["completed"],"state":"completed" if code==0 else "failed",
+        publish({**meta,"completed_batches":doc["completed"],"state":"completed" if code==0 else "failed",
                        "exit_code":code,"elapsed_seconds":round(time.monotonic()-started,3)})
         return code
 
