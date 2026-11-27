@@ -1,0 +1,58 @@
+# Standalone BT05 continuous research job; never combine with production Compose.
+name: ashare-bt05
+services:
+  portfolio-research:
+    image: ${BT05_IMAGE:?set separately reviewed immutable BT05 Worker image}
+    user: "10002:10010"
+    init: true
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1024m
+    cpus: 1.0
+    entrypoint: ["/usr/local/bin/python3", "-m", "value_screener.bt05_research", "--market", "/market", "--security", "/security", "--signals", "/signals", "--scratch", "/scratch", "--output", "/results"]
+    environment:
+      TMPDIR: /scratch
+      DUCKDB_TEMP_DIRECTORY: /scratch
+    volumes:
+      - type: bind
+        source: ${BACKTEST_DIR:?set BT03 root}/02_standardized/market
+        target: /market
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:?set BT03 root}/02_standardized/tradeability
+        target: /security
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BT04_RESULT_DIR:?set completed BT04 run directory}
+        target: /signals
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BT04_EVIDENCE_DIR:?set read-only calendar/config directory}
+        target: /evidence
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BT05_RESULT_DIR:?set isolated result directory}
+        target: /results
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BT05_SCRATCH_DIR:?set isolated scratch directory}
+        target: /scratch
+        bind:
+          create_host_path: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
