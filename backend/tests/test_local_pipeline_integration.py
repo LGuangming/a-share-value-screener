@@ -217,6 +217,38 @@ class BT04ParquetIntegration(unittest.TestCase):
             saved=(out/"shard-000.json").read_bytes()
             with redirect_stdout(StringIO()):bt.run(a)
             self.assertEqual(saved,(out/"shard-000.json").read_bytes())
+            # BT05 consumes the same immutable receipts, not the BT04 capped bars.
+            from value_screener import bt05_research as bt05
+            out5=root/"bt05";out5.mkdir()
+            config=root/"execution-config.json"
+            config.write_text(json.dumps({"holding_sessions":5,"stop_loss_rate":.05}))
+            b=SimpleNamespace(market=market,security=security,signals=out,scratch=scratch,
+                output=out5,calendar=calendar,start=sessions[120],end=sessions[-1],
+                config=config,fees=None)
+            with redirect_stdout(StringIO()):report=bt05.run(b)
+            self.assertEqual(report["sessions"],15)
+            self.assertFalse(report["formal_backtest_ready"])
+            self.assertGreater(report["results"][TREND]["metrics"]["closed_trades"],0)
+            for k in result["results"]:
+                old=result["results"][k]["metrics"]
+                new=report["results"][k]["metrics"]
+                for metric in ("total_return","max_drawdown"):
+                    self.assertAlmostEqual(old[metric],new[metric])
+                self.assertEqual(old["closed_trades"],new["closed_trades"])
+            checkpoints=sorted(out5.glob("month-*.json"))
+            self.assertGreater(len(checkpoints),1)
+            saved5={p.name:p.read_bytes() for p in checkpoints}
+            with redirect_stdout(StringIO()):self.assertEqual(bt05.run(b),report)
+            self.assertEqual(saved5,{p.name:p.read_bytes() for p in checkpoints})
+            # Replay only the last month from the prior committed portfolio state.
+            checkpoints[-1].unlink();(out5/"summary.json").unlink()
+            with redirect_stdout(StringIO()):self.assertEqual(bt05.run(b),report)
+            self.assertEqual(saved5,{p.name:p.read_bytes() for p in checkpoints})
+            checkpoint=json.loads(checkpoints[-1].read_text())
+            checkpoint["body"]["rows_seen"]+=1
+            checkpoints[-1].write_text(json.dumps(checkpoint))
+            with self.assertRaisesRegex(ValueError,"Checkpoint hash"):
+                with redirect_stdout(StringIO()):bt05.run(b)
             a.max_rows=1
             with self.assertRaisesRegex(ValueError,"cap is"):
                 with redirect_stdout(StringIO()):bt.run(a)
