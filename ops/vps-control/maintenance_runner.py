@@ -20,6 +20,8 @@ from worker import store
 BASE=Path("/var/lib/ashare-research-work")
 CONFIG=Path("/etc/ashare-control/maintenance.json")
 MAX_BATCHES=180
+BULK_SECONDS=1200
+BATCH_SECONDS=300
 
 def validate(d):
     required={"python","backend","archive","evidence","dataset","batches"}
@@ -80,7 +82,9 @@ def command(d,b,work):
         return p+["--incremental","--start-year",b["day"][:4],"--end-year",b["day"][:4],"--day",b["day"]]
     return p+["--start-year",str(b["year"]),"--end-year",str(b["year"]),"--month",str(b["month"])]
 
-def run(d,base=BASE,invoke=subprocess.call):
+def run(d,base=BASE,invoke=subprocess.call,*,continuous=False):
+    if continuous and ("existing_market" not in d or any(b["stage"]!="security" for b in d["batches"])):
+        raise ValueError("Continuous mode is limited to the approved security-only plan")
     work=Path(base)/d["dataset"]
     if work.resolve()!=work:raise ValueError("Symlink output")
     work.mkdir(mode=0o700,exist_ok=True)
@@ -102,26 +106,35 @@ def run(d,base=BASE,invoke=subprocess.call):
         if doc["plan_sha256"]!=identity:raise ValueError("Plan changed; new dataset identity required")
         n=doc["completed"];total=len(d["batches"])
         if type(n) is not int or not 0<=n<=total:raise ValueError("Invalid local checkpoint")
-        base_report={"status":"BT03_LOCAL_MAINTENANCE_V1","completed_batches":n,"total_batches":total}
-        if n==total:
-            publish({**base_report,"state":"no_pending_batch"});return 0
-        b=d["batches"][n]
-        meta={**base_report,"stage":b["stage"],"year":b.get("year",int(b.get("day","2020")[:4])),
-              "month":b.get("month",int(b.get("day","2020-01")[5:7]))}
-        publish({**meta,"state":"running"})
-        started=time.monotonic()
-        env={"PATH":"/usr/bin:/bin","LANG":"C.UTF-8","PYTHONPATH":d["backend"],"PYTHONNOUSERSITE":"1",
-             "PYTHONDONTWRITEBYTECODE":"1","TMPDIR":str(work/"scratch")}
-        code=invoke(command(d,b,work),cwd="/",env=env,stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        # Underlying BT03 refuses differing outputs and revalidates receipts on
-        # retries. A failed/interrupted batch is not advanced automatically.
-        if code==0:
-            doc["completed"]=n+1;atomic(state,doc)
-        publish({**meta,"completed_batches":doc["completed"],"state":"completed" if code==0 else "failed",
-                       "exit_code":code,"elapsed_seconds":round(time.monotonic()-started,3)})
-        return code
+        deadline=time.monotonic()+BULK_SECONDS
+        while n<total:
+            base_report={"status":"BT03_LOCAL_MAINTENANCE_V1","completed_batches":n,"total_batches":total}
+            b=d["batches"][n]
+            meta={**base_report,"stage":b["stage"],"year":b.get("year",int(b.get("day","2020")[:4])),
+                  "month":b.get("month",int(b.get("day","2020-01")[5:7]))}
+            publish({**meta,"state":"running"})
+            started=time.monotonic()
+            env={"PATH":"/usr/bin:/bin","LANG":"C.UTF-8","PYTHONPATH":d["backend"],"PYTHONNOUSERSITE":"1",
+                 "PYTHONDONTWRITEBYTECODE":"1","TMPDIR":str(work/"scratch")}
+            opts={"timeout":min(BATCH_SECONDS,max(1,deadline-started))} if continuous else {}
+            try:
+                code=invoke(command(d,b,work),cwd="/",env=env,stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,**opts)
+            except subprocess.TimeoutExpired:
+                code=124
+            # Advance only on success. A fresh approved task may resume, but
+            # neither failed nor timed-out months are skipped.
+            if code==0:
+                n+=1;doc["completed"]=n;atomic(state,doc)
+            publish({**meta,"completed_batches":n,"state":"completed" if code==0 else "failed",
+                           "exit_code":code,"elapsed_seconds":round(time.monotonic()-started,3)})
+            if code!=0 or not continuous or n==total or time.monotonic()>=deadline:
+                return code
+        publish({"status":"BT03_LOCAL_MAINTENANCE_V1","completed_batches":n,
+                 "total_batches":total,"state":"no_pending_batch"})
+        return 0
 
 if __name__=="__main__":
     if os.geteuid()==0:raise SystemExit("Refuse root execution")
-    raise SystemExit(run(load()))
+    if sys.argv[1:] not in ([],["--continuous"]):raise SystemExit("Invalid fixed mode")
+    raise SystemExit(run(load(),continuous=sys.argv[1:]==["--continuous"]))
