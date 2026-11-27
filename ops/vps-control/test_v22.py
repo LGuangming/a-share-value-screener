@@ -36,6 +36,16 @@ class V22Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"matching market"):maint.validate(d)
         d=self.plan();d["batches"][0]["month"]=13
         with self.assertRaises(ValueError):maint.validate(d)
+    def test_reuse_read_only_market(self):
+        d=self.plan()
+        d["existing_market"]="/existing/market"
+        d["batches"]=d["batches"][1:]
+        maint.validate(d)
+        args=maint.command(d,d["batches"][0],Path("/work"))
+        self.assertEqual(args[args.index("--market")+1],"/existing/market")
+        self.assertEqual(args[args.index("--output")+1],"/work/security")
+        d["batches"].append({"stage":"market","year":2025,"month":2})
+        with self.assertRaisesRegex(ValueError,"read-only"):maint.validate(d)
     def test_runtime_selection_fail_closed(self):
         d={"baseline":{"revision":"a"*40},"candidate":{"revision":"b"*40}}
         with TemporaryDirectory() as tmp:
