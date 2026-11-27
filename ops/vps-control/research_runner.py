@@ -16,7 +16,9 @@ import subprocess
 import sys
 import time
 
-BASE=Path("/var/lib/ashare-control-work")
+BASE=Path(os.environ.get("ASHARE_RESEARCH_WORK","/var/lib/ashare-control-work"))
+if BASE not in (Path("/var/lib/ashare-control-work"),Path("/var/lib/ashare-research-work")):
+    raise ValueError("Invalid locally selected work directory")
 CONFIG=Path("/etc/ashare-control/research.json")
 STAGES=("preflight","signals","portfolio","walk")
 
