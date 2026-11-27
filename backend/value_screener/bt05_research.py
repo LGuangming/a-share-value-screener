@@ -19,6 +19,8 @@ from math import isfinite
 from . import bt04_research as bt04, bt05_portfolio, backtest_engine, technical_strategies, technical_research
 from .backtest_engine import Bar, BacktestConfig
 from .bt05_portfolio import Portfolio,FeePeriod,FeeSchedule
+from . import bt05_actions
+from .bt05_actions import Actions
 from .technical_strategies import TREND,REVERSAL,MAINBOARD
 from .technical_research import sha256,write_new
 
@@ -162,6 +164,8 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
     if sha256(args.calendar)!=source["calendar_sha256"]:raise ValueError("BT04 calendar mismatch")
     sessions=bt04.read_calendar(args.calendar,warmup,source_end)
     fees,fee_hash=load_fees(args.fees,cfg,args.start,args.end)
+    action_path=getattr(args,'actions',None)
+    actions,action_hash=Actions.load(action_path,sessions,args.start,args.end)
     import duckdb
     staging=TemporaryDirectory(dir=scratch,prefix="bt05-")
     try:
@@ -178,10 +182,12 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
             "bt04_run_id":source["run_id"],"signals":hashes,"inputs":inputs,
             "start":args.start.isoformat(),"end":args.end.isoformat(),"config":asdict(cfg),
             "fee_periods":fees.record(),"fee_input_sha256":fee_hash,
+            "action_input_sha256":action_hash,"action_policy":"explicit_net_cash_and_integer_shares_only" if action_path else "factor_gate_only",
             "code_sha256":{Path(p).name:sha256(Path(p)) for p in
-                (__file__,bt05_portfolio.__file__,bt04.__file__,backtest_engine.__file__,technical_strategies.__file__,technical_research.__file__)},
+                (__file__,bt05_portfolio.__file__,bt05_actions.__file__,bt04.__file__,backtest_engine.__file__,technical_strategies.__file__,technical_research.__file__)},
             "limitations":["provisional_historical_universe_and_tradeability","operator_fee_assumptions_not_certified",
-              "corporate_action_or_factor_gap_while_holding_blocks_execution","no_dividend_or_share_accounting",
+              "unsupported_or_unreconciled_corporate_action_blocks_execution","net_dividend_assumptions_not_certified",
+              "no_rights_fractional_delayed_shares_or_delisting_accounting",
               "no_independent_calendar_certification"]}
         rid=identity(contract);manifest=out/"run.json";record={"run_id":rid,**contract}
         if manifest.exists():
@@ -193,7 +199,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         for i,(rel,days) in enumerate(groups):
             selected=[d for d in days if d<=args.end]
             if selected:months.setdefault(selected[0].strftime("%Y-%m"),[]).append((i,selected))
-        portfolios={k:Portfolio(cfg,fees) for k in STRATEGIES}
+        portfolios={k:Portfolio(cfg,fees,actions) for k in STRATEGIES}
         ages={};previous_hash=None;completed=0;rows_seen=0;checkpoint_refs=[]
         for month,parts in months.items():
             marker=out/f"month-{month}.json"
@@ -204,7 +210,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
                 if body["month"]!=month or body["sessions"]!=[d.isoformat() for d in exec_days]:
                     raise ValueError("Checkpoint period mismatch")
                 ages=dict(body["ages"])
-                portfolios={k:Portfolio.restore(cfg,fees,body["portfolios"][k]) for k in STRATEGIES}
+                portfolios={k:Portfolio.restore(cfg,fees,body["portfolios"][k],actions) for k in STRATEGIES}
                 rows_seen=body["rows_seen"]
                 if any(p.index+1!=completed+len(exec_days) for p in portfolios.values()):
                     raise ValueError("Checkpoint session count mismatch")
@@ -234,7 +240,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         if completed!=len(expected_days) or completed<2:raise ValueError("Execution session coverage mismatch")
         _,_,checked=bt04.receipts(db,market,security,sessions)
         if (checked!=inputs or sha256(args.calendar)!=source["calendar_sha256"] or (args.fees and sha256(args.fees)!=fee_hash)
-                or sha256(signals/"run.json")!=source_hash or sha256(signals/"summary.json")!=summary_hash):
+                or (action_path and sha256(action_path)!=action_hash) or sha256(signals/"run.json")!=source_hash or sha256(signals/"summary.json")!=summary_hash):
             raise ValueError("Source inputs changed during execution")
         for sh in hashes:
             n=sh["shard"]
@@ -243,7 +249,7 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         summary={"run_id":rid,"status":STATUS,"formal_backtest_ready":False,
             "sessions":completed,"rows_seen_including_warmup":rows_seen,"checkpoints":checkpoint_refs,
             "results":{k:{"metrics":p.metrics(),"final_positions":p.checkpoint()["holdings"],
-                          "final_cash":p.cash} for k,p in portfolios.items()}}
+                          "final_cash":p.cash,"final_dividend_receivables":p.checkpoint()["receivables"]} for k,p in portfolios.items()}}
         dest=out/"summary.json"
         if dest.exists():
             if bt04.json_file(dest)!=summary:raise ValueError("BT05 summary differs")
@@ -260,6 +266,7 @@ def main():
     for name in ("start","end"):p.add_argument("--"+name,type=date.fromisoformat,required=True)
     p.add_argument("--config",type=Path)
     p.add_argument("--fees",type=Path)
+    p.add_argument("--actions",type=Path)
     run(p.parse_args())
 
 if __name__=="__main__":main()
