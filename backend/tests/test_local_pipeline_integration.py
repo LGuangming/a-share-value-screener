@@ -269,6 +269,28 @@ class BT04ParquetIntegration(unittest.TestCase):
             with redirect_stdout(StringIO()):self.assertEqual(bt05_grid.run(g),gr)
             g.test_start=g.train_end
             with self.assertRaisesRegex(ValueError,"disjoint"):bt05_grid.run(g)
+            # Real Parquet dividend reconciliation against a complete synthetic
+            # ex-date archive. Constant-factor prices must yield no actions.
+            from value_screener import bt05_dividend_capture as dc,bt05_dividend_reconcile as dr
+            raw_div=root/"dividend";raw_div.mkdir()
+            class EmptyDividendClient:
+                source="official"
+                def query(self,api,params,fields,retries):
+                    self.last=api
+                    return []
+            with redirect_stdout(StringIO()):
+                dc.collect(raw_div,sessions[120:],EmptyDividendClient(),50)
+            ledger_candidates=dr.build(market,security,raw_div,scratch,calendar,
+                sessions[119],sessions[120],sessions[-1],.2)
+            self.assertEqual(ledger_candidates["status"],dr.STATUS)
+            self.assertEqual(ledger_candidates["counts"]["factor_changes"],0)
+            self.assertEqual(ledger_candidates["events"],[])
+            self.assertEqual(len(ledger_candidates["dividend_inputs"]),15)
+            missing=dc.folder(raw_div,sessions[-1])/"manifest.json"
+            missing.unlink()
+            with self.assertRaisesRegex(ValueError,"capture incomplete"):
+                dr.build(market,security,raw_div,scratch,calendar,sessions[119],
+                         sessions[120],sessions[-1],.2)
             a.max_rows=1
             with self.assertRaisesRegex(ValueError,"cap is"):
                 with redirect_stdout(StringIO()):bt.run(a)
