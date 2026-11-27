@@ -249,6 +249,26 @@ class BT04ParquetIntegration(unittest.TestCase):
             checkpoints[-1].write_text(json.dumps(checkpoint))
             with self.assertRaisesRegex(ValueError,"Checkpoint hash"):
                 with redirect_stdout(StringIO()):bt05.run(b)
+            from value_screener import bt05_grid
+            grid=root/"grid";grid.mkdir()
+            action_file=root/"actions.json"
+            action_file.write_text(json.dumps({"status":"OPERATOR_REVIEWED_RESEARCH_NOT_CERTIFIED",
+                "from":sessions[0].isoformat(),"through":sessions[-1].isoformat(),"events":[]}))
+            g=SimpleNamespace(market=market,security=security,signals=out,scratch=scratch,
+                output=grid,calendar=calendar,train_start=sessions[120],train_end=sessions[129],
+                test_start=sessions[130],test_end=sessions[-1],config=None,fees=None,actions=action_file,
+                holdings=[1,2],stops=[None],min_trades=1,max_drawdown=.5)
+            with redirect_stdout(StringIO()):gr=bt05_grid.run(g)
+            self.assertFalse(gr["formal_backtest_ready"])
+            self.assertIsNotNone(gr["selected_results"][TREND])
+            self.assertEqual(gr["selected_results"][TREND]["held_out_metrics"]["completed_sessions"],5)
+            selection=json.loads((grid/"selection.json").read_text())
+            self.assertEqual(len(selection["training"]),2)
+            self.assertEqual(gr["selected_results"][TREND]["id"],selection["selected"][TREND])
+            self.assertIsNone(gr["selected_results"][bt05.REVERSAL])
+            with redirect_stdout(StringIO()):self.assertEqual(bt05_grid.run(g),gr)
+            g.test_start=g.train_end
+            with self.assertRaisesRegex(ValueError,"disjoint"):bt05_grid.run(g)
             a.max_rows=1
             with self.assertRaisesRegex(ValueError,"cap is"):
                 with redirect_stdout(StringIO()):bt.run(a)
