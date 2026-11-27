@@ -172,8 +172,10 @@ def open_local(path,directory=False):
     try:
         for i,name in enumerate(p.parts[1:]):
             last=i==len(p.parts)-2
-            flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK
-            if not last or directory:flags|=os.O_DIRECTORY
+            # Ancestors require traversal (x), not directory-listing (r).
+            # O_PATH + O_DIRECTORY + O_NOFOLLOW preserves symlink refusal.
+            flags=(os.O_PATH|os.O_DIRECTORY|os.O_NOFOLLOW) if not last else (os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            if last and directory:flags|=os.O_DIRECTORY
             child=os.open(name,flags,dir_fd=fd)
             os.close(fd);fd=child
         st=os.fstat(fd)
