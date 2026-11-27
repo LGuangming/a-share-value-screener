@@ -36,13 +36,14 @@ export function mergeArchivedBars(years:MarketBar[][]):MarketBar[]{
   return sorted;
 }
 // Anchor to the displayed interval, not today's unverified factor.
-export function adjustBars(bars:MarketBar[],factors:Factor[],mode:Adjustment):MarketBar[]{
+export function adjustBars(bars:MarketBar[],factors:Factor[],mode:Adjustment,anchorDay?:string):MarketBar[]{
   if(mode==="unadjusted"||!bars.length)return bars;
   const byDay=new Map(factors.map(f=>[f.day,f.factor]));
   if(byDay.size!==factors.length)throw Error("Duplicate adjustment factor");
   const required=bars.map(b=>byDay.get(b.day));
   if(required.some(f=>typeof f!=="number"||!Number.isFinite(f)||f<=0))throw Error("复权因子覆盖不完整");
-  const anchor=required[mode==="forward"?required.length-1:0]!;
+  const anchor=anchorDay===undefined?required[mode==="forward"?required.length-1:0]!:byDay.get(anchorDay);
+  if(typeof anchor!=="number"||!Number.isFinite(anchor)||anchor<=0)throw Error("复权锚点缺失");
   return bars.map((b,i)=>{
     const ratio=required[i]!/anchor;
     const out={...b,close:b.close*ratio};
@@ -130,4 +131,48 @@ export function historyYears(from:string,to:string,maxDate:string):number[]{
 }
 export function filterHistoryRange(bars:MarketBar[],from:string,to:string):MarketBar[]{
   return bars.filter(b=>b.day>=from&&b.day<=to);
+}
+
+export type HistoryRange={from:string;to:string};
+export function historyMonths(from:string,to:string,maxDate:string):{year:number;month:string}[]{
+  historyYears(from,to,maxDate);
+  const result:{year:number;month:string}[]=[];
+  for(const d=new Date(from.slice(0,7)+"-01T00:00:00Z");d.toISOString().slice(0,10)<=to;d.setUTCMonth(d.getUTCMonth()+1)){
+    result.push({year:d.getUTCFullYear(),month:String(d.getUTCMonth()+1).padStart(2,"0")});
+  }
+  return result;
+}
+// Bound each request to three months; never load a whole year for a short interval.
+export const HISTORY_CHUNK_MONTHS=3;
+export function historyChunks(from:string,to:string,maxDate:string):HistoryRange[]{
+  const months=historyMonths(from,to,maxDate),out:HistoryRange[]=[];
+  for(let i=0;i<months.length;i+=HISTORY_CHUNK_MONTHS){
+    const first=months[i],last=months[Math.min(i+HISTORY_CHUNK_MONTHS,months.length)-1];
+    const a=first.year+"-"+first.month+"-01";
+    const b=new Date(Date.UTC(last.year,Number(last.month),0)).toISOString().slice(0,10);
+    out.push({from:a<from?from:a,to:b>to?to:b});
+  }
+  return out;
+}
+export function priorHistoryEnd(from:string,period:"D"|"W"|"M"):string{
+  const d=new Date(from+"T00:00:00Z");
+  if(period==="W")d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));
+  if(period==="M")d.setUTCDate(1);
+  d.setUTCDate(d.getUTCDate()-1);
+  return d.toISOString().slice(0,10);
+}
+// Backward requests stop at the archive start and contain at most three months.
+export function previousHistoryChunk(to:string):HistoryRange|null{
+  if(to<"2020-01-01")return null;
+  const d=new Date(to.slice(0,7)+"-01T00:00:00Z");
+  d.setUTCMonth(d.getUTCMonth()-(HISTORY_CHUNK_MONTHS-1));
+  const from=d.toISOString().slice(0,10);
+  return {from:from<"2020-01-01"?"2020-01-01":from,to};
+}
+export function previousDay(day:string):string{
+  const d=new Date(day+"T00:00:00Z");d.setUTCDate(d.getUTCDate()-1);return d.toISOString().slice(0,10);
+}
+export function indicatorLookback(enabled:number[],showBoll:boolean,indicator:"none"|"macd"|"rsi"|"kdj"):number{
+  // Recursive indicators use a finite 100-period seed; MA/BOLL use exact windows.
+  return Math.max(0,...enabled.map(n=>n-1),showBoll?19:0,indicator==="none"?0:100);
 }
