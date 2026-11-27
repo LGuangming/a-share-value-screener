@@ -1,0 +1,30 @@
+[Unit]
+Description=A-Share credential-isolated official data capture queue worker
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+User=ashare-collection
+Group=ashare-control-collection
+UMask=0077
+ExecStart=/usr/bin/python3 -I /opt/ashare-control/worker.py --lane collection --config /etc/ashare-control/collection-worker.json --credential %d/tushare-token
+LoadCredential=tushare-token:/etc/ashare-control/tushare-token
+StateDirectory=ashare-collection-work
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/ashare-control-spool/collection/results
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+TimeoutStartSec=7500
+KillMode=control-group
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=32
