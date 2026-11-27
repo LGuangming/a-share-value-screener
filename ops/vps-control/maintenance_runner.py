@@ -18,7 +18,7 @@ import runtime_slots
 
 BASE=Path("/var/lib/ashare-research-work")
 CONFIG=Path("/etc/ashare-control/maintenance.json")
-MAX_BATCHES=84
+MAX_BATCHES=180
 
 def validate(d):
     if set(d)!={"python","backend","archive","evidence","dataset","batches"}:
