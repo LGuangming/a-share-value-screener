@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 import resource
 import time
+from tempfile import TemporaryDirectory
+from math import isfinite
 from . import bt04_research as bt04, bt05_portfolio, backtest_engine, technical_strategies, technical_research
 from .backtest_engine import Bar, BacktestConfig
 from .bt05_portfolio import Portfolio,FeePeriod,FeeSchedule
@@ -34,6 +36,10 @@ def signal_store(db,root,contract,sessions):
         raise ValueError("BT04 signals are not complete")
     db.execute("CREATE TEMP TABLE signals(strategy VARCHAR,day DATE,code VARCHAR,score DOUBLE)")
     hashes=[];counts={k:0 for k in STRATEGIES};total_rows=0
+    def insert(batch):
+        if batch:
+            columns=list(zip(*batch))
+            db.execute("INSERT INTO signals SELECT unnest(?::VARCHAR[]),unnest(?::DATE[]),unnest(?::VARCHAR[]),unnest(?::DOUBLE[])",[list(c) for c in columns])
     allowed=set(sessions);start=date.fromisoformat(contract["start"]);end=date.fromisoformat(contract["end"])
     for shard in range(contract["shards"]):
         marker=root/f"shard-{shard:03d}.json";p=root/f"shard-{shard:03d}.jsonl"
@@ -47,12 +53,12 @@ def signal_store(db,root,contract,sessions):
                 x=json.loads(line);day=date.fromisoformat(x["day"]);code=x["ts_code"];k=x["strategy_id"];score=x["score"]
                 if (k not in STRATEGIES or not MAINBOARD.fullmatch(code) or
                     int(code[:6])%contract["shards"]!=shard or day not in allowed or not start<=day<=end
-                    or type(score) not in (float,int) or not bt05_portfolio.isfinite(score)):
+                    or type(score) not in (float,int) or not isfinite(score)):
                     raise ValueError("Invalid BT04 signal")
                 seen[k]+=1;batch.append((k,day,code,score))
                 if len(batch)>=4096:
-                    db.executemany("INSERT INTO signals VALUES (?,?,?,?)",batch);batch.clear()
-        if batch:db.executemany("INSERT INTO signals VALUES (?,?,?,?)",batch)
+                    insert(batch);batch.clear()
+        if batch:insert(batch)
         if seen!=doc["signal_counts"] or sha256(p)!=doc["sha256"] or sha256(marker)!=receipt_hash:
             raise ValueError("BT04 shard changed or count mismatch")
         total_rows+=doc["rows"]
@@ -143,6 +149,7 @@ def run(args):
         return run_locked(args,market,security,signals,scratch,out,cfg)
 
 def run_locked(args,market,security,signals,scratch,out,cfg):
+    source_hash=sha256(signals/"run.json");summary_hash=sha256(signals/"summary.json")
     source=bt04.json_file(signals/"run.json")
     if (source.get("status")!=bt04.STATUS or source.get("eligibility_policy")!="provisional_evidence"
             or source.get("formal_backtest_ready") is not False):
@@ -155,7 +162,14 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
     if sha256(args.calendar)!=source["calendar_sha256"]:raise ValueError("BT04 calendar mismatch")
     sessions=bt04.read_calendar(args.calendar,warmup,source_end)
     fees,fee_hash=load_fees(args.fees,cfg,args.start,args.end)
-    db=bt04.connect(scratch)
+    import duckdb
+    staging=TemporaryDirectory(dir=scratch,prefix="bt05-")
+    try:
+        db=duckdb.connect(str(Path(staging.name)/"signals.duckdb"),
+            config={"threads":"1","memory_limit":"384MB","temp_directory":staging.name,
+                    "preserve_insertion_order":"false"})
+    except BaseException:
+        staging.cleanup();raise
     try:
         mf,sf,inputs=bt04.receipts(db,market,security,sessions)
         if inputs!=source["inputs"]:raise ValueError("BT03 inputs differ from BT04")
@@ -219,7 +233,8 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         expected_days=[d for d in sessions if args.start<=d<=args.end]
         if completed!=len(expected_days) or completed<2:raise ValueError("Execution session coverage mismatch")
         _,_,checked=bt04.receipts(db,market,security,sessions)
-        if checked!=inputs or sha256(args.calendar)!=source["calendar_sha256"] or (args.fees and sha256(args.fees)!=fee_hash):
+        if (checked!=inputs or sha256(args.calendar)!=source["calendar_sha256"] or (args.fees and sha256(args.fees)!=fee_hash)
+                or sha256(signals/"run.json")!=source_hash or sha256(signals/"summary.json")!=summary_hash):
             raise ValueError("Source inputs changed during execution")
         for sh in hashes:
             n=sh["shard"]
@@ -235,7 +250,8 @@ def run_locked(args,market,security,signals,scratch,out,cfg):
         else:write_new(dest,summary)
         print("BT05_SUMMARY "+json.dumps({"status":STATUS,"sessions":completed,"rows_seen":rows_seen}),flush=True)
         return summary
-    finally:db.close()
+    finally:
+        db.close();staging.cleanup()
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
