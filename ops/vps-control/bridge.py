@@ -17,6 +17,8 @@ import re
 import shutil
 import signal
 import stat
+import math
+import time
 import subprocess
 import sys
 import urllib.request
@@ -28,6 +30,12 @@ PROFILE=re.compile(r"[a-z][a-z0-9_-]{0,39}\Z")
 REPO=re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_RESPONSE=2_000_000
 TTL=900
+VERSION=2
+READ_TASKS={"capabilities","data_inventory","backtest_status","task_status","task_logs","docker_status","deployment_status"}
+REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment"}
+INVENTORY_KINDS={"market","security","dividend","reference"}
+MAX_REPORT_BYTES=4*1024*1024
+MAX_ENTRIES=20000
 
 def dump(doc):
     return json.dumps(doc,sort_keys=True,separators=(",",":"),allow_nan=False)
@@ -54,7 +62,8 @@ def trusted_file(path, executable=False):
 
 def config(path):
     doc=strict_json(trusted_file(path).read_text())
-    if set(doc)!={"repository","repository_id","actor_ids","profiles"}:
+    required={"repository","repository_id","actor_ids","profiles"}
+    if not required<=set(doc) or set(doc)-required-{"inventory","reports"}:
         raise ValueError("Invalid config fields")
     if (not REPO.fullmatch(doc["repository"]) or type(doc["repository_id"]) is not int or doc["repository_id"]<=0
         or not isinstance(doc["actor_ids"],list) or not doc["actor_ids"]
@@ -67,6 +76,14 @@ def config(path):
         script=trusted_file(p["script"],True)
         if not script.is_relative_to(Path("/opt/ashare-control/profiles")):
             raise ValueError("Profile outside trusted directory")
+    for name,root in doc.get("inventory",{}).items():
+        if name not in INVENTORY_KINDS:raise ValueError("Invalid inventory alias")
+        local_path(root)
+    for name,spec in doc.get("reports",{}).items():
+        if not PROFILE.fullmatch(name) or set(spec)!={"kind","file"} or spec["kind"] not in REPORT_KINDS:
+            raise ValueError("Invalid report alias")
+        local_path(spec["file"])
+    if len(doc.get("reports",{}))>32:raise ValueError("Too many report aliases")
     return doc
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -116,6 +133,9 @@ def parse_request(issue,actors,now):
         doc=strict_json(body)
         if not isinstance(doc,dict) or doc.get("schema")!=SCHEMA:return None
         if doc.get("task")=="status" and set(doc)=={"schema","task"}:pass
+        elif doc.get("task") in ("capabilities","data_inventory","task_status") and set(doc)=={"schema","task"}:pass
+        elif doc.get("task") in ("backtest_status","task_logs","docker_status","deployment_status") and set(doc)=={"schema","task","report"}:
+            if not isinstance(doc["report"],str) or not PROFILE.fullmatch(doc["report"]):return None
         elif doc.get("task")=="run_profile" and set(doc)=={"schema","task","profile"}:
             if not isinstance(doc["profile"],str) or not PROFILE.fullmatch(doc["profile"]):return None
         else:return None
@@ -133,6 +153,175 @@ def status():
             "memory_total_mib":info["MemTotal"]//1024,"memory_available_mib":info["MemAvailable"]//1024,
             "disk_total_gib":round(disk.total/2**30,2),"disk_free_gib":round(disk.free/2**30,2)}
 
+def local_path(value):
+    p=Path(value)
+    if not p.is_absolute() or ".." in p.parts:
+        raise ValueError("Invalid configured absolute path")
+    # Paths are chosen only by local admin, not a remote request.
+    return p
+
+def open_local(path,directory=False):
+    """Open every path component without following symlinks; no FIFO/device reads."""
+    p=local_path(path)
+    fd=os.open("/",os.O_RDONLY|os.O_DIRECTORY)
+    try:
+        for i,name in enumerate(p.parts[1:]):
+            last=i==len(p.parts)-2
+            flags=os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK
+            if not last or directory:flags|=os.O_DIRECTORY
+            child=os.open(name,flags,dir_fd=fd)
+            os.close(fd);fd=child
+        st=os.fstat(fd)
+        if directory and not stat.S_ISDIR(st.st_mode):raise ValueError("Not directory")
+        if not directory and not stat.S_ISREG(st.st_mode):raise ValueError("Not regular file")
+        return fd
+    except BaseException:
+        os.close(fd);raise
+
+def bounded_json(path):
+    fd=open_local(path)
+    with os.fdopen(fd,"rb") as f:
+        if os.fstat(f.fileno()).st_size>MAX_REPORT_BYTES:raise ValueError("Report too large")
+        data=f.read(MAX_REPORT_BYTES+1)
+    if len(data)>MAX_REPORT_BYTES:raise ValueError("Report too large")
+    doc=strict_json(data)
+    if not isinstance(doc,dict):raise ValueError("Report must be object")
+    return doc
+
+def entries(path):
+    fd=open_local(path,True)
+    try:
+        with os.scandir(fd) as scan:
+            for i,e in enumerate(scan):
+                if i>=MAX_ENTRIES:raise ValueError("Inventory directory cap")
+                yield e.name,e.is_dir(follow_symlinks=False),e.is_file(follow_symlinks=False)
+    finally:os.close(fd)
+
+def inventory(kind,root):
+    root=local_path(root);months=set();days=set();years=set();seen=0
+    if kind=="reference":
+        count=0
+        for name,is_dir,is_file in entries(root):
+            if is_file and re.fullmatch(r"(calendar-(SSE|SZSE)|index-000(300|905|852)\.SH)-\d{4}-\d{2}-\d{2}-\d{4}-\d{2}-\d{2}\.manifest\.json",name):
+                count+=1
+        return {"receipt_files":count,"verification":"presence_only"}
+    for y,is_dir,_ in entries(root):
+        if not is_dir or not re.fullmatch(r"year=20\d{2}",y):continue
+        for m,is_dir,_ in entries(root/y):
+            if not is_dir or not re.fullmatch(r"month=(0[1-9]|1[0-2])",m):continue
+            for n,is_dir,is_file in entries(root/y/m):
+                seen+=1
+                if seen>MAX_ENTRIES:raise ValueError("Inventory entry cap")
+                if is_file and n=="manifest.json":
+                    months.add(y[-4:]+"-"+m[-2:]);years.add(y[-4:])
+                elif is_dir and re.fullmatch(r"day=20\d{6}",n) and n[4:10]==y[-4:]+m[-2:]:
+                    try:
+                        d=datetime.strptime(n[4:],"%Y%m%d").date()
+                    except ValueError:continue
+                    if any(name=="manifest.json" and file for name,_,file in entries(root/y/m/n)):
+                        days.add(d.isoformat());years.add(y[-4:])
+    return {"monthly_receipts":len(months),"daily_receipts":len(days),
+            "years":sorted(years),"first_month":min(months) if months else None,
+            "last_month":max(months) if months else None,
+            "first_day":min(days) if days else None,"last_day":max(days) if days else None,
+            "verification":"presence_only"}
+
+def number(v):
+    return v if type(v) in (int,float) and math.isfinite(v) and abs(v)<=1e16 else None
+
+def numeric(doc,fields):
+    return {k:number(doc[k]) for k in fields if k in doc and number(doc[k]) is not None}
+
+def clean_report(kind,doc):
+    # Strict field allowlist: never copy messages, paths, source metadata,
+    # environment variables, securities, trades, logs or arbitrary strings.
+    out={"kind":kind,"formal_backtest_ready":False}
+    if kind=="preflight":
+        if doc.get("status")!="BT05_PREFLIGHT_RESEARCH_ONLY":raise ValueError("Unexpected preflight status")
+        out["research_preflight_pass"]=doc.get("research_preflight_pass") is True
+        names=("calendar","market_security","dividend_capture","actions","benchmark")
+        allowed=("sessions","execution_sessions","partitions","mainboard_rows","provisional_evidence_rows",
+                 "missing_factors","verified_sessions","raw_rows","empty_responses","supported","blocked")
+        checks=doc.get("checks",{})
+        out["checks"]={k:{"ok":checks[k].get("ok") is True,**numeric(checks[k],allowed)}
+                       for k in names if isinstance(checks.get(k),dict)}
+        out["blockers"]=[k for k in names if k in doc.get("blockers",[])]
+        out["resources"]=numeric(doc.get("resource_observation",{}),("elapsed_seconds","process_peak_rss_kib","scratch_free_bytes"))
+    elif kind=="signals":
+        if doc.get("status")!="BT04_RESEARCH_ONLY_NOT_CERTIFIED":raise ValueError("Unexpected signal status")
+        out.update(numeric(doc,("rows","shards_completed")))
+        out["signal_counts"]=numeric(doc.get("signal_counts",{}),("ma_trend_research_v0","oversold_reversion_v0"))
+    elif kind=="portfolio":
+        if doc.get("status")!="BT05_ENGINEERING_ONLY_NOT_CERTIFIED":raise ValueError("Unexpected portfolio status")
+        out.update(numeric(doc,("sessions","rows_seen_including_warmup")))
+        out["results"]={}
+        fields=("total_return","annualized_return","max_drawdown","closed_trades","win_rate","profit_factor",
+                "sharpe_zero_rf","completed_sessions","fees_paid","traded_notional","open_positions","stale_mark_count",
+                "blocked_buys","blocked_sell_attempts","dividend_receivable","corporate_actions")
+        for name in ("ma_trend_research_v0","oversold_reversion_v0"):
+            x=doc.get("results",{}).get(name)
+            if isinstance(x,dict):out["results"][name]=numeric(x.get("metrics",{}),fields)
+    elif kind=="walk":
+        if doc.get("status")!="BT05_WALK_FORWARD_ENGINEERING_ONLY":raise ValueError("Unexpected walk status")
+        out["aggregate"]={k:numeric(v,("total_folds","selected_folds","unselected_folds","positive_excess_folds","mean_fold_excess_return"))
+            for k,v in doc.get("aggregate",{}).items() if k in ("ma_trend_research_v0","oversold_reversion_v0") and isinstance(v,dict)}
+    elif kind=="progress":
+        if doc.get("status") not in ("running","completed","failed","blocked","timeout"):raise ValueError("Unknown progress")
+        out["state"]=doc["status"]
+        if doc.get("stage") in ("reference","dividend","preflight","signals","portfolio","walk"):out["stage"]=doc["stage"]
+        out.update(numeric(doc,("completed","total","elapsed_seconds","exit_code","peak_rss_kib")))
+    elif kind=="containers":
+        if doc.get("status")!="LOCAL_DOCKER_SNAPSHOT_V1":raise ValueError("Unexpected docker snapshot")
+        out["containers"]={}
+        for k,v in doc.get("containers",{}).items():
+            if k in ("web","worker","postgres","redis","backtest") and v in ("running","exited","created","restarting","paused","dead","not_found","unknown"):
+                out["containers"][k]=v
+        out.update(numeric(doc,("captured_unix",)))
+    elif kind=="deployment":
+        if doc.get("status")!="LOCAL_DEPLOYMENT_SNAPSHOT_V1":raise ValueError("Unexpected deployment snapshot")
+        if doc.get("state") not in ("unknown","healthy","unhealthy","pending"):raise ValueError("Invalid deployment state")
+        out["state"]=doc["state"];out.update(numeric(doc,("captured_unix",)))
+        rev=doc.get("revision")
+        if isinstance(rev,str) and re.fullmatch(r"[0-9a-f]{40}",rev):out["revision"]=rev
+    else:raise ValueError("Unknown report kind")
+    return out
+
+def diagnostics(doc,cfg,state):
+    task=doc["task"]
+    if task=="capabilities":
+        return {"status":"completed","bridge_version":VERSION,"inventory":sorted(cfg.get("inventory",{})),
+                "reports":{k:v["kind"] for k,v in cfg.get("reports",{}).items()},
+                "profiles":sorted(cfg["profiles"]),"raw_logs":False,"remote_shell":False}
+    if task=="data_inventory":
+        result={}
+        for kind,root in sorted(cfg.get("inventory",{}).items()):
+            try:result[kind]={"state":"readable",**inventory(kind,root)}
+            except FileNotFoundError:result[kind]={"state":"missing"}
+            except PermissionError:result[kind]={"state":"permission_denied"}
+            except (OSError,ValueError):result[kind]={"state":"invalid_or_capped"}
+        return {"status":"completed","inventory":result,"verification":"presence_only_not_data_audit"}
+    if task=="task_status":
+        result=[]
+        for p in sorted(state.glob("issue-*.json"),key=lambda p:p.stat().st_mtime,reverse=True)[:20]:
+            item=bounded_json(p)
+            if item.get("repository_id")!=cfg["repository_id"]:continue
+            previous=item.get("result") or {}
+            value=previous.get("status")
+            if value not in ("completed","failed","timeout","rejected","interrupted_unknown_do_not_retry"):value="unknown"
+            result.append({"issue_number":item["issue_number"],"status":value,
+                           **numeric(previous,("exit_code","elapsed_seconds"))})
+        return {"status":"completed","recent_tasks":result,"running_jobs_observable_while_busy":False}
+    spec=cfg.get("reports",{}).get(doc["report"])
+    allowed={"backtest_status":{"preflight","signals","portfolio","walk"},"task_logs":{"progress"},
+             "docker_status":{"containers"},"deployment_status":{"deployment"}}[task]
+    if not spec or spec["kind"] not in allowed:return {"status":"rejected","reason":"report_not_locally_enabled"}
+    try:
+        snapshot=clean_report(spec["kind"],bounded_json(spec["file"]))
+        return {"status":"completed","report":doc["report"],"snapshot":snapshot}
+    except FileNotFoundError:return {"status":"unavailable","reason":"report_not_created"}
+    except PermissionError:return {"status":"unavailable","reason":"report_not_readable"}
+    except (ValueError,TypeError,KeyError,AttributeError,OSError):return {"status":"unavailable","reason":"invalid_or_oversized_report"}
+
 def execute(doc,profiles):
     if doc["task"]=="status":return {"status":"completed","metrics":status()}
     p=profiles.get(doc["profile"])
@@ -140,15 +329,16 @@ def execute(doc,profiles):
     script=trusted_file(p["script"],True)
     # No user-supplied arguments, shell, inherited token, environment, or stdin.
     # Local profile can maintain its own private log. Never post its output.
+    started=time.monotonic()
     with subprocess.Popen([str(script)],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,cwd="/",env={"PATH":"/usr/bin:/bin","LANG":"C.UTF-8"},
         start_new_session=True) as proc:
         try:
             code=proc.wait(timeout=p["timeout_seconds"])
-            return {"status":"completed" if code==0 else "failed","exit_code":code}
+            return {"status":"completed" if code==0 else "failed","exit_code":code,"profile":doc["profile"],"elapsed_seconds":round(time.monotonic()-started,3)}
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-            return {"status":"timeout"}
+            return {"status":"timeout","profile":doc["profile"],"elapsed_seconds":round(time.monotonic()-started,3)}
 
 def save(path,doc):
     temp=path.with_suffix(".tmp")
@@ -187,7 +377,8 @@ def run(cfg,gh,state,now,executor=execute):
             old={"repository_id":cfg["repository_id"],"issue_number":n,"issue_id":iid,
                  "request_sha256":h,"delivery":"running","result":None}
             save(p,old)
-            try:result=executor(doc,cfg["profiles"])
+            try:
+                result=diagnostics(doc,cfg,state) if doc["task"] in READ_TASKS else executor(doc,cfg["profiles"])
             except Exception:result={"status":"failed","reason":"local_execution_error"}
             old["result"]=result;old["delivery"]="pending";save(p,old)
             deliver(gh,p,old)
