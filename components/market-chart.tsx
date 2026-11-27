@@ -151,7 +151,7 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
     async function load(){
       let cursor=priorHistoryEnd(visibleFrom!,period),previous:MarketBar[]=[],note="";
       const precedingFactors:Factor[]=[];
-      while(aggregateBars(previous,period).length<lookback){
+      while(aggregateBars(previous,period).length<lookback+(period==="W"?1:0)){
         const part=previousHistoryChunk(cursor);
         if(!part){note="可用归档历史不足";break;}
         const result=await readRangePart(code,part,controller.signal,"quotes");
