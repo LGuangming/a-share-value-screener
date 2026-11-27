@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 import unittest
+import subprocess
 import bridge
 import maintenance_runner as maint
 import runtime_slots as slots
@@ -46,6 +47,44 @@ class V22Tests(unittest.TestCase):
         self.assertEqual(args[args.index("--output")+1],"/work/security")
         d["batches"].append({"stage":"market","year":2025,"month":2})
         with self.assertRaisesRegex(ValueError,"read-only"):maint.validate(d)
+    def test_continuous_resume_and_fail_stop(self):
+        d=self.plan()
+        d["existing_market"]="/existing/market"
+        d["batches"]=[{"stage":"security","year":2025,"month":m} for m in range(1,5)]
+        maint.validate(d)
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);calls=[]
+            def invoke(argv,**kwargs):
+                calls.append(int(argv[argv.index("--month")+1]))
+                if len(calls)==2: return 2
+                self.assertIn("timeout",kwargs) if len(calls)>2 else None
+                return 0
+            def single(argv,**kwargs):
+                calls.append(int(argv[argv.index("--month")+1]));return 0
+            self.assertEqual(maint.run(d,root,single),0)
+            self.assertEqual(maint.run(d,root,invoke,continuous=True),2)
+            self.assertEqual(calls,[1,2])
+            checkpoint=root/"bt03-test/maintenance-state.json"
+            self.assertEqual(json.loads(checkpoint.read_text())["completed"],1)
+            self.assertEqual(maint.run(d,root,invoke,continuous=True),0)
+            self.assertEqual(calls,[1,2,2,3,4])
+            self.assertEqual(json.loads(checkpoint.read_text())["completed"],4)
+            self.assertEqual(maint.run(d,root,invoke,continuous=True),0)
+            self.assertEqual(len(calls),5)
+    def test_continuous_timeout(self):
+        d=self.plan()
+        d["existing_market"]="/existing/market"
+        d["batches"]=d["batches"][1:]
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            def invoke(argv,**kwargs):
+                raise subprocess.TimeoutExpired(argv,kwargs["timeout"])
+            self.assertEqual(maint.run(d,root,invoke,continuous=True),124)
+            report=json.loads((root/"bt03-test/maintenance.json").read_text())
+            self.assertEqual(report["completed_batches"],0)
+            self.assertEqual(report["state"],"failed")
+        with self.assertRaisesRegex(ValueError,"security-only"):
+            maint.run(self.plan(),continuous=True)
     def test_runtime_selection_fail_closed(self):
         d={"baseline":{"revision":"a"*40},"candidate":{"revision":"b"*40}}
         with TemporaryDirectory() as tmp:
