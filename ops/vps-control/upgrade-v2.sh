@@ -36,7 +36,7 @@ for stage in preflight signals portfolio walk; do
   printf '#!/bin/sh\nexec /usr/bin/python3 -I /opt/ashare-control/research_runner.py %s\n' "$stage" \
     > "$backup/$name"
   install -o root -g root -m 0755 "$backup/$name" "/opt/ashare-control/profiles/$name"
-fi
+done
 systemctl daemon-reload
 echo "V2 installed, existing token/config/state preserved. Polling paused."
 echo "Backup stored at $backup"
