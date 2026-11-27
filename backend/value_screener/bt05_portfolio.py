@@ -100,15 +100,6 @@ class Portfolio:
                 self.receivables.append({"code":code,"pay":event.pay.isoformat(),"amount":dividend,"ex":day.isoformat()})
             action_records.append({"type":"ENTITLEMENT","code":code,"day":day.isoformat(),
                 "old_shares":old,"new_shares":new,"net_cash_receivable":dividend,"source_ref":event.source_ref})
-        # Cash is spendable no earlier than pay date. Non-session payment dates
-        # are credited at the next session, including after the position sold.
-        remaining=[]
-        for item in self.receivables:
-            if item["pay"]<=day.isoformat():
-                self.cash+=item["amount"];self.dividends_paid+=item["amount"]
-                action_records.append({"type":"PAYMENT","day":day.isoformat(),**item})
-            else:remaining.append(item)
-        self.receivables=remaining
         for code,pos in list(self.holdings.items()):
             if idx-pos.entry_index<cfg.holding_sessions and code not in self.pending:continue
             b=bars.get(code)
@@ -150,6 +141,15 @@ class Portfolio:
                 self.marks[code]=price;self.factors[code]=f
                 self.total_fees+=fee;self.turnover+=notional
                 fills.append(dict(day=day.isoformat(),side="BUY",ts_code=code,signal_day=self.previous.isoformat(),shares=size,price=price,fees=fee))
+        # Conservative settlement: credit cash at close of first session on or
+        # after payment date, available for new orders only next session.
+        remaining=[]
+        for item in self.receivables:
+            if item["pay"]<=day.isoformat():
+                self.cash+=item["amount"];self.dividends_paid+=item["amount"]
+                action_records.append({"type":"PAYMENT","day":day.isoformat(),**item})
+            else:remaining.append(item)
+        self.receivables=remaining
         equity=self.cash+sum(x['amount'] for x in self.receivables)
         for code,pos in self.holdings.items():
             b=bars.get(code)
@@ -187,7 +187,7 @@ class Portfolio:
         obj.marks=dict(state["marks"]);obj.factors=dict(state["factors"]);obj.pending=set(state["pending"])
         obj.previous=date.fromisoformat(state["previous"]) if state["previous"] else None
         obj.candidates=list(state["candidates"])
-        if set(obj.holdings)!=set(obj.marks) or set(obj.holdings)!=set(obj.factors) or not obj.pending<=set(obj.holdings):
+        if set(obj.holdings)!=set(obj.marks) or set(obj.holdings)!=set(obj.factors) or not obj.pending<=set(obj.holdings) or not set(obj.dividend_credit)<=set(obj.holdings):
             raise ValueError("Invalid portfolio checkpoint")
         return obj
 
