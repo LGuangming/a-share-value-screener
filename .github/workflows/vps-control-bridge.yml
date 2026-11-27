@@ -1,0 +1,15 @@
+name: VPS control bridge offline tests
+on:
+  pull_request:
+    paths:
+      - 'ops/vps-control/**'
+      - '.github/workflows/vps-control-bridge.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Offline bridge contracts (no credentials or network calls)
+        run: python3 -m unittest discover -s ops/vps-control -p 'test_*.py' -v
