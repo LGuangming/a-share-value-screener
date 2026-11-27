@@ -10,6 +10,16 @@ test -d /var/lib/ashare-control
 id ashare-control >/dev/null
 # Never kill a running profile during upgrade. Pause polling first.
 systemctl stop ashare-vps-control.timer
+for lane in research collection; do
+  if test -f "/etc/systemd/system/ashare-$lane-worker.timer"; then
+    systemctl stop "ashare-$lane-worker.timer"
+  fi
+done
+for lane in research collection; do
+  if systemctl is-active --quiet "ashare-$lane-worker.service" || test "$(systemctl show -p ActiveState --value "ashare-$lane-worker.service")" = activating; then
+    echo "Worker active: $lane; do not upgrade until finished" >&2; exit 1
+  fi
+done
 if systemctl is-active --quiet ashare-vps-control.service || \
    test "$(systemctl show -p ActiveState --value ashare-vps-control.service)" = activating; then
   echo "A task is running. Timer paused; finish task before upgrading." >&2
@@ -23,7 +33,7 @@ cp -a /opt/ashare-control/bridge.py /etc/systemd/system/ashare-vps-control.servi
   /etc/systemd/system/ashare-vps-control.timer /etc/ashare-control/config.json "$backup/"
 install -d -o root -g root -m 0755 /opt/ashare-control /opt/ashare-control/profiles
 install -o root -g root -m 0644 "$root/bridge.py" "$root/research_runner.py" \
-  "$root/docker_snapshot.py" /opt/ashare-control/
+  "$root/docker_snapshot.py" "$root/runtime_slots.py" /opt/ashare-control/
 install -o root -g root -m 0644 "$root/ashare-vps-control.service" \
   "$root/ashare-vps-control.timer" /etc/systemd/system/
 # Only fixed stage wrappers; not registered in profiles until local approval.
