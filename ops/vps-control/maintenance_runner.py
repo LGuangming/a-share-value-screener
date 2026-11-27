@@ -14,6 +14,7 @@ import time
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from research_runner import trusted,atomic
 import bridge
+import runtime_slots
 
 BASE=Path("/var/lib/ashare-research-work")
 CONFIG=Path("/etc/ashare-control/maintenance.json")
@@ -46,7 +47,9 @@ def validate(d):
     return d
 
 def load(path=CONFIG):
-    d=validate(bridge.bounded_json(trusted(path)))
+    raw=bridge.bounded_json(trusted(path))
+    if "use_approved_runtime" in raw and type(raw["use_approved_runtime"]) is not bool:raise ValueError("Invalid runtime opt-in")
+    d=validate(runtime_slots.resolve(raw))
     trusted(d["python"]);trusted(d["backend"],True)
     if not os.access(d["python"],os.X_OK):raise ValueError("Runtime not executable")
     for k in ("archive","evidence"):
