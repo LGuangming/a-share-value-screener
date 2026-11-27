@@ -30,11 +30,11 @@ PROFILE=re.compile(r"[a-z][a-z0-9_-]{0,39}\Z")
 REPO=re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 MAX_RESPONSE=2_000_000
 TTL=900
-VERSION=3  # V2.1 feature generation; wire protocol remains v1
+VERSION=4  # V2.2 feature generation; wire protocol remains v1
 LANES={"research","collection"}
 SPOOL=Path("/var/lib/ashare-control-spool")
-READ_TASKS={"capabilities","data_inventory","backtest_status","task_status","task_logs","docker_status","deployment_status"}
-REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment"}
+READ_TASKS={"capabilities","data_inventory","backtest_status","task_status","task_logs","docker_status","deployment_status","maintenance_status"}
+REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment","maintenance","runtime"}
 INVENTORY_KINDS={"market","security","dividend","reference"}
 MAX_REPORT_BYTES=4*1024*1024
 MAX_ENTRIES=20000
@@ -139,7 +139,7 @@ def parse_request(issue,actors,now):
         if not isinstance(doc,dict) or doc.get("schema")!=SCHEMA:return None
         if doc.get("task")=="status" and set(doc)=={"schema","task"}:pass
         elif doc.get("task") in ("capabilities","data_inventory","task_status") and set(doc)=={"schema","task"}:pass
-        elif doc.get("task") in ("backtest_status","task_logs","docker_status","deployment_status") and set(doc)=={"schema","task","report"}:
+        elif doc.get("task") in ("backtest_status","task_logs","docker_status","deployment_status","maintenance_status") and set(doc)=={"schema","task","report"}:
             if not isinstance(doc["report"],str) or not PROFILE.fullmatch(doc["report"]):return None
         elif doc.get("task")=="run_profile" and set(doc)=={"schema","task","profile"}:
             if not isinstance(doc["profile"],str) or not PROFILE.fullmatch(doc["profile"]):return None
@@ -228,6 +228,8 @@ def inventory(kind,root):
                     if any(name=="manifest.json" and file for name,_,file in entries(root/y/m/n)):
                         days.add(d.isoformat());years.add(y[-4:])
     return {"monthly_receipts":len(months),"daily_receipts":len(days),
+            "by_year":{y:{"monthly_receipts":sum(m.startswith(y+"-") for m in months),
+                          "daily_receipts":sum(d.startswith(y+"-") for d in days)} for y in sorted(years)},
             "years":sorted(years),"first_month":min(months) if months else None,
             "last_month":max(months) if months else None,
             "first_day":min(days) if days else None,"last_day":max(days) if days else None,
@@ -277,6 +279,17 @@ def clean_report(kind,doc):
         out["state"]=doc["status"]
         if doc.get("stage") in ("reference","dividend","preflight","signals","portfolio","walk"):out["stage"]=doc["stage"]
         out.update(numeric(doc,("completed","total","elapsed_seconds","exit_code","peak_rss_kib")))
+    elif kind=="maintenance":
+        if doc.get("status")!="BT03_LOCAL_MAINTENANCE_V1":raise ValueError("Unexpected maintenance report")
+        if doc.get("state") not in ("running","completed","failed","no_pending_batch"):raise ValueError("Invalid maintenance state")
+        out["state"]=doc["state"];out.update(numeric(doc,("completed_batches","total_batches","exit_code","elapsed_seconds","year","month")))
+        if doc.get("stage") in ("market","security","incremental"):out["stage"]=doc["stage"]
+    elif kind=="runtime":
+        if doc.get("status")!="LOCAL_RESEARCH_RUNTIME_V1":raise ValueError("Unexpected runtime report")
+        if doc.get("slot") not in ("baseline","candidate"):raise ValueError("Invalid runtime slot")
+        out["slot"]=doc["slot"]
+        rev=doc.get("revision")
+        if isinstance(rev,str) and re.fullmatch(r"[0-9a-f]{40}",rev):out["revision"]=rev
     elif kind=="containers":
         if doc.get("status")!="LOCAL_DOCKER_SNAPSHOT_V1":raise ValueError("Unexpected docker snapshot")
         out["containers"]={}
@@ -323,7 +336,8 @@ def diagnostics(doc,cfg,state):
         return {"status":"completed","recent_tasks":result,"running_jobs_observable_while_busy":bool(cfg.get("async_profiles"))}
     spec=cfg.get("reports",{}).get(doc["report"])
     allowed={"backtest_status":{"preflight","signals","portfolio","walk"},"task_logs":{"progress"},
-             "docker_status":{"containers"},"deployment_status":{"deployment"}}[task]
+             "docker_status":{"containers"},"deployment_status":{"deployment"},
+             "maintenance_status":{"maintenance","runtime"}}[task]
     if not spec or spec["kind"] not in allowed:return {"status":"rejected","reason":"report_not_locally_enabled"}
     try:
         snapshot=clean_report(spec["kind"],bounded_json(spec["file"]))
