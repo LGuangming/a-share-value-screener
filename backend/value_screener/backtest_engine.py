@@ -52,6 +52,7 @@ class BacktestConfig:
     sell_tax_rate: float = 0.0005  # explicit assumption, not a live tax quote
     slippage_rate: float = 0.0005
     strict_tradeability: bool = True
+    stop_loss_rate: float | None = None
 
     def __post_init__(self):
         if not isfinite(self.initial_cash) or self.initial_cash <= 0:
@@ -60,6 +61,8 @@ class BacktestConfig:
             raise ValueError("holding_sessions must be 1..260")
         if not 1 <= self.max_positions <= 100 or self.lot_size < 1:
             raise ValueError("Invalid position or lot limit")
+        if self.stop_loss_rate is not None and (not isfinite(self.stop_loss_rate) or not 0 < self.stop_loss_rate < 1):
+            raise ValueError("Invalid stop loss rate")
         rates = (self.commission_rate,self.sell_tax_rate,self.slippage_rate)
         if any(not isfinite(x) or x < 0 or x > 0.1 for x in rates):
             raise ValueError("Invalid fee rate assumption")
@@ -134,13 +137,15 @@ def _performance(curve: list[EquityPoint], trades: list[Trade],
         "fee_assumptions": {
             "commission_rate":cfg.commission_rate,"min_commission":cfg.min_commission,
             "sell_tax_rate":cfg.sell_tax_rate,"slippage_rate":cfg.slippage_rate,
+            "stop_loss_rate":cfg.stop_loss_rate,
         },
         "validation":"ENGINEERING_ONLY_NOT_A_VERIFIED_HISTORICAL_RETURN",
     }
 
 
 def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
-                 cfg: BacktestConfig = BacktestConfig()) -> dict:
+                 cfg: BacktestConfig = BacktestConfig(),
+                 *, entry_eligible: Mapping[date, set[str]] | None = None) -> dict:
     """Run a long-only cash portfolio. Signal date is CLOSE; fill at NEXT OPEN.
 
     A blocked sell is retried at subsequent opens, including after hold expiry.
@@ -164,12 +169,13 @@ def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
     fills:list[dict]=[]
     curve:list[EquityPoint]=[]
     stale_marks=0
+    stop_pending:set[str]=set()
 
     for idx,day in enumerate(days):
         today=by_day[day]
         # Existing positions exit at open after the configured HOLD duration.
         for code,position in list(holdings.items()):
-            if idx-position.entry_index < cfg.holding_sessions:
+            if idx-position.entry_index < cfg.holding_sessions and code not in stop_pending:
                 continue
             bar=today.get(code)
             if not _tradable(bar,cfg,"sell"):
@@ -188,6 +194,7 @@ def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
             fills.append({"day":day.isoformat(),"side":"SELL","ts_code":code,
                           "shares":position.size,"price":sell_price,"fees":sell_fee})
             del holdings[code]
+            stop_pending.discard(code)
 
         # The ONLY allowed buy signals come from the previous day's CLOSE.
         if idx>0:
@@ -196,13 +203,15 @@ def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
             for code in candidates:
                 if code in holdings or len(holdings)>=cfg.max_positions:
                     continue
+                if entry_eligible is not None and code not in entry_eligible.get(day,set()):
+                    continue
                 bar=today.get(code)
                 if not _tradable(bar,cfg,"buy"):
                     continue
                 assert bar is not None
                 buy_price=bar.open*(1+cfg.slippage_rate)
                 existing_value=sum(
-                    pos.size*(today[pos.ts_code].close if pos.ts_code in today
+                    pos.size*(today[pos.ts_code].open if pos.ts_code in today
                               else last_closes.get(pos.ts_code,pos.entry_price))
                     for pos in holdings.values()
                 )
@@ -235,6 +244,10 @@ def run_backtest(bars: Iterable[Bar], close_signals: Mapping[date, list[str]],
                                  round(cash,6),len(holdings)))
         for code,bar in today.items():
             last_closes[code]=bar.close
+            if (cfg.stop_loss_rate is not None and code in holdings and not bar.suspended
+                    and bar.volume>0 and bar.close <= holdings[code].entry_price*(1-cfg.stop_loss_rate)):
+                # Close-time risk signal: attempt at next open, retry if blocked.
+                stop_pending.add(code)
 
     return {
         "metrics":_performance(curve,trades,cfg),

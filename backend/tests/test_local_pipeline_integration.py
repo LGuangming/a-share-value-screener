@@ -145,4 +145,215 @@ class LocalPipelineIntegration(unittest.TestCase):
                 from value_screener.raw_maintenance import main
                 with self.assertRaisesRegex(RuntimeError,"cleanup disabled"):main()
 
+
+@unittest.skipUnless(os.getenv("TEST_PIPELINE_DATABASE_URL"),"isolated integration dependencies not configured")
+class BT04ParquetIntegration(unittest.TestCase):
+    def test_manifest_adapter_shards_resume_and_global_execution(self):
+        import duckdb
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from value_screener import bt04_research as bt
+        from value_screener.technical_strategies import TREND
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            market,security,scratch,out,strict=(root/x for x in ("market","security","scratch","out","strict"))
+            for p in (market,security,scratch,out,strict):p.mkdir()
+            sessions=[]
+            d=date(2025,1,1)
+            while len(sessions)<135:
+                if d.weekday()<5:sessions.append(d)
+                d+=timedelta(days=1)
+            # Explicit synthetic calendar, not a real exchange calendar.
+            calendar=root/"calendar.json"
+            calendar.write_text(json.dumps({"from":sessions[0].isoformat(),"to":sessions[-1].isoformat(),
+                                          "sessions":[d.isoformat() for d in sessions]}))
+            db=duckdb.connect()
+            def parquet(folder,name,table):
+                p=folder/(name+".tmp.parquet")
+                db.execute("COPY "+table+" TO ? (FORMAT PARQUET,COMPRESSION ZSTD)",[str(p)])
+                h=bt.sha256(p);final=folder/(name+"-"+h+".parquet");p.rename(final)
+                return {"file":final.name,"sha256":h,"bytes":final.stat().st_size}
+            try:
+                for rel,days in bt.expected(sessions).items():
+                    m=market/rel;s=security/rel;m.mkdir(parents=True);s.mkdir(parents=True)
+                    db.execute("""CREATE OR REPLACE TABLE m(ts_code VARCHAR,trade_date DATE,
+                       open DOUBLE,high DOUBLE,low DOUBLE,close DOUBLE,vol DOUBLE,amount DOUBLE,adj_factor DOUBLE,
+                       up_limit DOUBLE,down_limit DOUBLE,factor_valid BOOLEAN,limits_valid BOOLEAN,ohlcv_valid BOOLEAN,
+                       suspend_event_count BIGINT,st_normal_evidence BOOLEAN,st_ann_date DATE)""")
+                    db.execute("""CREATE OR REPLACE TABLE s(ts_code VARCHAR,trade_date DATE,listing_evidence VARCHAR,
+                       historical_st_type VARCHAR,st_evidence VARCHAR,st_certified BOOLEAN)""")
+                    for day in days:
+                        i=sessions.index(day)
+                        price=100+i*.2+(1.2 if i in (124,130) else 0)
+                        for code in ("000001.SZ","000002.SZ"):
+                            db.execute("INSERT INTO m VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                [code,day,price,price*1.005,price*.995,price,1000,60000,1,price*1.1,price*.9,
+                                 True,True,True,0,True,date(2024,12,31)])
+                            db.execute("INSERT INTO s VALUES (?,?,?,?,?,?)",[code,day,
+                                "within_snapshot_listing_dates_not_certified","NORMAL","historical_merged_not_certified",False])
+                    db.execute("CREATE OR REPLACE TABLE events(ts_code VARCHAR,trade_date DATE)")
+                    mp=parquet(m,"market","m");ep=parquet(m,"suspension_events","events")
+                    sp=parquet(s,"security","s")
+                    n=len(days)*2
+                    (m/"manifest.json").write_text(json.dumps(dict(version=1,year=days[0].year,month=days[0].month,
+                        status="research_data_not_backtest_ready",outputs={"market":mp,"suspension_events":ep},
+                        quality={"rows":n,"suspension_event_rows":0})))
+                    (s/"manifest.json").write_text(json.dumps(dict(version=1,status="security_evidence_not_certified",
+                        inputs={"market_sha256":mp["sha256"]},quality={"rows":n},**sp)))
+            finally:db.close()
+            a=SimpleNamespace(market=market,security=security,scratch=scratch,output=out,calendar=calendar,
+                warmup=sessions[0],start=sessions[120],end=sessions[-1],shards=2,shard=None,config=None,
+                provisional=True,execute_start=sessions[120],execute_end=sessions[-1],
+                holding=5,stop=.05,max_rows=1000)
+            with redirect_stdout(StringIO()):bt.run(a)
+            summary=json.loads((out/"summary.json").read_text())
+            self.assertEqual(summary["rows"],270)
+            self.assertGreaterEqual(summary["signal_counts"][TREND],2)
+            result=json.loads(next(out.glob("execution-*.json")).read_text())
+            self.assertFalse(result["formal_backtest_ready"])
+            self.assertEqual(result["rows"],30)
+            self.assertTrue(result["results"][TREND]["fills"])
+            self.assertEqual(result["results"][TREND]["fills"][0]["ts_code"],"000001.SZ")
+            saved=(out/"shard-000.json").read_bytes()
+            with redirect_stdout(StringIO()):bt.run(a)
+            self.assertEqual(saved,(out/"shard-000.json").read_bytes())
+            # BT05 consumes the same immutable receipts, not the BT04 capped bars.
+            from value_screener import bt05_research as bt05
+            out5=root/"bt05";out5.mkdir()
+            config=root/"execution-config.json"
+            config.write_text(json.dumps({"holding_sessions":5,"stop_loss_rate":.05}))
+            b=SimpleNamespace(market=market,security=security,signals=out,scratch=scratch,
+                output=out5,calendar=calendar,start=sessions[120],end=sessions[-1],
+                config=config,fees=None)
+            with redirect_stdout(StringIO()):report=bt05.run(b)
+            self.assertEqual(report["sessions"],15)
+            self.assertFalse(report["formal_backtest_ready"])
+            self.assertGreater(report["results"][TREND]["metrics"]["closed_trades"],0)
+            for k in result["results"]:
+                old=result["results"][k]["metrics"]
+                new=report["results"][k]["metrics"]
+                for metric in ("total_return","max_drawdown"):
+                    self.assertAlmostEqual(old[metric],new[metric])
+                self.assertEqual(old["closed_trades"],new["closed_trades"])
+            checkpoints=sorted(out5.glob("month-*.json"))
+            self.assertGreater(len(checkpoints),1)
+            saved5={p.name:p.read_bytes() for p in checkpoints}
+            with redirect_stdout(StringIO()):self.assertEqual(bt05.run(b),report)
+            self.assertEqual(saved5,{p.name:p.read_bytes() for p in checkpoints})
+            # Replay only the last month from the prior committed portfolio state.
+            checkpoints[-1].unlink();(out5/"summary.json").unlink()
+            with redirect_stdout(StringIO()):self.assertEqual(bt05.run(b),report)
+            self.assertEqual(saved5,{p.name:p.read_bytes() for p in checkpoints})
+            checkpoint=json.loads(checkpoints[-1].read_text())
+            checkpoint["body"]["rows_seen"]+=1
+            checkpoints[-1].write_text(json.dumps(checkpoint))
+            with self.assertRaisesRegex(ValueError,"Checkpoint hash"):
+                with redirect_stdout(StringIO()):bt05.run(b)
+            from value_screener import bt05_grid
+            grid=root/"grid";grid.mkdir()
+            action_file=root/"actions.json"
+            action_file.write_text(json.dumps({"status":"OPERATOR_REVIEWED_RESEARCH_NOT_CERTIFIED",
+                "from":sessions[0].isoformat(),"through":sessions[-1].isoformat(),"events":[]}))
+            g=SimpleNamespace(market=market,security=security,signals=out,scratch=scratch,
+                output=grid,calendar=calendar,train_start=sessions[120],train_end=sessions[129],
+                test_start=sessions[130],test_end=sessions[-1],config=None,fees=None,actions=action_file,
+                holdings=[1,2],stops=[None],min_trades=1,max_drawdown=.5)
+            with redirect_stdout(StringIO()):gr=bt05_grid.run(g)
+            self.assertFalse(gr["formal_backtest_ready"])
+            self.assertIsNotNone(gr["selected_results"][TREND])
+            self.assertEqual(gr["selected_results"][TREND]["held_out_metrics"]["completed_sessions"],5)
+            selection=json.loads((grid/"selection.json").read_text())
+            self.assertEqual(len(selection["training"]),2)
+            self.assertEqual(gr["selected_results"][TREND]["id"],selection["selected"][TREND])
+            self.assertIsNone(gr["selected_results"][bt05.REVERSAL])
+            with redirect_stdout(StringIO()):self.assertEqual(bt05_grid.run(g),gr)
+            g.test_start=g.train_end
+            with self.assertRaisesRegex(ValueError,"disjoint"):bt05_grid.run(g)
+            # Walk-forward: train and test independently, with two disjoint
+            # held-out windows. First fold has no qualifying synthetic signal.
+            from value_screener import bt05_walk_forward as wf
+            walk=root/"walk";walk.mkdir()
+            plan_path=root/"walk-plan.json"
+            plan_path.write_text(json.dumps({"warmup":sessions[0].isoformat(),
+                "folds":[{"train_start":sessions[50].isoformat(),"train_end":sessions[80].isoformat(),
+                          "test_start":sessions[81].isoformat(),"test_end":sessions[100].isoformat()},
+                         {"train_start":sessions[120].isoformat(),"train_end":sessions[129].isoformat(),
+                          "test_start":sessions[130].isoformat(),"test_end":sessions[-1].isoformat()}],
+                "signal_configs":[{},{"pullback_tolerance":.03}],
+                "execution_configs":[{"holding_sessions":1}],
+                "min_trades":1,"max_drawdown":.5}))
+            bench=root/"benchmark.json"
+            bench.write_text(json.dumps({"status":"OPERATOR_REVIEWED_BENCHMARK_NOT_CERTIFIED",
+                "kind":"price_index","code":"SYNTH","source_ref":"synthetic levels",
+                "levels":[{"date":day.isoformat(),"close":100+i} for i,day in enumerate(sessions)]}))
+            wa=SimpleNamespace(market=market,security=security,scratch=scratch,output=walk,
+                calendar=calendar,plan=plan_path,benchmark=bench,fees=None,actions=action_file,shards=2)
+            with redirect_stdout(StringIO()):wr=wf.run(wa)
+            self.assertEqual(len(wr["folds"]),2)
+            self.assertIsNone(wr["folds"][0]["results"][TREND])
+            picked=wr["folds"][1]["results"][TREND]
+            self.assertIsNotNone(picked)
+            self.assertEqual(picked["test_metrics"]["completed_sessions"],5)
+            self.assertAlmostEqual(picked["comparison"]["benchmark_return"],234/230-1)
+            self.assertEqual(wr["aggregate"][TREND]["selected_folds"],1)
+            selection=json.loads((walk/"fold-02"/"selection.json").read_text())
+            self.assertEqual(picked["id"],selection["selected"][TREND])
+            training_runs=list((walk/"fold-02"/"train"/"signals").glob("*/run.json"))
+            self.assertEqual(len(training_runs),2)
+            for runfile in training_runs:
+                self.assertEqual(json.loads(runfile.read_text())["end"],sessions[129].isoformat())
+            with redirect_stdout(StringIO()):self.assertEqual(wf.run(wa),wr)
+            # Real Parquet dividend reconciliation against a complete synthetic
+            # ex-date archive. Constant-factor prices must yield no actions.
+            from value_screener import bt05_dividend_capture as dc,bt05_dividend_reconcile as dr
+            raw_div=root/"dividend";raw_div.mkdir()
+            class EmptyDividendClient:
+                source="official"
+                def query(self,api,params,fields,retries):
+                    self.last=api
+                    return []
+            with redirect_stdout(StringIO()):
+                dc.collect(raw_div,sessions[120:],EmptyDividendClient(),50)
+            ledger_candidates=dr.build(market,security,raw_div,scratch,calendar,
+                sessions[119],sessions[120],sessions[-1],.2)
+            self.assertEqual(ledger_candidates["status"],dr.STATUS)
+            self.assertEqual(ledger_candidates["counts"]["factor_changes"],0)
+            self.assertEqual(ledger_candidates["events"],[])
+            self.assertEqual(len(ledger_candidates["dividend_inputs"]),15)
+            from value_screener import bt05_preflight as pf
+            reviewed_calendar=root/"reviewed-calendar.json"
+            reviewed_calendar.write_text(json.dumps({**json.loads(calendar.read_text()),
+                "status":"OPERATOR_REVIEWED_CALENDAR_NOT_CERTIFIED"}))
+            reviewed_actions=root/"reviewed-actions.json"
+            reviewed_actions.write_text(json.dumps({**json.loads(action_file.read_text()),
+                "candidate_sha256":"fixture","review_sha256":"fixture"}))
+            pa=SimpleNamespace(market=market,security=security,dividend=raw_div,scratch=scratch,
+                calendar=reviewed_calendar,benchmark=bench,actions=reviewed_actions,
+                warmup=sessions[119],start=sessions[120],end=sessions[-1])
+            pre=pf.run(pa)
+            self.assertTrue(pre["research_preflight_pass"],pre["checks"])
+            self.assertFalse(pre["formal_backtest_ready"])
+            self.assertEqual(pre["checks"]["market_security"]["mainboard_rows"],30)
+            missing=dc.folder(raw_div,sessions[-1])/"manifest.json"
+            missing.unlink()
+            self.assertIn("dividend_capture",pf.run(pa)["blockers"])
+            with self.assertRaisesRegex(ValueError,"capture incomplete"):
+                dr.build(market,security,raw_div,scratch,calendar,sessions[119],
+                         sessions[120],sessions[-1],.2)
+            a.max_rows=1
+            with self.assertRaisesRegex(ValueError,"cap is"):
+                with redirect_stdout(StringIO()):bt.run(a)
+            a.output=strict;a.provisional=False;a.execute_start=a.execute_end=None
+            with redirect_stdout(StringIO()):bt.run(a)
+            self.assertEqual(sum(json.loads((strict/"summary.json").read_text())["signal_counts"].values()),0)
+            a.output=out;a.provisional=True
+            (out/"shard-000.jsonl").write_text("corrupt")
+            with self.assertRaisesRegex(ValueError,"corrupted"):
+                with redirect_stdout(StringIO()):bt.run(a)
+            a.output=strict;a.provisional=False
+            sp=next(security.rglob("security-*.parquet"))
+            sp.write_bytes(b"corrupt")
+            with self.assertRaisesRegex(ValueError,"checksum"):
+                with redirect_stdout(StringIO()):bt.run(a)
+
 if __name__=="__main__":unittest.main()
