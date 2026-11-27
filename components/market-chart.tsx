@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CandlestickSeries, HistogramSeries, LineSeries, createChart, createSeriesMarkers, ColorType, CrosshairMode } from "lightweight-charts";
 import { Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import {useWorkspacePreferences} from "@/components/workspace-preferences";
-import { aggregateBars, completeBar, movingAverage, mergeArchivedBars, historyYears, filterHistoryRange, adjustBars, macd, rsi, boll, kdj, type Adjustment, type Factor, type MarketBar, type TradeMark } from "@/lib/market-bars";
+import { aggregateBars, completeBar, movingAverage, mergeArchivedBars, historyYears, historyChunks, previousHistoryChunk, previousDay, priorHistoryEnd, indicatorLookback, adjustBars, macd, rsi, boll, kdj, type Adjustment, type Factor, type MarketBar, type TradeMark, type HistoryRange } from "@/lib/market-bars";
 
 const MA=[{period:5,color:"#D04A02"},{period:10,color:"#B58516"},{period:20,color:"#5475AC"},{period:50,color:"#8C66A4"},{period:60,color:"#217E83"},{period:120,color:"#7B8792"},{period:250,color:"#4E5660"}];
 const UP="#c93738",DOWN="#19805b";
@@ -16,6 +16,17 @@ const TODAY=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
 const CURRENT_YEAR=Number(TODAY.slice(0,4));
 const FIRST_DATE="2020-01-01";
 const DEFAULT_RANGE={from:CURRENT_YEAR+"-01-01",to:TODAY};
+type RangeCoverage={partial:boolean;latest:string;archivedSessions:number;missingMonths:string[];missingSessions:string[]};
+async function readRangePart(code:string,part:HistoryRange,signal:AbortSignal,kind:"quotes"|"factors"){
+  const query=new URLSearchParams({range:"custom",from:part.from,to:part.to});
+  const res=await fetch("/api/quotes/"+encodeURIComponent(code)+(kind==="factors"?"/factors":"")+"?"+query,{signal});
+  const data=await res.json();
+  if(!res.ok)throw Error(part.from+" 至 "+part.to+"："+(data.error||"历史数据暂不可用"));
+  const points=kind==="quotes"?data.bars:data.factors;
+  if(data.code!==code||data.range!=="custom"||data.from!==part.from||data.to!==part.to||!Array.isArray(points)||points.some(p=>typeof p?.day!=="string"||p.day<part.from||p.day>part.to))throw Error("历史期间响应异常");
+  if(kind==="quotes"&&(data.adjustment!=="unadjusted"||!data.coverage||typeof data.coverage.partial!=="boolean"))throw Error("历史行情覆盖信息异常");
+  return {bars:kind==="quotes"?points as MarketBar[]:[],factors:kind==="factors"?points as Factor[]:[],coverage:data.coverage as RangeCoverage|undefined};
+}
 
 export default function MarketChart({code,name,marks=NO_MARKS}:Props){
   const {prefs}=useWorkspacePreferences();
@@ -38,7 +49,8 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
   const [factorError,setFactorError]=useState("");
   const [showBoll,setShowBoll]=useState(false);
   const [indicator,setIndicator]=useState<"none"|"macd"|"rsi"|"kdj">("none");
-  const factorCache=useRef(new Map<string,Factor[]>());
+  const [warmup,setWarmup]=useState<{key:string;bars:MarketBar[];note:string}|null>(null);
+  const [warmLoading,setWarmLoading]=useState(false);
   const [error,setError]=useState("");
   const [period,setPeriod]=useState<"D"|"W"|"M">("D");
   const [kind,setKind]=useState<"candle"|"line">("candle");
@@ -47,11 +59,11 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
   const [hover,setHover]=useState<MarketBar|null>(null);
   const [expanded,setExpanded]=useState(false);
   const [chartError,setChartError]=useState(false);
-  const requestCache=useRef(new Map<string,MarketBar[]>());
+
 
   useEffect(()=>{
     const controller=new AbortController();
-    const years=source==="recent"?[]:historyYears(range.from,range.to,TODAY);
+    const chunks=source==="recent"?[]:historyChunks(range.from,range.to,TODAY);
     setArchive([]);setRecentRange(null);setLoading(true);setError("");setProgress("");setCoverageNote("");
     async function load(){
       if(source==="recent"){
@@ -66,25 +78,25 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
         }
         return;
       }
-      const all:MarketBar[][]=[];
-      for(let i=0;i<years.length;i+=2){
-        const batch=await Promise.all(years.slice(i,i+2).map(async year=>{
-          const key=code+":"+year;
-          const stored=requestCache.current.get(key);
-          if(stored&&year<2026)return stored;
-          const res=await fetch("/api/quotes/"+encodeURIComponent(code)+"?year="+year,{signal:controller.signal});
-          const data=await res.json();
-          if(!res.ok)throw Error(year+"年："+(data.error||"历史行情暂不可用"));
-          if(!Array.isArray(data.bars)||data.code!==code||data.year!==year||data.adjustment!=="unadjusted")throw Error("历史行情响应异常");
-          const bars=data.bars as MarketBar[];
-          if(year<2026)requestCache.current.set(key,bars);
-          if(year>=2026&&data.coverage?.partial&&!controller.signal.aborted)setCoverageNote(year+"年归档尚未齐全 · 已归档 "+data.coverage.archivedSessions+" 个交易日 · 最新 "+data.coverage.latest);
-          return bars;
-        }));
+      const all:MarketBar[][]=[],gaps:string[]=[];
+      let sessions=0,latest="";
+      for(let i=0;i<chunks.length;i+=2){
+        const batch=await Promise.all(chunks.slice(i,i+2).map(part=>readRangePart(code,part,controller.signal,"quotes")));
         if(controller.signal.aborted)return;
-        all.push(...batch);setProgress(all.length+"/"+years.length+" 年");
+        for(const item of batch){
+          all.push(item.bars);
+          const c=item.coverage!;
+          sessions+=c.archivedSessions;
+          if(c.latest>latest)latest=c.latest;
+          if(c.partial)gaps.push(...c.missingMonths,...c.missingSessions);
+        }
+        setProgress(all.length+"/"+chunks.length+" 批");
       }
-      if(!controller.signal.aborted)setArchive(filterHistoryRange(mergeArchivedBars(all),range.from,range.to));
+      if(!controller.signal.aborted){
+        setArchive(mergeArchivedBars(all));
+        if(gaps.length)setCoverageNote("部分归档未齐全 · 已归档 "+sessions+" 个市场交易日 · 最新 "+(latest||"—"));
+        else if(latest&&latest<range.to)setCoverageNote("区间内最新已验证交易日 "+latest);
+      }
     }
     load().catch(e=>{if(!controller.signal.aborted)setError(e instanceof Error?e.message:"历史行情暂不可用");}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return ()=>controller.abort();
@@ -93,7 +105,7 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
   const factorKey=code+":"+source+(source==="recent"?(recentRange?":"+recentRange.from+":"+recentRange.to:""):":"+range.from+":"+range.to);
   useEffect(()=>{
     if(adjustment==="unadjusted"||(source==="recent"&&!recentRange)){setFactorLoading(false);setFactorError("");return;}
-    const controller=new AbortController(),years=source==="recent"?[]:historyYears(range.from,range.to,TODAY);
+    const controller=new AbortController(),chunks=source==="recent"?[]:historyChunks(range.from,range.to,TODAY);
     setFactorLoading(true);setFactorError("");
     async function load(){
       if(source==="recent"&&recentRange){
@@ -106,18 +118,10 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
         return;
       }
       const all:Factor[]=[];
-      for(let i=0;i<years.length;i+=2){
-        const result=await Promise.all(years.slice(i,i+2).map(async year=>{
-          const key=code+":"+year;
-          const saved=factorCache.current.get(key);if(saved&&year<2026)return saved;
-          const res=await fetch("/api/quotes/"+encodeURIComponent(code)+"/factors?year="+year,{signal:controller.signal});
-          const data=await res.json();
-          if(!res.ok)throw Error(year+"年："+(data.error||"复权因子暂不可用"));
-          if(data.code!==code||data.year!==year||!Array.isArray(data.factors))throw Error("复权因子响应异常");
-          const value=data.factors as Factor[];if(year<2026)factorCache.current.set(key,value);return value;
-        }));
+      for(let i=0;i<chunks.length;i+=2){
+        const result=await Promise.all(chunks.slice(i,i+2).map(part=>readRangePart(code,part,controller.signal,"factors")));
         if(controller.signal.aborted)return;
-        all.push(...result.flat());
+        all.push(...result.flatMap(x=>x.factors));
       }
       if(!controller.signal.aborted)setFactors({key:factorKey,values:all});
     }
@@ -133,11 +137,51 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
     catch(e){return {bars:[] as MarketBar[],error:e instanceof Error?e.message:"复权失败"};}
   },[rawDaily,adjustment,factors,factorKey]);
   const daily=adjusted.bars;
+  const visibleFrom=source==="recent"?recentRange?.from:range.from;
+  const lookback=indicatorLookback(enabled,showBoll,indicator);
+  const warmKey=factorKey+":"+period+":"+lookback+":"+adjustment;
+  // Warm-up is separate from the requested candles. Fetch backwards only until
+  // actual stock observations (at the selected bar frequency) satisfy lookback.
+  useEffect(()=>{
+    setWarmup(null);setWarmLoading(false);
+    if(loading||error||!visibleFrom||!rawDaily.length||!lookback||
+       (adjustment!=="unadjusted"&&(factorLoading||factorError||adjusted.error||factors?.key!==factorKey)))return;
+    const controller=new AbortController();
+    setWarmLoading(true);
+    async function load(){
+      let cursor=priorHistoryEnd(visibleFrom!,period),previous:MarketBar[]=[],note="";
+      const precedingFactors:Factor[]=[];
+      while(aggregateBars(previous,period).length<lookback){
+        const part=previousHistoryChunk(cursor);
+        if(!part){note="可用归档历史不足";break;}
+        const result=await readRangePart(code,part,controller.signal,"quotes");
+        if(controller.signal.aborted)return;
+        if(result.coverage?.partial){note="部分预热行情未归档";break;}
+        if(adjustment!=="unadjusted"&&result.bars.length){
+          const f=await readRangePart(code,part,controller.signal,"factors");
+          if(controller.signal.aborted)return;
+          precedingFactors.push(...f.factors);
+        }
+        previous=mergeArchivedBars([result.bars,previous]);
+        cursor=previousDay(part.from);
+      }
+      let history=previous;
+      if(adjustment!=="unadjusted"&&previous.length){
+        const anchor=adjustment==="forward"?rawDaily.at(-1)!.day:rawDaily[0].day;
+        history=adjustBars(previous,[...precedingFactors,...factors!.values],adjustment,anchor);
+      }
+      if(!controller.signal.aborted)setWarmup({key:warmKey,bars:aggregateBars(history,period).slice(-lookback),note});
+    }
+    load().catch(()=>{if(!controller.signal.aborted)setWarmup({key:warmKey,bars:[],note:"预热数据暂不可用"});}).finally(()=>{if(!controller.signal.aborted)setWarmLoading(false);});
+    return ()=>controller.abort();
+  },[code,visibleFrom,period,lookback,adjustment,warmKey,loading,error,rawDaily,factorLoading,factorError,adjusted.error,factors,factorKey]);
   const busy=loading||factorLoading||(adjustment!=="unadjusted"&&factors?.key!==factorKey&&!factorError);
   const displayError=error||(adjustment!=="unadjusted"?(factorError||adjusted.error):"");
   const bars=useMemo(()=>aggregateBars(daily,period),[daily,period]);
-  const bollData=useMemo(()=>showBoll?boll(bars):[],[bars,showBoll]);
-  const lower=useMemo(()=>indicator==="macd"?macd(bars).map(p=>({time:p.time,a:p.dif,b:p.dea,c:p.histogram})):indicator==="rsi"?rsi(bars).map(p=>({time:p.time,a:p.value,b:undefined,c:undefined})):indicator==="kdj"?kdj(bars).map(p=>({time:p.time,a:p.k,b:p.d,c:p.j})):[],[bars,indicator]);
+  const visibleDays=useMemo(()=>new Set(bars.map(b=>b.day)),[bars]);
+  const indicatorBars=useMemo(()=>[...(warmup?.key===warmKey?warmup.bars:[]),...bars],[warmup,warmKey,bars]);
+  const bollData=useMemo(()=>showBoll?boll(indicatorBars).filter(p=>visibleDays.has(p.time)):[],[indicatorBars,visibleDays,showBoll]);
+  const lower=useMemo(()=>(indicator==="macd"?macd(indicatorBars).map(p=>({time:p.time,a:p.dif,b:p.dea,c:p.histogram})):indicator==="rsi"?rsi(indicatorBars).map(p=>({time:p.time,a:p.value,b:undefined,c:undefined})):indicator==="kdj"?kdj(indicatorBars).map(p=>({time:p.time,a:p.k,b:p.d,c:p.j})):[]).filter(p=>visibleDays.has(p.time)),[indicatorBars,visibleDays,indicator]);
   const candles=bars.length>0&&bars.every(completeBar);
   const candleMode=candles&&kind==="candle";
   const hasVolume=bars.some(b=>typeof b.volume==="number");
@@ -172,7 +216,7 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
       }
       for(const ma of MA.filter(m=>enabled.includes(m.period))){
         const line=chart.addSeries(LineSeries,{color:ma.color,lineWidth:1,priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false});
-        line.setData(movingAverage(bars,ma.period));
+        line.setData(movingAverage(indicatorBars,ma.period).filter(p=>visibleDays.has(p.time)));
       }
       if(showBoll&&bollData.length){
         for(const [key,color] of [["middle","#B58516"],["upper","#8293a6"],["lower","#8293a6"]] as const){
@@ -207,7 +251,7 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
       setChartError(true);
     }
     return ()=>{api.current=null;chart.remove();};
-  },[bars,candleMode,enabled,showVolume,hasVolume,busy,displayError,period,marks,dark,showBoll,bollData,indicator,lower]);
+  },[bars,candleMode,enabled,showVolume,hasVolume,busy,displayError,period,marks,dark,showBoll,bollData,indicator,lower,indicatorBars,visibleDays]);
 
   useEffect(()=>{
     const handle=()=>{if(!document.fullscreenElement)setExpanded(false);};
@@ -225,7 +269,7 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
     if(root.current?.requestFullscreen)await root.current.requestFullscreen().catch(()=>{});
   }
 
-  function resetRangeChart(){setHover(null);setArchive([]);setError("");setLoading(true);setRecentRange(null);setKind("candle");setAdjustment("unadjusted");setFactorError("");setFactorLoading(false);}
+  function resetRangeChart(){setHover(null);setArchive([]);setError("");setLoading(true);setRecentRange(null);setKind("candle");setAdjustment("unadjusted");setFactorError("");setFactorLoading(false);setFactors(null);setWarmup(null);}
   function chooseSource(value:string){if(value!==source){resetRangeChart();setRangeError("");setDraft(range);setSource(value);}}
   function applyRange(from:string,to:string){
     try{historyYears(from,to,TODAY);}catch(e){setRangeError(e instanceof Error?e.message:"请选择有效的行情期间");return;}
@@ -255,7 +299,7 @@ export default function MarketChart({code,name,marks=NO_MARKS}:Props){
       <button type="button" aria-pressed={showBoll} onClick={()=>setShowBoll(v=>!v)}>BOLL(20,2)</button><select aria-label="副图指标" value={indicator} onChange={e=>setIndicator(e.target.value as typeof indicator)}><option value="none">副图指标</option><option value="macd">MACD(12,26,9)</option><option value="rsi">RSI(14)</option><option value="kdj" disabled={!candles}>KDJ(9,3,3)</option></select>
       <button type="button" aria-pressed={showVolume&&hasVolume} disabled={!hasVolume} onClick={()=>setShowVolume(v=>!v)}>成交量</button>
     </div>
-    {!busy&&!displayError&&((indicator!=="none"&&!lower.length)||(showBoll&&!bollData.length))&&<div className="chart-indicator-status" role="status">当前周期历史记录不足，部分指标不可用</div>}
+    {!busy&&!displayError&&bars.length>0&&<>{warmLoading?<div className="chart-indicator-status" role="status">正在补充指标历史行情</div>:warmup?.key===warmKey&&warmup.note?<div className="chart-indicator-status" role="status">{warmup.note} · 部分指标可能不足</div>:((indicator!=="none"&&!lower.length)||(showBoll&&!bollData.length))?<div className="chart-indicator-status" role="status">当前周期历史记录不足，部分指标不可用</div>:null}</>}
     <div className="chart-quote-strip" aria-label="光标对应行情">
       <strong>{shown?.day??"—"}</strong><span>开 {money(shown?.open)}</span><span>高 {money(shown?.high)}</span><span>低 {money(shown?.low)}</span><span>收 {money(shown?.close)}</span><span>量 {volume(shown?.volume)} 手</span>
     </div>
