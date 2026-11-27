@@ -34,7 +34,7 @@ VERSION=4  # V2.2 feature generation; wire protocol remains v1
 LANES={"research","collection"}
 SPOOL=Path("/var/lib/ashare-control-spool")
 READ_TASKS={"capabilities","data_inventory","backtest_status","task_status","task_logs","docker_status","deployment_status","maintenance_status"}
-REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment","maintenance","runtime","security_audit"}
+REPORT_KINDS={"preflight","signals","portfolio","walk","progress","containers","deployment","maintenance","runtime","security_audit","reference_capture"}
 INVENTORY_KINDS={"market","security","dividend","reference"}
 MAX_REPORT_BYTES=4*1024*1024
 MAX_ENTRIES=20000
@@ -279,6 +279,11 @@ def clean_report(kind,doc):
         out["state"]=doc["status"]
         if doc.get("stage") in ("reference","dividend","preflight","signals","portfolio","walk"):out["stage"]=doc["stage"]
         out.update(numeric(doc,("completed","total","elapsed_seconds","exit_code","peak_rss_kib")))
+    elif kind=="reference_capture":
+        if doc.get("status")!="BT05_REFERENCE_CAPTURE_V1" or doc.get("state") not in ("running","partial","failed","candidate_ready"):
+            raise ValueError("Invalid reference capture")
+        out["state"]=doc["state"]
+        out.update(numeric(doc,("expected_slices","verified_slices","new_requests")))
     elif kind=="security_audit":
         if doc.get("status")!="BT03_SECURITY_AUDIT_V1" or doc.get("state") not in ("running","completed","failed"):
             raise ValueError("Invalid security audit")
