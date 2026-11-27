@@ -1,0 +1,9 @@
+[Unit]
+Description=Poll local research queue
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=10s
+AccuracySec=2s
+Unit=ashare-research-worker.service
+[Install]
+WantedBy=timers.target
