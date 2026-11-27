@@ -4,6 +4,7 @@ from datetime import date,timedelta
 from dataclasses import replace
 from value_screener.backtest_engine import Bar,BacktestConfig,run_backtest
 from value_screener.bt05_portfolio import Portfolio,FeeSchedule,FeePeriod
+from value_screener.bt05_actions import Action,Actions
 
 CODE="000001.SZ"
 START=date(2024,12,27)
@@ -81,5 +82,47 @@ class BT05PortfolioTests(unittest.TestCase):
         b=replace(bars(1),up_limit=10.01)
         r=p.step(b.day,{CODE:b},{CODE},{CODE:1.},[])
         self.assertEqual(r["fills"][0]["price"],10.01)
+
+
+    def test_cash_and_bonus_shares_paid_after_sale_without_double_count(self):
+        cfg=BacktestConfig(initial_cash=10000,max_positions=1,holding_sessions=2,
+            commission_rate=0,min_commission=0,sell_tax_rate=0,slippage_rate=0,stop_loss_rate=.03)
+        fees=FeeSchedule.fixed(cfg)
+        act=Action(CODE,START+timedelta(days=1),START+timedelta(days=2),START+timedelta(days=4),
+                   .5,2.,1.,2.,"synthetic fixture")
+        actions=Actions([act])
+        p=Portfolio(cfg,fees,actions)
+        for i in (0,1):
+            b=bars(i);p.step(b.day,{CODE:b},{CODE},{CODE:1.},[CODE] if i==0 else [])
+        b=bars(2,4.75)
+        result=p.step(b.day,{CODE:b},{CODE},{CODE:2.},[])
+        self.assertEqual(p.holdings[CODE].size,2000)
+        self.assertEqual(result["equity"]["equity"],10000)
+        self.assertEqual(result["dividend_receivable"],500)
+        self.assertEqual(p.cash,0)
+        self.assertFalse(p.pending)
+        p=Portfolio.restore(cfg,fees,json.loads(json.dumps(p.checkpoint())),actions)
+        b=bars(3,4.75)
+        result=p.step(b.day,{CODE:b},{CODE},{CODE:2.},[])
+        self.assertEqual(result["trades"][0]["net_pnl"],0)
+        self.assertEqual(p.cash,9500)
+        self.assertEqual(result["equity"]["equity"],10000)
+        b=bars(4,4.75)
+        result=p.step(b.day,{CODE:b},{CODE},{CODE:2.},[])
+        self.assertEqual(p.cash,10000)
+        self.assertEqual(result["dividend_receivable"],0)
+        self.assertEqual(p.metrics()["net_dividends_paid"],500)
+
+    def test_ex_date_buyer_not_entitled_and_unsupported_holding_blocks(self):
+        cfg=BacktestConfig()
+        fees=FeeSchedule.fixed(cfg)
+        a=Action(CODE,START,START+timedelta(days=1),START+timedelta(days=3),.5,1.,1.,1.05,"synthetic")
+        p=Portfolio(cfg,fees,Actions([a],[(START+timedelta(days=2),CODE)]))
+        b=bars(0);p.step(b.day,{CODE:b},{CODE},{CODE:1.},[CODE])
+        b=bars(1,9.5);p.step(b.day,{CODE:b},{CODE},{CODE:1.05},[])
+        self.assertEqual(p.metrics()["net_dividends_recognized"],0)
+        b=bars(2,9.5)
+        with self.assertRaisesRegex(ValueError,"Unsupported corporate action"):
+            p.step(b.day,{CODE:b},{CODE},{CODE:1.05},[])
 
 if __name__=="__main__":unittest.main()
