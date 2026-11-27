@@ -115,3 +115,19 @@ export function recentMonthRange(from:string,to:string):{year:number;month:strin
   }
   return result;
 }
+
+
+// User-selected calendar dates are independent of the physical archive layout.
+export function historyYears(from:string,to:string,maxDate:string):number[]{
+  const valid=(s:string)=>{
+    if(!/^20\d{2}-\d{2}-\d{2}$/.test(s))return false;
+    const d=new Date(s+"T00:00:00Z");
+    return Number.isFinite(+d)&&d.toISOString().slice(0,10)===s;
+  };
+  if(!valid(from)||!valid(to)||!valid(maxDate)||from<"2020-01-01"||from>to||to>maxDate)throw Error("请选择有效的行情期间");
+  const first=Number(from.slice(0,4)),last=Number(to.slice(0,4));
+  return Array.from({length:last-first+1},(_,i)=>first+i);
+}
+export function filterHistoryRange(bars:MarketBar[],from:string,to:string):MarketBar[]{
+  return bars.filter(b=>b.day>=from&&b.day<=to);
+}
