@@ -1,0 +1,61 @@
+# Standalone research project. Never include in production compose invocation.
+name: ashare-backtest
+services:
+  backtest-worker:
+    image: ${BACKTEST_IMAGE:?set independently reviewed immutable Worker image}
+    user: "10002:10010"
+    init: true
+    restart: "no"
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1024m
+    cpus: 1.0
+    entrypoint: ["/usr/local/bin/python3", "-m", "value_screener.backtest_tasks"]
+    environment:
+      TMPDIR: /scratch
+      DUCKDB_TEMP_DIRECTORY: /scratch
+    volumes:
+      - type: bind
+        source: ${ARCHIVE_DIR:-../archive}
+        target: /data/archive
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:-../backtest}/02_standardized/market
+        target: /market
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:-../backtest}/02_standardized/financial_pit
+        target: /financial
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:-../backtest}/02_standardized/tradeability
+        target: /security
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:-../backtest}/evidence
+        target: /evidence
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:-../backtest}/manifests
+        target: /manifests
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKTEST_DIR:-../backtest}/tmp
+        target: /scratch
+        bind:
+          create_host_path: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
