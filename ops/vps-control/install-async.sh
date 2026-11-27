@@ -5,6 +5,11 @@ test "$(id -u)" = 0
 root="$(cd -- "$(dirname -- "$0")" && pwd -P)"
 command -v setfacl >/dev/null || { echo "Install ACL utilities before setup" >&2; exit 1; }
 systemctl stop ashare-vps-control.timer
+for lane in research collection; do
+  if test -f "/etc/systemd/system/ashare-$lane-worker.timer"; then
+    systemctl stop "ashare-$lane-worker.timer"
+  fi
+done
 for unit in ashare-vps-control ashare-research-worker ashare-collection-worker; do
   if systemctl is-active --quiet "$unit.service" || test "$(systemctl show -p ActiveState --value "$unit.service")" = activating; then
     echo "Active task: $unit; finish it before installation" >&2; exit 1
