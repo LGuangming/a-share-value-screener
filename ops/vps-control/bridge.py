@@ -352,7 +352,7 @@ def diagnostics(doc,cfg,state):
     spec=cfg.get("reports",{}).get(doc["report"])
     allowed={"backtest_status":{"preflight","signals","portfolio","walk"},"task_logs":{"progress"},
              "docker_status":{"containers"},"deployment_status":{"deployment"},
-             "maintenance_status":{"maintenance","runtime","security_audit"}}[task]
+             "maintenance_status":{"maintenance","runtime","security_audit","reference_capture"}}[task]
     if not spec or spec["kind"] not in allowed:return {"status":"rejected","reason":"report_not_locally_enabled"}
     try:
         snapshot=clean_report(spec["kind"],bounded_json(spec["file"]))
