@@ -123,10 +123,41 @@ def add_comparison(out,key,metric,field,vid,cv,pv,inputs,status=None):
       (*key,metric,field,vid,cv,pv,absolute,relative,status or state,canonical(inputs)))
 
 
+FLOW_METRICS=("revenue","parent_profit","net_profit","operating_cashflow","fcf")
+QUARTERS=("0331","0630","0930","1231")
+
+
+def flow_periods(period,ttm):
+    year=int(period[:4]); q=QUARTERS.index(period[4:])
+    if not ttm:
+        return [str(year)+QUARTERS[i] for i in range(q+1)]
+    return [str((year*4+q-i)//4)+QUARTERS[(year*4+q-i)%4] for i in range(3,-1,-1)]
+
+
+def flow_check(cache,period,comp,base,ttm):
+    periods=flow_periods(period,ttm)
+    target=base+("_ttm" if ttm else "_ytd")
+    requested=[(period,target)]+[(p,base+"_quarter") for p in periods]
+    values=[cache.get((p,comp),{}).get(metric,(None,"missing")) for p,metric in requested]
+    inputs=[{"period":p,"metric":m,"value":v[0],"status":v[1]}
+            for (p,m),v in zip(requested,values)]
+    if any(v[0] is None or v[1]!="ok" for v in values):
+        return "metric_inputs_unavailable",None,None,inputs
+    residual=num(values[0][0]-sum(v[0] for v in values[1:]))
+    tol=max(1,max(abs(v[0]) for v in values)*1e-6)
+    if residual is None:
+        return "invalid_numeric",None,tol,inputs
+    return ("within_tolerance" if abs(residual)<=tol else "outside_tolerance"),residual,tol,inputs
+
+
 def process_code(src,metrics,out,code,market,counts):
-    keys=metrics.execute("""SELECT DISTINCT period,comp_type FROM metrics WHERE code=?
-      AND period>='20200101' ORDER BY period,comp_type""",(code,))
-    for period,comp in keys:
+    cache={}
+    for period,comp,metric,value,status in metrics.execute(
+        "SELECT period,comp_type,metric,value,status FROM metrics WHERE code=?",(code,)):
+        cache.setdefault((period,comp),{})[metric]=(value,status)
+    for period,comp in sorted(cache):
+        if period<"20200101":
+            continue
         shares,evidence=market[period]
         key=(code,period,comp)
         groups={}
@@ -153,8 +184,15 @@ def process_code(src,metrics,out,code,market,counts):
               (*key,name,status,residual,tol,canonical({"fields":fields,"signs":signs,"version_ids":ids,
                 "group_id":group["id"] if group else None})))
             counts["check:"+name+":"+status]+=1
-        values={r[0]:(r[1],r[2],r[3]) for r in metrics.execute(
-          "SELECT metric,value,status,inputs FROM metrics WHERE code=? AND period=? AND comp_type=?",key)}
+        values=cache[(period,comp)]
+        for base in FLOW_METRICS:
+            for ttm in (False,True):
+                name=base+("_ttm_quarter_sum" if ttm else "_ytd_quarter_sum")
+                status,residual,tol,inputs=flow_check(cache,period,comp,base,ttm)
+                out.execute("INSERT INTO accounting_checks VALUES (?,?,?,?,?,?,?,?)",
+                  (*key,name,status,residual,tol,canonical({"metric_inputs":inputs,
+                     "mechanical_identity_only":True})))
+                counts["check:"+name+":"+status]+=1
         for strategy,required in STRATEGIES.items():
             missing=[m for m in required if values.get(m,(None,"missing"))[1]!="ok"]
             status="financial_inputs_present" if not missing else "financial_inputs_incomplete"
@@ -198,7 +236,7 @@ def build(ledger,metrics,raw,output):
                               "standardized_staging_not_pit_certified",2)
     md,m,other=open_verified(metrics,"metrics.sqlite3","metrics_sha256","metrics_bytes",
                             "financial_metrics_research_not_pit_certified",1)
-    if m["input_ledger_sha256"]!=ld["ledger_sha256"] or m["asof"]!=ld["asof"] or m.get("formula_version")!="fin19-metrics-v1":
+    if m["input_ledger_sha256"]!=ld["ledger_sha256"] or m["asof"]!=ld["asof"] or m.get("input_manifest_sha256")!=hashes[str(ledger/"manifest.json")] or m.get("formula_version")!="fin19-metrics-v1":
         raise ValueError("metric sidecar does not match V5 ledger")
     hashes.update(other)
     output.parent.mkdir(parents=True,exist_ok=True)
@@ -245,7 +283,8 @@ def build(ledger,metrics,raw,output):
           "market_periods":market,"limitations":["market session share is not reported quarter-end share",
           "no forward fill for missing securities","annual ROE/ROA differences are diagnostic, not equivalence",
           "strategy flags are financial input presence only, not eligibility or buy signals",
-          "accounting checks use coherent selected groups only; no automatic repairs","no EBITDA or ROIC derivation"]}
+          "accounting checks use coherent selected groups only; no automatic repairs",
+          "quarter sum checks are mechanical identities, not independent accounting evidence","no EBITDA or ROIC derivation"]}
         (tmp/"manifest.json").write_text(json.dumps(report,indent=2)+"\n")
         if output.exists():
             raise ValueError("output appeared")
