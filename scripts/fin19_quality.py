@@ -123,10 +123,11 @@ def add_comparison(out,key,metric,field,vid,cv,pv,inputs,status=None):
       (*key,metric,field,vid,cv,pv,absolute,relative,status or state,canonical(inputs)))
 
 
-def process_period(src,metrics,out,period,shares,evidence,counts):
-    keys=metrics.execute("""SELECT DISTINCT code,comp_type FROM metrics WHERE period=?
-      ORDER BY code,comp_type""",(period,))
-    for code,comp in keys:
+def process_code(src,metrics,out,code,market,counts):
+    keys=metrics.execute("""SELECT DISTINCT period,comp_type FROM metrics WHERE code=?
+      AND period>='20200101' ORDER BY period,comp_type""",(code,))
+    for period,comp in keys:
+        shares,evidence=market[period]
         key=(code,period,comp)
         groups={}
         for api in {r[0] for r in RULES.values()}:
@@ -185,7 +186,6 @@ def process_period(src,metrics,out,period,shares,evidence,counts):
                       {"unit":"percentage-point assumption; not definition matched",
                        "provider_ann_date":r.get("ann_date"),"provider_version_id":vid},
                       "annual_definition_unverified" if cv is not None and pv is not None else "not_comparable")
-    out.commit()
 
 
 def build(ledger,metrics,raw,output):
@@ -214,12 +214,20 @@ def build(ledger,metrics,raw,output):
         periods=[r[0] for r in md.execute("SELECT DISTINCT period FROM metrics WHERE period>='20200101' ORDER BY period")]
         if not periods:
             raise ValueError("no formal periods")
+        market_by_period={}
         for period in periods:
             shares,evidence=load_period(raw,period,con)
             market.append(evidence)
+            market_by_period[period]=(shares,evidence)
             out.execute("INSERT INTO market_period VALUES (?,?)",(period,canonical(evidence)))
-            process_period(src,md,out,period,shares,evidence,counts)
-            print("FIN19_V7_PERIOD",period,evidence["status"],flush=True)
+            print("FIN19_V7_MARKET",period,evidence["status"],flush=True)
+        codes=[r[0] for r in md.execute("SELECT DISTINCT code FROM metrics ORDER BY code")]
+        for n,code in enumerate(codes,1):
+            process_code(src,md,out,code,market_by_period,counts)
+            if n%50==0:
+                out.commit()
+                print("FIN19_V7_PROGRESS",n,len(codes),flush=True)
+        out.commit()
         if out.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
             raise ValueError("quality database integrity failed")
         out.close();out=None
