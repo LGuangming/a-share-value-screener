@@ -128,3 +128,48 @@ historically known date. This sidecar must not be read by backtests or
 production. Actual coverage, disk/time, statement-type distributions and
 provider differences require VPS acceptance. V7 reconciliation, original
 revision lineage and FIN20 Parquet publication remain separate gates.
+
+## V7 quality sidecar (first acceptance candidate)
+
+Use the accepted V5 ledger and V6 metric sidecar directly. Run with the
+existing research Python runtime that has DuckDB; no network or installation
+is performed by the builder.
+
+```bash
+/opt/ashare-research-runtime/bin/python -m unittest discover -s tests -p 'test_fin19_quality.py' -v
+/usr/bin/time -v /opt/ashare-research-runtime/bin/python -u scripts/fin19_quality.py \
+  --ledger /opt/ashare/backtest/fin19-staging-faaf086 \
+  --metrics /opt/ashare/backtest/fin19-metrics-4f65e51 \
+  --raw /opt/ashare/archive/a-share-backtest/01_raw_data \
+  --output /opt/ashare/backtest/fin19-quality-v1
+```
+
+V7 verifies V5/V6 manifest hashes, their exact linkage, and source hashes
+before and after processing. Output quality.sqlite3 is separate; the original
+28 metrics remain unchanged. Formal scope starts 2020; quarter/TTM checks
+can read existing warmup periods. Market evidence uses only the committed
+annual monthly daily_basic partition or the committed incremental market day
+with calendar evidence through report-period end. No security-level stale
+fill or current share fallback. Missing archive coverage is explicit;
+checksum or identity corruption aborts. Tushare documents balancesheet
+total_share in shares and daily_basic.total_share in ten-thousand shares
+(https://tushare.pro/document/2?doc_id=36 and doc_id=32).
+A market session on the period end is a market observation, not a financial
+statement share count; a previous session is explicitly a proxy, not an exact
+period-end share count. The reported BVPS and market BVPS candidate are stored
+separately. No overwrite or imputation of the original BVPS.
+
+Five direct accounting identities (balance, minority equity, cash flow
+sections, cash opening/closing, income-tax reconciliation) use coherent
+source versions only, and 10 YTD/TTM quarter-sum arithmetic checks use
+the V6 calculated flows. All use absolute tolerance max(1 CNY, 1 ppm of
+largest input); passing does not certify cross-period reporting consistency.
+Missing, disputed, or inapplicable input is not zero. Provider FCF/EBIT
+comparisons retain individual conflict values, absolute and relative
+differences (relative null at zero provider value). Annual ROE/ROA/npta
+comparisons explicitly assume provider percentages and are diagnostic only;
+definitions, revision matching and units require verification. Strategy
+quality flags are financial-input presence checks, not buy signals or
+historical eligibility; low PB with market share candidate is distinct from
+reported BVPS. No EBITDA/ROIC or sector-specific banking/insurance ratios
+are added in this revision; no PIT or production publication.
