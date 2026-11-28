@@ -45,7 +45,7 @@ class FinancialStandardizationTests(unittest.TestCase):
         check([ROW,dict(ROW,total_assets=101)],"non_null_value_conflict")
         check([ROW,dict(ROW,total_assets=None)],"null_population_difference")
         check([ROW,dict(ROW,new_field=1)],"schema_or_complementary_difference")
-        check([ROW,dict(ROW,total_assets=100.0)],"null_population_difference")
+        check([ROW,dict(ROW,total_assets=100.0)],"numeric_representation_difference")
     def test_missing_and_invalid_denominator(self):
         result=f.normalize("cashflow",dict(ROW,n_cashflow_act=0,c_pay_acq_const_fiolta=None),ASOF)
         self.assertIsNone(result[8]["operating_cash_less_capex_cny_ytd"])
