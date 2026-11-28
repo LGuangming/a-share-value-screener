@@ -163,7 +163,7 @@ def build_views(con,asof,selected):
         raise ValueError("statement version lineage mismatch")
     con.execute("""CREATE TEMP TABLE financial_metric_detail AS
         SELECT l.code,l.period,l.comp_type,x.metric,
-            CASE WHEN m.status='ok' THEN m.value END value,m.unit,
+            CASE WHEN m.status='ok' THEN m."value" END AS "value",m.unit,
             CASE WHEN l.selection_status!='latest_observed_period' THEN l.selection_status
                  ELSE coalesce(m.status,'metric_missing') END status,
             m.candidate_date_max,m.inputs,m.formula_version
@@ -172,7 +172,7 @@ def build_views(con,asof,selected):
           AND (l.code,l.period,l.comp_type,x.metric)=(m.code,m.period,m.comp_type,m.metric)""",[list(METRICS)])
     fields=[]
     for metric in METRICS:
-        fields += [f"max(d.value) FILTER(WHERE d.metric='{metric}') AS {metric}",
+        fields += [f"max(d.\"value\") FILTER(WHERE d.metric='{metric}') AS {metric}",
                    f"max(d.status) FILTER(WHERE d.metric='{metric}') AS {metric}_status"]
     con.execute("CREATE TEMP TABLE financial_metrics AS SELECT l.*,"+",".join(fields)+
         " FROM latest l JOIN financial_metric_detail d USING(code) GROUP BY ALL")
