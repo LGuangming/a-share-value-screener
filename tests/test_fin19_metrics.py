@@ -22,6 +22,7 @@ class MetricTests(unittest.TestCase):
         self.assertEqual(d["x"]["value"],0)
         self.assertEqual(d["y"]["state"],"conflicting_non_null")
         self.assertIsNone(d["y"]["value"])
+        self.assertEqual(d["y"]["conflict_observations"],[[1,1],[2,2]])
         self.assertEqual(d["z"]["state"],"no_value")
         self.assertEqual(d["z"]["absent"],1)
         self.assertEqual(d["z"]["null"],1)
@@ -89,6 +90,12 @@ class MetricTests(unittest.TestCase):
         b=group("cashflow","20251231",{"n_cashflow_act":10},end="2")
         rows={r[3]:r for r in m.metric_builder({("income","20251231","1"):a,("cashflow","20251231","1"):b},"000001.SZ","20251231","1")}
         self.assertEqual(rows["cash_to_profit_ytd"][6],"report_period_type_mismatch")
+
+    def test_ebit_industrial_interest_field(self):
+        g=group("income","20251231",{"total_profit":100,"fin_exp_int_exp":15,
+                 "int_exp":99,"ebit":130})
+        rows={r[3]:r for r in m.metric_builder({("income","20251231","1"):g},"000001.SZ","20251231","1")}
+        self.assertEqual(rows["ebit_pbt_plus_interest_ytd"][4],115)
 
     def test_full_read_only_build(self):
         with tempfile.TemporaryDirectory() as d:
