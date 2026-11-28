@@ -109,14 +109,14 @@ def load_period(raw,period,con):
           NOT regexp_full_match(ts_code,'[0-9]{6}\\.(SH|SZ|BJ)')),
        min(CAST(trade_date AS DATE)),max(CAST(trade_date AS DATE))
       FROM read_parquet(?,hive_partitioning=false)""",[str(path)]).fetchone()
-    if (rows!=meta["rows"] or rows!=distinct or bad or max_day!=session
+    if (rows!=meta["rows"] or rows!=distinct or bad
         or (meta.get("max_session") is not None and
-           (min_day!=day(meta["min_session"]) or
-            con.execute("SELECT count(DISTINCT trade_date) FROM read_parquet(?,hive_partitioning=false)",[str(path)]).fetchone()[0]!=meta["sessions"]))
-        or (meta.get("trade_date") is not None and min_day!=session)):
+           ((rows and not day(meta["min_session"])<=min_day<=max_day<=session) or
+            con.execute("SELECT count(DISTINCT trade_date) FROM read_parquet(?,hive_partitioning=false)",[str(path)]).fetchone()[0]!=meta.get("nonempty_sessions",meta["sessions"])))
+        or (meta.get("trade_date") is not None and rows and (min_day!=session or max_day!=session))):
         raise ValueError("market rows/calendar reconciliation failed")
     result={}
-    for code,share in con.execute("""SELECT ts_code,total_share FROM
+    for code,share in con.execute("""SELECT ts_code,CAST(total_share AS DOUBLE) FROM
         read_parquet(?,hive_partitioning=false) WHERE CAST(trade_date AS DATE)=?""",
         [str(path),session]).fetchall():
         v=num(share)
