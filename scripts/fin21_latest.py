@@ -237,7 +237,7 @@ def build_views(con,asof,selected):
         FROM latest l CROSS JOIN (VALUES ('net_net'),('low_pb_financial'),('fcf_financial'),('quality_momentum_financial')) x(strategy)
         LEFT JOIN strategy_quality s ON l.selection_status='latest_observed_period'
           AND (l.code,l.period,l.comp_type,x.strategy)=(s.code,s.period,s.comp_type,s.strategy)
-        JOIN valuation_metrics v USING(code) JOIN financial_quality q USING(code)""")
+        JOIN valuation_metrics v ON v.code=l.code JOIN financial_quality q ON q.code=l.code""")
     n=con.execute("SELECT count(*) FROM latest").fetchone()[0]
     if not n:
         raise ValueError("empty latest universe")
