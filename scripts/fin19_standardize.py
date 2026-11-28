@@ -160,6 +160,11 @@ CREATE TABLE lineage(version_id INTEGER NOT NULL REFERENCES versions(id),
  PRIMARY KEY(source_id,line_no,row_no));
 CREATE TABLE calendar(code TEXT NOT NULL, period TEXT NOT NULL, actual_date TEXT NOT NULL,
  PRIMARY KEY(code,period,actual_date)) WITHOUT ROWID;
+CREATE TABLE calendar_origin(code TEXT NOT NULL, period TEXT NOT NULL, actual_date TEXT NOT NULL,
+ source_class TEXT NOT NULL, PRIMARY KEY(code,period,actual_date,source_class)) WITHOUT ROWID;
+CREATE TABLE source_field_quality(source_id INTEGER NOT NULL REFERENCES sources(id),
+ field TEXT NOT NULL, state TEXT NOT NULL, occurrences INTEGER NOT NULL,
+ PRIMARY KEY(source_id,field,state)) WITHOUT ROWID;
 CREATE TABLE group_quality(api TEXT,code TEXT,period TEXT,report_type TEXT,
  comp_type TEXT,end_type TEXT,candidate_date TEXT,versions INTEGER,
  classification TEXT, differing_fields TEXT,
@@ -205,15 +210,46 @@ def sources(weekend, old):
                 raise ValueError("unsupported old manifest: "+str(mp))
             yield "old",api,path,m["compressed_bytes"],m["sha256"],mp,digest(mp),m["rows"],m["rows"]
 
+    # Reuse BT03's existing disclosure archive contract; do not glob arbitrary JSON.
+    directory = old/"disclosures"
+    payloads = sorted(directory.glob("period=*.jsonl.gz"))
+    markers = sorted(directory.glob("period=*.manifest.json"))
+    if (not markers or {p.name[:-9] for p in payloads} != {p.name[:-14] for p in markers}):
+        raise ValueError("old disclosure archive pairs missing: "+str(directory))
+    for mp in markers:
+        if mp.is_symlink():
+            raise ValueError("symlink disclosure manifest")
+        mh = digest(mp)
+        m = json.loads(mp.read_text(encoding="utf-8"))
+        period = m.get("report_period")
+        if (not day(period) or mp.name != f"period={period}.manifest.json"):
+            raise ValueError("invalid disclosure manifest period")
+        path = directory/f"period={period}.jsonl.gz"
+        if (m.get("format_version") != 1 or m.get("source") != "Tushare official disclosure_date"
+            or m.get("status") != "source_evidence_only"
+            or m.get("object_key") != "a-share-backtest/01_raw_data/"+path.relative_to(old).as_posix()
+            or not 0 < m.get("compressed_bytes",0) <= 8*1024*1024
+            or m.get("actual_date_populated",-1) < 0 or m.get("actual_date_missing",-1) < 0
+            or m.get("rows") != m.get("actual_date_populated")+m.get("actual_date_missing")):
+            raise ValueError("unsupported disclosure manifest: "+str(mp))
+        yield "old_disclosure","disclosure_date",path,m["compressed_bytes"],m["sha256"],mp,mh,m["rows"],m["rows"]
+
 
 def read_source(db, spec, asof):
     source_class,api,path,size,checksum,mp,mh,expected_lines,expected_rows = spec
     check_file(path,size,checksum)
     sid = db.execute("INSERT INTO sources(source_class,api,path,sha256,bytes,manifest_sha256) VALUES (?,?,?,?,?,?)",
                      (source_class,api,str(path),checksum,size,mh)).lastrowid
-    accepted = excluded = lines = 0
+    accepted = excluded = lines = populated = expanded = 0
+    field_counts = Counter()
+    old_disclosure = source_class == "old_disclosure"
+    old_meta = json.loads(mp.read_text(encoding="utf-8")) if old_disclosure else None
     with gzip.open(path,"rt",encoding="utf-8") as f:
         for lines,line in enumerate(f,1):
+            if old_disclosure:
+                expanded += len(line.encode("utf-8"))
+                if expanded > 64*1024*1024:
+                    raise ValueError("old disclosure expansion limit")
             obj = json.loads(line)
             if not isinstance(obj,dict):
                 raise ValueError("non-object source line")
@@ -229,6 +265,20 @@ def read_source(db, spec, asof):
             for row_no,row in enumerate(records,1):
                 if not isinstance(row,dict):
                     raise ValueError("non-object financial row")
+                if old_disclosure:
+                    if row.get("end_date") != old_meta["report_period"] or not row.get("ts_code"):
+                        raise ValueError("old disclosure row identity mismatch")
+                    populated += row.get("actual_date") not in (None,"")
+                for field in sorted(set(CORE.get(api, ())) | set(FIELDS.get(api, ()))):
+                    if field not in row:
+                        state = "absent_in_payload"
+                    elif row[field] is None:
+                        state = "explicit_null"
+                    elif num(row[field]) is None:
+                        state = "invalid_numeric"
+                    else:
+                        state = "valid_numeric"
+                    field_counts[(field,state)] += 1
                 payload = canonical(row)
                 code,p,rt,ct,et,eff,flags,typed,derived = normalize(api,row,asof)
                 rh = sha(payload)
@@ -242,13 +292,20 @@ def read_source(db, spec, asof):
                 if api == "disclosure_date":
                     pd,ad = day(p),day(row.get("actual_date"))
                     if pd and ad and pd <= ad <= asof and "invalid_code" not in flags:
-                        db.execute("INSERT OR IGNORE INTO calendar VALUES (?,?,?)",
-                                   (code,p,ad.strftime("%Y%m%d")))
+                        actual = ad.strftime("%Y%m%d")
+                        db.execute("INSERT OR IGNORE INTO calendar VALUES (?,?,?)",(code,p,actual))
+                        db.execute("INSERT OR IGNORE INTO calendar_origin VALUES (?,?,?,?)",
+                                   (code,p,actual,source_class))
             if lines % 250 == 0:
                 db.commit()
     # The manifest is authoritative for response lines and completed-row count.
     if lines != expected_lines or accepted != expected_rows:
         raise ValueError(f"source counts differ: {path} lines={lines}/{expected_lines} accepted={accepted}/{expected_rows} excluded={excluded}")
+    if old_disclosure and (populated != old_meta["actual_date_populated"]
+                           or accepted-populated != old_meta["actual_date_missing"]):
+        raise ValueError("old disclosure actual-date counts mismatch")
+    db.executemany("INSERT INTO source_field_quality VALUES (?,?,?,?)",
+                   [(sid,field,state,n) for (field,state),n in sorted(field_counts.items())])
     check_file(path,size,checksum)
     if digest(mp) != mh:
         raise ValueError("manifest changed during read")
@@ -362,17 +419,29 @@ def build(weekend,old,output,asof):
               FROM versions v WHERE api IN ('balancesheet','income','cashflow') AND report_type='1'
               """)
         date_counts = db.execute("SELECT api,evidence,COUNT(*) FROM statement_date_evidence GROUP BY api,evidence").fetchall()
+        origin_counts = db.execute("SELECT source_class,COUNT(*) FROM calendar_origin GROUP BY source_class").fetchall()
+        overlap = db.execute("""SELECT COUNT(*) FROM (
+            SELECT code,period,actual_date FROM calendar_origin
+            GROUP BY code,period,actual_date HAVING COUNT(*) > 1)""").fetchone()[0]
+        field_counts = db.execute("""SELECT s.source_class,s.api,q.field,q.state,SUM(q.occurrences)
+            FROM source_field_quality q JOIN sources s ON s.id=q.source_id
+            GROUP BY s.source_class,s.api,q.field,q.state
+            ORDER BY s.source_class,s.api,q.field,q.state""").fetchall()
         db.commit()
         if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok" or db.execute("PRAGMA foreign_key_check").fetchone():
             raise ValueError("ledger integrity failed")
         db.close()
         db = None
         ledger = tmp/"financial.sqlite3"
-        report = {"state":"standardized_staging_not_pit_certified","format_version":1,
+        report = {"state":"standardized_staging_not_pit_certified","format_version":2,
                   "asof":asof.isoformat(),"formal_start":"2020-01-01","warmup_start":"2018-01-01",
                   "pit_certified":False,"production_published":False,"parquet_published":False,
                   "missing_input_sha256":missing_sha,"ledger_sha256":digest(ledger),
                   "ledger_bytes":ledger.stat().st_size,"counts":counts,"version_groups":groups,
+                  "calendar_origin_counts":[{"source_class":s,"valid_distinct_date_keys":n} for s,n in origin_counts],
+                  "calendar_shared_date_keys":overlap,
+                  "field_quality_by_source":[{"source_class":s,"api":a,"field":f,"state":k,"occurrences":n}
+                      for s,a,f,k,n in field_counts],
                   "date_evidence":[{"api":a,"classification":e,"rows":n} for a,e,n in date_counts],
                   "limitations":["no version release certification","no TTM or ROE derivation",
                     "no conflict winner selection","no automatic publication","no historical universe certification",
