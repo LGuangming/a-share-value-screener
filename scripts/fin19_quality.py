@@ -150,7 +150,7 @@ def flow_check(cache,period,comp,base,ttm):
     return ("within_tolerance" if abs(residual)<=tol else "outside_tolerance"),residual,tol,inputs
 
 
-def process_code(src,metrics,out,code,market,counts):
+def process_code(src,metrics,out,code,market_by_period,counts):
     cache={}
     for period,comp,metric,value,status in metrics.execute(
         "SELECT period,comp_type,metric,value,status FROM metrics WHERE code=?",(code,)):
@@ -158,7 +158,7 @@ def process_code(src,metrics,out,code,market,counts):
     for period,comp in sorted(cache):
         if period<"20200101":
             continue
-        shares,evidence=market[period]
+        shares,evidence=market_by_period[period]
         key=(code,period,comp)
         groups={}
         for api in {r[0] for r in RULES.values()}:
@@ -170,9 +170,9 @@ def process_code(src,metrics,out,code,market,counts):
         v,ids,status=extract(b,["total_hldr_eqy_exc_min_int","total_share"])
         reported=ratio(*v) if v is not None else None
         reported_status="ok" if reported is not None else ("invalid_denominator_or_value" if status=="ok" else status)
-        market,market_status,market_ids=share_candidate(b,shares.get(code),evidence)
+        market_bvps,market_status,market_ids=share_candidate(b,shares.get(code),evidence)
         out.execute("INSERT INTO bvps VALUES (?,?,?,?,?,?,?,?,?,?)",
-          (*key,reported,market,reported_status,market_status,shares.get(code),evidence.get("session"),
+          (*key,reported,market_bvps,reported_status,market_status,shares.get(code),evidence.get("session"),
            canonical({"reported_version_ids":ids,"equity_version_ids":market_ids,
              "group_id":b["id"] if b else None,"market_period":period})))
         counts["bvps_reported:"+reported_status]+=1
@@ -196,7 +196,7 @@ def process_code(src,metrics,out,code,market,counts):
         for strategy,required in STRATEGIES.items():
             missing=[m for m in required if values.get(m,(None,"missing"))[1]!="ok"]
             status="financial_inputs_present" if not missing else "financial_inputs_incomplete"
-            if strategy=="low_pb_financial" and missing and market is not None:
+            if strategy=="low_pb_financial" and missing and market_bvps is not None:
                 status="market_share_candidate_only"
             out.execute("INSERT INTO strategy_quality VALUES (?,?,?,?,?,?)",
                         (*key,strategy,status,canonical(missing)))
