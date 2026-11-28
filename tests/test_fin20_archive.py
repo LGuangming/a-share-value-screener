@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts import fin20_archive as a
 from scripts import fin19_standardize as s
@@ -30,7 +31,9 @@ class ArchiveTests(unittest.TestCase):
                       (4,"bad","null",1e-200),(5,None,"",1e200)]
                 db.executemany("INSERT INTO sample VALUES (?,?,?,?)",rows)
                 defn={"columns":cols}
-                result=a.export_table(db,con,root,"ledger","sample",defn)
+                with patch.object(a,"CHUNK",1):
+                    result=a.export_table(db,con,root,"ledger","sample",defn)
+                self.assertEqual(len(result["partitions"][0]["files"]),2)
                 self.assertEqual(result["rows"],5)
                 self.assertEqual([p["partition"] for p in result["partitions"]],["2025","2026","unknown"])
                 a.verify_table(con,root,defn,result)
