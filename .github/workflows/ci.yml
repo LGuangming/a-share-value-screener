@@ -76,6 +76,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p test_fin19_standardize.py -v
           python -m unittest discover -s tests -p test_fin19_metrics.py -v
+          python -m unittest discover -s tests -p test_fin19_quality.py -v
       - name: Registry manifest verification regression tests
         if: needs.scope.outputs.registry == 'true'
         run: |
@@ -175,6 +176,10 @@ jobs:
       - name: Install fixture-only Parquet generator
         run: |
           python -m pip install --only-binary=:all: 'duckdb==1.5.6'
+      - name: FIN19 V7 real Parquet quality fixture
+        run: |
+          python -c 'import duckdb'
+          python -m unittest discover -s tests -p test_fin19_quality.py -v
       - name: Archive storage and real Parquet compatibility tests
         env:
           ARCHIVE_TEST_FIXTURES: '1'
