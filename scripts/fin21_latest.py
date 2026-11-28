@@ -117,7 +117,7 @@ def market_views(con,raw,selected):
     return evidence
 
 
-def build_views(con,asof,selected):
+def select_latest(con,asof):
     cutoff=asof.replace("-","")
     # Scope is observed financial mainboard codes plus current-session mainboard
     # market codes. Latest *observed* period, not latest complete period.
@@ -136,6 +136,10 @@ def build_views(con,asof,selected):
                WHEN t.type_count!=1 OR t.comp_type IS NULL OR t.comp_type='' THEN 'ambiguous_or_unknown_company_type'
                ELSE 'latest_observed_period' END selection_status
         FROM universe u LEFT JOIN latest_types t USING(code)""",[cutoff,CODE_PATTERN,CODE_PATTERN,CODE_PATTERN])
+
+
+def build_views(con,asof,selected):
+    select_latest(con,asof)
     con.execute("""CREATE TEMP TABLE financial_statements AS
         SELECT l.code,l.period,l.comp_type,x.api,l.selection_status,
           CASE WHEN l.selection_status!='latest_observed_period' THEN l.selection_status
@@ -176,7 +180,7 @@ def build_views(con,asof,selected):
     # fill. All ratios compare latest observed report with market date, not PIT.
     con.execute("""CREATE TEMP TABLE valuation_metrics AS WITH market_data AS (
         SELECT l.code,l.period,l.comp_type,?::DATE market_date,
-          CASE WHEN isfinite(p.close) AND p.close>0 THEN p.close END close_cny,
+          CASE WHEN isfinite(p."close") AND p."close">0 THEN p."close" END close_cny,
           CASE WHEN isfinite(b.total_mv) AND b.total_mv>0 THEN b.total_mv*10000 END market_cap_cny,
           CASE WHEN isfinite(b.total_share) AND b.total_share>0 THEN b.total_share*10000 END market_shares,
           CASE WHEN isfinite(b.pb) THEN b.pb END provider_pb,
@@ -188,6 +192,8 @@ def build_views(con,asof,selected):
           CASE WHEN s.statement_status='selected_explicit_type'
             AND json_extract_string(s.decisions,'$.total_hldr_eqy_exc_min_int.state') IN ('consensus','partial_consensus')
             THEN try_cast(json_extract(s.decisions,'$.total_hldr_eqy_exc_min_int.value') AS DOUBLE) END parent_equity_cny,
+          json_extract_string(s.decisions,'$.total_hldr_eqy_exc_min_int.state') parent_equity_field_status,
+          json_extract(s.decisions,'$.total_hldr_eqy_exc_min_int.version_ids') parent_equity_version_ids,
           f.ncav,f.parent_profit_ttm,f.fcf_ttm
         FROM latest l JOIN financial_metrics f USING(code)
         LEFT JOIN daily_prices p ON p.ts_code=l.code
