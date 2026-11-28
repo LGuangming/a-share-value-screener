@@ -21,7 +21,6 @@ except ImportError:
     from fin19_standardize import day,digest
 
 VERSION="fin21-latest-v1"
-MAINBOARD="[0-9]{6}[.](SH|SZ)"
 CODE_PATTERN="(60[0135][0-9]{3}[.]SH|00[0123][0-9]{3}[.]SZ)"
 METRICS=("ncav","book_value_per_share","debt_to_assets","current_ratio","quick_ratio",
          "gross_margin_ytd",*[base+"_"+suffix for base in
@@ -105,6 +104,8 @@ def market_views(con,raw,selected):
             raise ValueError("daily partition manifest mismatch")
         market.verified(path,meta)
         evidence[relative]=a.file_info(path)
+        if evidence[relative]["sha256"]!=meta["sha256"]:
+            raise ValueError("market source changed")
         if ds not in ("daily_prices","daily_basic"):
             continue
         con.execute("CREATE TEMP TABLE "+ds+" AS SELECT * FROM read_parquet(?,hive_partitioning=false)",[str(path)])
@@ -149,7 +150,7 @@ def build_views(con,asof,selected):
     con.execute("""CREATE TEMP TABLE statement_versions AS
         SELECT s.code,s.period,s.comp_type,s.api,s.statement_status,s.group_id,
                v.id version_id,v.row_hash,v.report_type,v.end_type,v.candidate_date,v.payload,v.flags
-        FROM financial_statements s, LATERAL json_each(s.version_ids) j
+        FROM financial_statements s CROSS JOIN LATERAL json_each(s.version_ids) j
         JOIN versions v ON v.id=CAST(j.value AS BIGINT)
         WHERE (v.code,v.period,v.comp_type,v.api)=(s.code,s.period,s.comp_type,s.api)
           AND v.report_type='1' AND v.end_type=s.end_type AND v.candidate_date=s.candidate_date""")
@@ -185,7 +186,7 @@ def build_views(con,asof,selected):
           q.market_candidate period_market_bvps,q.market_status period_market_bvps_status,
           q.source_session period_share_session,
           CASE WHEN s.statement_status='selected_explicit_type'
-            AND json_extract_string(s.decisions,'$.total_hldr_eqy_exc_min_int.state')='consensus'
+            AND json_extract_string(s.decisions,'$.total_hldr_eqy_exc_min_int.state') IN ('consensus','partial_consensus')
             THEN try_cast(json_extract(s.decisions,'$.total_hldr_eqy_exc_min_int.value') AS DOUBLE) END parent_equity_cny,
           f.ncav,f.parent_profit_ttm,f.fcf_ttm
         FROM latest l JOIN financial_metrics f USING(code)
@@ -194,7 +195,8 @@ def build_views(con,asof,selected):
         LEFT JOIN bvps q ON l.selection_status='latest_observed_period' AND
           (l.code,l.period,l.comp_type)=(q.code,q.period,q.comp_type)
         LEFT JOIN financial_statements s ON s.code=l.code AND s.api='balancesheet')
-        SELECT *,CASE WHEN market_cap_cny>0 AND parent_equity_cny>0
+        SELECT *,date_diff('day',try_strptime(period,'%Y%m%d')::DATE,market_date) report_age_days,
+          CASE WHEN market_cap_cny>0 AND parent_equity_cny>0
               THEN market_cap_cny/parent_equity_cny END pb_cap_to_reported_equity,
           CASE WHEN market_cap_cny>0 AND parent_profit_ttm>0
               THEN market_cap_cny/parent_profit_ttm END pe_latest_ttm,
@@ -218,7 +220,7 @@ def build_views(con,asof,selected):
         FROM latest l JOIN checks c USING(code)""")
     con.execute("""CREATE TEMP TABLE strategy_inputs AS
         SELECT l.code,l.period,l.comp_type,x.strategy,
-          coalesce(s.status,l.selection_status) financial_status,s.missing_metrics,
+          coalesce(s.status,CASE WHEN l.selection_status='latest_observed_period' THEN 'quality_record_missing' ELSE l.selection_status END) financial_status,s.missing_metrics,
           v.market_date,v.market_status,
           CASE WHEN x.strategy='net_net' THEN v.cap_to_positive_ncav IS NOT NULL
                WHEN x.strategy='low_pb_financial' THEN v.pb_cap_to_reported_equity IS NOT NULL
