@@ -72,6 +72,19 @@ class FinancialStandardizationTests(unittest.TestCase):
             records=[ROW] if api=="balancesheet" else []
             write_gz(path,records)
             (folder/"batch.manifest.json").write_text(json.dumps(dict(kind=api,format_version=1,source="Tushare official per-symbol",currency="CNY",financial_amount_unit="RMB yuan",rows=len(records),compressed_bytes=path.stat().st_size,sha256=f.digest(path))))
+        folder=old/"disclosures"
+        folder.mkdir()
+        period="20251231"
+        path=folder/f"period={period}.jsonl.gz"
+        rows=[dict(ts_code="000001.SZ",end_date=period,actual_date="20260301"),
+              dict(ts_code="000001.SZ",end_date=period,actual_date="20260302"),
+              dict(ts_code="000002.SZ",end_date=period,actual_date=None)]
+        write_gz(path,rows)
+        (folder/f"period={period}.manifest.json").write_text(json.dumps(dict(
+            format_version=1,source="Tushare official disclosure_date",status="source_evidence_only",
+            report_period=period,object_key=f"a-share-backtest/01_raw_data/disclosures/{path.name}",
+            rows=3,actual_date_populated=2,actual_date_missing=1,
+            compressed_bytes=path.stat().st_size,sha256=f.digest(path))))
         return new,old
     def test_end_to_end(self):
         with tempfile.TemporaryDirectory() as d:
@@ -90,8 +103,24 @@ class FinancialStandardizationTests(unittest.TestCase):
                 self.assertEqual(db.execute("select classification from group_quality where api='balancesheet'").fetchone()[0],"metadata_only")
             self.assertEqual(before,f.digest(new/"archive"/"balancesheet.jsonl.gz"))
             self.assertEqual(doc["date_evidence"][0]["classification"],"calendar_exact_match")
+            self.assertEqual(doc["format_version"],2)
+            self.assertEqual(doc["calendar_shared_date_keys"],1)
+            self.assertEqual({v["source_class"]:v["valid_distinct_date_keys"] for v in doc["calendar_origin_counts"]},
+                             {"weekend":1,"old_disclosure":2})
+            self.assertTrue(any(v["source_class"]=="old" and v["api"]=="balancesheet"
+                                and v["state"]=="valid_numeric" for v in doc["field_quality_by_source"]))
             with self.assertRaises(ValueError):
                 f.build(new,old,out,ASOF)
+    def test_old_disclosure_manifest_mismatch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); new,old=self.fixture(root)
+            mp=old/"disclosures"/"period=20251231.manifest.json"
+            m=json.loads(mp.read_text()); m["actual_date_populated"]=1; m["actual_date_missing"]=2
+            mp.write_text(json.dumps(m))
+            out=root/"out"
+            with self.assertRaises(ValueError),contextlib.redirect_stdout(io.StringIO()):
+                f.build(new,old,out,ASOF)
+            self.assertFalse(out.exists())
     def test_tamper_fails_closed(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); new,old=self.fixture(root)
