@@ -29,7 +29,7 @@ FIELDS = {
     "balancesheet": ("total_assets","total_liab","total_cur_assets","total_cur_liab",
         "total_hldr_eqy_exc_min_int","total_hldr_eqy_inc_min_int","inventories","total_share"),
     "income": ("revenue","oper_cost","n_income","n_income_attr_p","total_profit",
-        "int_exp","ebit","ebitda"),
+        "fin_exp_int_exp","ebit","ebitda"),
     "cashflow": ("n_cashflow_act","c_pay_acq_const_fiolta","free_cashflow"),
 }
 # Explicit applicability: standard industrial/commercial definitions.
@@ -91,7 +91,9 @@ def decisions(rows, fields):
             status = "consensus"
         result[f] = {"state":status,"value":next(iter(vals.values())) if status in
                      ("consensus","partial_consensus") else None,
-                     "version_ids":sorted(vals),"absent":absent,"null":null,"invalid":invalid}
+                     "version_ids":sorted(vals),"absent":absent,"null":null,"invalid":invalid,
+                     "conflict_observations":[[vid,val] for vid,val in sorted(vals.items())]
+                         if status=="conflicting_non_null" else []}
     return result
 
 
@@ -273,8 +275,9 @@ def metric_builder(selected, code, period, comp):
     # no percentage growth from a nonpositive base.
     emit("cash_to_profit_ytd","ratio",[req(c,["n_cashflow_act"]),req(i,["n_income"])],
          lambda a,b:ratio(a[0],b[0]),industrial)
-    # EBIT proxy is intentionally named, NOT a universal EBIT definition.
-    emit("ebit_pbt_plus_interest_ytd","CNY",[req(i,["total_profit","int_exp"])],
+    # Industrial interest expense in finance costs, not int_exp (interest
+    # expenditure on the financial-company income statement). This is a proxy.
+    emit("ebit_pbt_plus_interest_ytd","CNY",[req(i,["total_profit","fin_exp_int_exp"])],
          lambda v:v[0]+v[1] if v[1]>=0 else None,industrial)
     return outputs
 
@@ -324,12 +327,16 @@ def process_code(src,out,code,asof,counts):
             pv=provider[0] if provider else None
             cv=calculated[4]
             diff=num(cv-pv) if cv is not None and pv is not None else None
+            observations=(g["fields"][field]["conflict_observations"] if g else [])
+            variants=[{"version_id":vid,"provider_value":val,"difference":num(cv-val) if cv is not None else None}
+                      for vid,val in observations]
             status="compared_distinct_definitions" if diff is not None else (
+                "compared_conflicting_provider_variants" if cv is not None and variants else
                 "calculation_unavailable" if cv is None else state)
             out.execute("INSERT INTO provider_checks VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (code,p,comp,metric,field,cv,pv,diff,status,
                          canonical({"calculation":json.loads(calculated[8]),"provider_version_ids":ids,
-                                    "provider_group_id":g["id"] if g else None})))
+                                    "provider_group_id":g["id"] if g else None,"provider_conflict_variants":variants})))
     return len(periods)
 
 
