@@ -77,3 +77,54 @@ Rebuild into a new output directory; do not overwrite the accepted format-v1 led
 The older stock_basic snapshot and incremental reader records are not yet merged.
 The formal archive location remains /opt/ashare/archive; do not directly modify
 .archive_meta, overwrite managed raw object keys, or publish Parquet before FIN20.
+
+## V5C/V6 snapshot metric sidecar
+
+Run only on the accepted format-v2 V5 ledger. No raw reread or network/provider
+access. Use a new output directory; verify the input ledger SHA and size before
+and after. The ledger and its manifest remain immutable.
+
+```bash
+python3 -m unittest discover -s tests -p 'test_fin19_metrics.py' -v
+/usr/bin/time -v python3 -u scripts/fin19_metrics.py \
+  --ledger /opt/ashare/backtest/fin19-staging-faaf086 \
+  --output /opt/ashare/backtest/fin19-metrics-v1
+```
+
+The output contains metrics.sqlite3 and manifest.json. Four tables:
+field_groups (per exact API/code/period/company type/end type/candidate date
+field decisions and version IDs), period_selection (latest observed date,
+no older fallback), metrics (typed value, unit, explicit failure state, input
+IDs and formula version), provider_checks (calculated vs provider FCF/EBIT
+including every conflicting provider variant).
+
+Scope is report_type=1, 2018+ mainboard code patterns, not historical security
+eligibility. Old raw fields lacked end_type. Unknown types are kept separate;
+same-date known type is selected only if overlapping legacy fields agree.
+Unknown-only types are diagnostic and not used for metrics. No field fill
+from another version: formula fields must occur together in at least one
+original payload. A conflict in provider-only FCF/EBIT does not null an
+otherwise coherent underlying formula.
+
+Amounts CNY, ratios decimal, BVPS CNY/share using reported period-end total
+shares (not current shares). Q2/Q3/Q4 standalone flows = YTD minus previous
+quarter YTD. TTM = current YTD + previous full year - prior-year comparable
+YTD; year end uses annual amount directly. ROE uses parent TTM profit and
+average of current/prior-year comparable parent equity, ROA uses consolidated
+profit and average assets, turnover uses revenue and average assets. Nonpositive
+denominators and missing inputs are not zero; growth from a nonpositive base
+is not a percentage. FCF = CFO - cash paid for long-lived asset acquisition,
+not necessarily provider FCF or FCFF. EBIT diagnostic proxy = profit before tax
++ finance-cost interest expense (fin_exp_int_exp), not financial-company int_exp.
+Industry-specific measures (NCAV, liquidity, gross margin, FCF, EBIT proxy)
+are limited to comp_type=1. No valuation multiples, ROIC or EBITDA
+calculation pending separate accounting definitions and price/share lineage.
+Provider comparison is currently FCF and EBIT only; ROE/ROA indicator
+comparison is deferred until comparable definitions and periods are mapped.
+
+All period selections use the ledger snapshot cutoff, including later
+corrections to earlier periods. Candidate-date max is diagnostic, NOT the
+historically known date. This sidecar must not be read by backtests or
+production. Actual coverage, disk/time, statement-type distributions and
+provider differences require VPS acceptance. V7 reconciliation, original
+revision lineage and FIN20 Parquet publication remain separate gates.
