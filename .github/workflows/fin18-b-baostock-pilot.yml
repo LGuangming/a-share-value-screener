@@ -1,0 +1,46 @@
+name: FIN18-B BaoStock pilot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/fin18_b_baostock_probe.py
+      - .github/workflows/fin18-b-baostock-pilot.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 scripts/fin18_b_baostock_probe.py --self-test
+  provider-pilot:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install baostock
+      - name: Run bounded provider probe
+        run: |
+          printf '%s\n' 'ts_code,period,api,reason' \
+            '000016.SZ,20251231,fina_indicator,core_null_or_invalid' \
+            '000023.SZ,20240331,fina_indicator,core_null_or_invalid' > "$RUNNER_TEMP/fin18-b-sample.csv"
+          timeout --kill-after=15s 5m python scripts/fin18_b_baostock_probe.py \
+            --missing "$RUNNER_TEMP/fin18-b-sample.csv" \
+            --out "$RUNNER_TEMP/fin18-b-result" --asof 2026-11-28 --per-reason 2
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fin18-b-provider-pilot
+          path: ${{ runner.temp }}/fin18-b-result/
+          if-no-files-found: warn
+          retention-days: 7
