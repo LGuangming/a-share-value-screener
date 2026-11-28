@@ -26,7 +26,7 @@ def daily(raw,stamp):
             path=raw/ds/(suffix+".parquet")
             path.parent.mkdir(parents=True,exist_ok=True)
             if ds=="daily_prices":
-                sql=f"SELECT '000001.SZ' ts_code,DATE '{d}' trade_date,10.0 close UNION ALL SELECT '000002.SZ',DATE '{d}',20.0"
+                sql=f"SELECT '000001.SZ' ts_code,DATE '{d}' trade_date,10.0 AS \"close\" UNION ALL SELECT '000002.SZ',DATE '{d}',20.0"
             elif ds=="daily_basic":
                 sql=f"""SELECT '000001.SZ' ts_code,DATE '{d}' trade_date,0.01 total_mv,0.001 total_share,2.0 pb,5.0 pe_ttm
                         UNION ALL SELECT '000002.SZ',DATE '{d}',0.04,0.002,3.0,6.0"""
@@ -90,6 +90,23 @@ class LatestTests(unittest.TestCase):
             marker.write_text("{}")
             with self.assertRaises((ValueError,FileNotFoundError)):
                 latest.build(snap,raw,approve,root/"bad")
+
+    def test_latest_period_no_fallback_and_type_conflict(self):
+        with closing(a.connection()) as con:
+            con.execute("""CREATE TEMP TABLE metrics AS SELECT * FROM (VALUES
+                ('000001.SZ','20251231','1','ok'),
+                ('000001.SZ','20260930','1','no_value'),
+                ('000002.SZ','20251231','1','ok'),
+                ('000002.SZ','20260930','1','ok'),
+                ('000002.SZ','20260930','2','ok'),
+                ('000003.SZ','20261231','1','ok')) t(code,period,comp_type,status)""")
+            con.execute("CREATE TEMP TABLE daily_prices AS SELECT '000003.SZ' ts_code")
+            con.execute("CREATE TEMP TABLE daily_basic AS SELECT '000003.SZ' ts_code")
+            latest.select_latest(con,"2026-11-28")
+            self.assertEqual(con.execute("SELECT code,period,comp_type,selection_status FROM latest ORDER BY code").fetchall(),[
+                ("000001.SZ","20260930","1","latest_observed_period"),
+                ("000002.SZ","20260930",None,"ambiguous_or_unknown_company_type"),
+                ("000003.SZ",None,None,"no_observed_financial_period")])
 
     def test_market_day_no_silent_fallback(self):
         with tempfile.TemporaryDirectory() as d:
