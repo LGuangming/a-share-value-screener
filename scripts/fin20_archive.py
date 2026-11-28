@@ -21,7 +21,8 @@ except ImportError:
     from fin19_standardize import canonical,digest,sources
 
 VERSION=1
-CHUNK=2048
+CHUNK=8192
+MAX_BATCH_BYTES=16*1024*1024
 LAYERS={
     "ledger":("financial.sqlite3","ledger_sha256","ledger_bytes",2,
       "standardized_staging_not_pit_certified",
@@ -216,6 +217,8 @@ def add_rows(hasher,rows):
 
 
 def validate_row(row,cols):
+    if len(row)!=len(cols):
+        raise ValueError("row width mismatch")
     for value,c in zip(row,cols):
         if value is None:
             continue
@@ -224,6 +227,9 @@ def validate_row(row,cols):
 
 
 def parquet_rows(con,path,cols):
+    actual=con.execute("DESCRIBE SELECT * FROM read_parquet(?,hive_partitioning=false)",[str(path)]).fetchall()
+    if [(r[0],r[1]) for r in actual]!=[(c["name"],TYPES[c["type"]]) for c in cols]:
+        raise ValueError("Parquet schema mismatch: "+str(path))
     cursor=con.execute("SELECT "+",".join(quote(c["name"]) for c in cols)+
         " FROM read_parquet(?,hive_partitioning=false)",[str(path)])
     while True:
@@ -251,16 +257,16 @@ def write_chunk(con,path,rows,cols):
 
 def export_table(db,con,root,layer,name,definition):
     cols=definition["columns"]; partition=None; buffer=[]; parts=[]
-    h=None; n=0; chunk=0; total=0
+    h=None; n=0; chunk=0; total=0; buffered_bytes=0
     base=LAYERS[layer][6]+"/"+layer+"/"+name
     def flush():
-        nonlocal chunk
+        nonlocal chunk,buffered_bytes
         if not buffer:
             return
         relative=f"{base}/year={partition}/part-{chunk:06d}.parquet"
         info=write_chunk(con,safe(root,relative),buffer,cols)
         parts[-1]["files"].append({"path":relative,**info})
-        buffer.clear();chunk+=1
+        buffer.clear();chunk+=1;buffered_bytes=0
     def end_part():
         flush()
         parts[-1].update({"rows":n,"logical_sha256":h.hexdigest()})
@@ -272,8 +278,11 @@ def export_table(db,con,root,layer,name,definition):
             partition=p;h=hashlib.sha256();n=chunk=0
             parts.append({"partition":p,"files":[]})
         validate_row(row,cols)
-        h.update(row_bytes(row));n+=1;total+=1
-        buffer.append(row)
+        raw=row_bytes(row)
+        if buffer and buffered_bytes+len(raw)>MAX_BATCH_BYTES:
+            flush()
+        h.update(raw);n+=1;total+=1
+        buffer.append(row);buffered_bytes+=len(raw)
         if len(buffer)>=CHUNK:
             flush()
     if partition is not None:
@@ -380,6 +389,8 @@ def build(ledger,metrics,quality,weekend,old,output):
     tmp.rename(output)
     print("FIN20_STAGED",output,flush=True)
     print("FIN20_MANIFEST_SHA256",digest(output/"manifest.json"),flush=True)
+    print("FIN20_PARQUET_FILES",sum(len(p["files"]) for d in layers.values() for t in d["tables"].values() for p in t["partitions"]),flush=True)
+    print("FIN20_PARQUET_BYTES",sum(f["bytes"] for d in layers.values() for t in d["tables"].values() for p in t["partitions"] for f in p["files"]),flush=True)
 
 
 def manifest(root):
