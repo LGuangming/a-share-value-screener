@@ -7,8 +7,7 @@ rows and SQLite DDL are preserved, not byte-identical SQLite database files.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from contextlib import closing, ExitStack
+from contextlib import closing
 import hashlib
 import json
 from pathlib import Path
@@ -380,6 +379,7 @@ def build(ledger,metrics,quality,weekend,old,output):
         raise ValueError("output appeared")
     tmp.rename(output)
     print("FIN20_STAGED",output,flush=True)
+    print("FIN20_MANIFEST_SHA256",digest(output/"manifest.json"),flush=True)
 
 
 def manifest(root):
@@ -441,6 +441,59 @@ def restore(root,old,output):
     if output.exists():
         raise ValueError("restore output appeared")
     tmp.rename(output)
+    print("FIN20_RESTORED",output,flush=True)
+
+
+def publish(root,old,restored,archive,approve):
+    """Explicit local publication after successful restore. Never updates managed keys."""
+    root,old,restored,archive=(p.resolve() for p in (root,old,restored,archive))
+    if old!=archive/"a-share-backtest/01_raw_data":
+        raise ValueError("unexpected canonical archive root")
+    if digest(root/"manifest.json")!=approve:
+        raise ValueError("approval does not match staged manifest SHA256")
+    doc=verify(root,old)
+    receipt=json.loads((restored/"manifest.json").read_text())
+    if (receipt.get("state")!="logical_reconstruction_verified"
+        or receipt.get("snapshot_manifest_sha256")!=approve
+        or receipt.get("pit_certified") is not False or receipt.get("production_published") is not False
+        or set(receipt.get("databases",{}))!={v[0] for v in LAYERS.values()}):
+        raise ValueError("restore receipt mismatch")
+    for name,info in receipt["databases"].items():
+        check(safe(restored,name),info)
+    # Independently reconcile restored records before permitting publication.
+    for layer,d in doc["layers"].items():
+        with closing(ro(restored/LAYERS[layer][0])) as db:
+            if schema(db,layer)!=d["schema"]:
+                raise ValueError("restored schema mismatch")
+            if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok" or db.execute("PRAGMA foreign_key_check").fetchone():
+                raise ValueError("restored integrity failure")
+            for name,table in d["tables"].items():
+                verify_source(db,name,d["schema"]["tables"][name],table)
+    parent=archive/"a-share-backtest/financial_snapshots"
+    target=parent/("snapshot="+doc["asof"]+"-"+approve[:16])
+    if safe(archive,target.relative_to(archive).as_posix())!=target:
+        raise ValueError("unsafe publication path")
+    separate(target,root,old,restored)
+    parent.mkdir(parents=True,exist_ok=True)
+    tmp=Path(tempfile.mkdtemp(prefix=".fin20-publish-",dir=parent))
+    # Copy only manifest-listed evidence and Parquet files, never arbitrary data.
+    items=list(doc["evidence_files"])
+    for d in doc["layers"].values():
+        for table in d["tables"].values():
+            for part in table["partitions"]:
+                items.extend(part["files"])
+    inventory=[]
+    for item in items:
+        copy_evidence(safe(root,item["path"]),tmp,item["path"],inventory,
+                      {k:item[k] for k in ("bytes","sha256")})
+    copy_evidence(root/"manifest.json",tmp,"manifest.json",inventory)
+    if digest(tmp/"manifest.json")!=approve:
+        raise ValueError("copied manifest mismatch")
+    verify(tmp,old)
+    if target.exists():
+        raise ValueError("publication target appeared")
+    tmp.rename(target)
+    print("FIN20_LOCAL_ARCHIVE_PASS",target,flush=True)
 
 
 def main():
@@ -451,13 +504,19 @@ def main():
         parser=sub.add_parser(action)
         for name in names:
             parser.add_argument("--"+name,type=Path,required=True)
+    pub=sub.add_parser("publish")
+    for name in ("root","old","restored","archive"):
+        pub.add_argument("--"+name,type=Path,required=True)
+    pub.add_argument("--approve",required=True)
     a=p.parse_args()
     if a.action=="build":
         build(a.ledger,a.metrics,a.quality,a.weekend,a.old,a.output)
     elif a.action=="verify":
         verify(a.root,a.old)
-    else:
+    elif a.action=="restore":
         restore(a.root,a.old,a.output)
+    else:
+        publish(a.root,a.old,a.restored,a.archive,a.approve)
 
 
 if __name__=="__main__":
