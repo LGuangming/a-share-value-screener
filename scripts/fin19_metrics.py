@@ -13,7 +13,6 @@ from collections import Counter, defaultdict
 from datetime import date
 import itertools
 import json
-import math
 from pathlib import Path
 import re
 import sqlite3
@@ -100,7 +99,7 @@ def group_record(key, rows):
     api,period,comp,end,eff = key
     flags = set().union(*(set(r[2]) for r in rows))
     quality = "eligible_research_group"
-    if not day(period) or not day(eff) or BAD_FLAGS.intersection(flags):
+    if not day(period) or not day(eff) or day(eff)<day(period) or BAD_FLAGS.intersection(flags):
         quality = "invalid_group"
     elif not comp:
         quality = "unknown_company_type"
@@ -196,6 +195,13 @@ def metric_builder(selected, code, period, comp):
                 value=None
             if value is None:
                 status="invalid_denominator_or_value"
+        # At a given period, do not mix incompatible explicit report-period types.
+        if status=="ok":
+            types=defaultdict(set)
+            for api,p,fields in requests:
+                types[p].add(selected[(api,p,comp)]["key"][3])
+            if any(len(t)>1 for t in types.values()):
+                value=None;status="report_period_type_mismatch"
         dates=[i["candidate_date"] for i in inputs if i["candidate_date"]]
         outputs.append((code,period,comp,name,value,unit,status,max(dates,default=""),
                         canonical(inputs),VERSION))
@@ -222,12 +228,14 @@ def metric_builder(selected, code, period, comp):
         if len(v)==1:
             return v[0]
         return [a+b-c for a,b,c in zip(*v)]
+    def book_ratio(a,b):
+        return ratio(a,b)
     def nonnegative_ratio(a,b):
         return ratio(a,b) if a>=0 else None
     emit("ncav","CNY",[req(b,["total_cur_assets","total_liab"])],
          lambda v:v[0]-v[1] if min(v)>=0 else None,industrial)
     emit("book_value_per_share","CNY/share",[req(b,["total_hldr_eqy_exc_min_int","total_share"])],
-         lambda v:ratio(*v))
+         lambda v:book_ratio(*v))
     emit("debt_to_assets","ratio",[req(b,["total_liab","total_assets"])],
          lambda v:nonnegative_ratio(*v))
     emit("current_ratio","ratio",[req(b,["total_cur_assets","total_cur_liab"])],
@@ -261,6 +269,8 @@ def metric_builder(selected, code, period, comp):
     for name,field in [("revenue_yoy","revenue"),("parent_profit_yoy","n_income_attr_p")]:
         emit(name,"ratio",[req(i,[field]),req(i,[field],prev_year(period))],
              lambda a,b:ratio(a[0]-b[0],b[0]))
+    # Signed profit transitions remain explicit in the underlying profit metrics;
+    # no percentage growth from a nonpositive base.
     emit("cash_to_profit_ytd","ratio",[req(c,["n_cashflow_act"]),req(i,["n_income"])],
          lambda a,b:ratio(a[0],b[0]),industrial)
     # EBIT proxy is intentionally named, NOT a universal EBIT definition.
