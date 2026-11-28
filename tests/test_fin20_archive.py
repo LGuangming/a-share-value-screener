@@ -13,7 +13,7 @@ from scripts import fin20_archive as a
 from scripts import fin19_standardize as s
 from scripts import fin19_metrics as m
 from scripts import fin19_quality as q
-from test_fin19_standardize import FinancialStandardizationTests
+import test_fin19_standardize as fixture
 
 
 @unittest.skipUnless(importlib.util.find_spec("duckdb"),"Parquet runtime required")
@@ -43,7 +43,9 @@ class ArchiveTests(unittest.TestCase):
 
     def test_full_snapshot_restore(self):
         with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
-            root=Path(d);new,old=FinancialStandardizationTests().fixture(root)
+            root=Path(d);new,old=fixture.FinancialStandardizationTests().fixture(root)
+            archive=root/"archive"; raw=archive/"a-share-backtest/01_raw_data"
+            raw.parent.mkdir(parents=True);old.rename(raw);old=raw
             (new/"unfinished.csv").write_text("task,status\n")
             ledger=root/"ledger"; metrics=root/"metrics";quality=root/"quality"
             s.build(new,old,ledger,date(2026,11,28))
@@ -67,6 +69,16 @@ class ArchiveTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM statement_date_evidence").fetchone()[0],2)
             with self.assertRaises(ValueError):
                 a.build(ledger,metrics,quality,new,old,snapshot)
+            approval=s.digest(snapshot/"manifest.json")
+            with self.assertRaises(ValueError):
+                a.publish(snapshot,old,restored,archive,"0"*64)
+            a.publish(snapshot,old,restored,archive,approval)
+            published=archive/"a-share-backtest/financial_snapshots"/("snapshot=2026-11-28-"+approval[:16])
+            self.assertEqual(s.digest(published/"manifest.json"),approval)
+            self.assertTrue((published/"01_raw_data/financial_weekend/manifest.json").is_file())
+            self.assertFalse((archive/".archive_meta").exists())
+            with self.assertRaises(ValueError):
+                a.publish(snapshot,old,restored,archive,approval)
             ref=old/doc["existing_raw_references"][0]["path"]
             with ref.open("ab") as f:
                 f.write(b"x")
