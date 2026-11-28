@@ -173,3 +173,60 @@ quality flags are financial-input presence checks, not buy signals or
 historical eligibility; low PB with market share candidate is distinct from
 reported BVPS. No EBITDA/ROIC or sector-specific banking/insurance ratios
 are added in this revision; no PIT or production publication.
+
+## FIN20 immutable local snapshot (acceptance candidate)
+
+FIN20 does not regenerate V5/V6/V7 and does not alter the managed raw archive
+or .archive_meta. It packages all 17 physical SQLite tables (8 ledger,
+4 metrics, 5 quality), original table DDL/index/view definitions, input
+manifests, the nine exact new compressed API response files, missing.csv and
+unfinished.csv. The original weekend collection manifest and all V5 source
+hashes are checked. Existing 2020+ market evidence and older financial and
+disclosure objects remain where they are; verified relative path references
+prevent unnecessary copies. The original collection state.sqlite3 is not
+included, and must remain retained.
+
+Parquet uses ZSTD and report-year partitions for period-bearing tables;
+unpartitioned tables use year=all and unrecognized dates are preserved in
+year=unknown. Typed chunks preserve SQLite integer, real, text, null, zero,
+empty string and JSON payloads. A per-chunk logical SHA256 checks rows read
+back against the SQLite export, and partition hashes are checked again by
+verify and restore. SQLite column types, file hashes, row counts, primary
+keys, foreign keys and integrity are checked. The restore reproduces logical
+rows and schema, not the original SQLite binary image or collection state;
+original manifest database hashes are retained as provenance, not rewritten
+to pretend the restored SQLite bytes are original.
+
+Run in the preinstalled DuckDB research environment, only after CI acceptance:
+
+```bash
+PY=/opt/ashare-research-runtime/bin/python
+RAW=/opt/ashare/archive/a-share-backtest/01_raw_data
+STAGE=/opt/ashare/backtest/fin20-staged-v1
+RESTORE=/opt/ashare/backtest/fin20-restore-v1
+
+"$PY" -m unittest discover -s tests -p test_fin20_archive.py -v
+
+/usr/bin/time -v "$PY" -u scripts/fin20_archive.py build \
+  --ledger /opt/ashare/backtest/fin19-staging-faaf086 \
+  --metrics /opt/ashare/backtest/fin19-metrics-4f65e51 \
+  --quality /opt/ashare/backtest/fin19-quality-a16cc1d \
+  --weekend /var/lib/ashare-collection-work/financial-weekend-20261128 \
+  --old "$RAW" --output "$STAGE"
+
+/usr/bin/time -v "$PY" -u scripts/fin20_archive.py restore \
+  --root "$STAGE" --old "$RAW" --output "$RESTORE"
+```
+
+After operator inspection of the staged archive and the restoration receipt,
+the explicit publish subcommand requires the actual approved snapshot manifest
+SHA256 and the verified restoration directory. It independently checks restored
+schema, integrity and logical rows, copies only listed files, verifies the copy,
+and atomically renames a new directory under
+/opt/ashare/archive/a-share-backtest/financial_snapshots/snapshot=<asof>-<hashprefix>/.
+The new local namespace deliberately does not overwrite managed 01_raw_data
+keys or object-store metadata; future readers must explicitly support it.
+The manifest retains research-only status. No production or PIT publication,
+no automatic cleanup, and no use of restored SQLite as an original FIN19
+input. FIN20-H deletion requires separate approval after downstream reader and
+recovery requirements are verified.
