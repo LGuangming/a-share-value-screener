@@ -72,8 +72,10 @@ jobs:
         env:
           PYTHONPATH: backend
         run: python -m unittest discover -s backend/tests -v
-      - name: FIN19 offline financial standardization fixtures
-        run: python -m unittest discover -s tests -p test_fin19_standardize.py -v
+      - name: FIN19 offline financial standardization and metric fixtures
+        run: |
+          python -m unittest discover -s tests -p test_fin19_standardize.py -v
+          python -m unittest discover -s tests -p test_fin19_metrics.py -v
       - name: Registry manifest verification regression tests
         if: needs.scope.outputs.registry == 'true'
         run: |
