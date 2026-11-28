@@ -16,7 +16,6 @@ import json
 import math
 from pathlib import Path
 import re
-import shutil
 import sqlite3
 import tempfile
 
@@ -269,11 +268,13 @@ def classify_payloads(payloads):
     values = {}
     nonnull = {}
     schemas = set()
+    null_sets = set()
     conflict = set()
     for payload in payloads:
         row = json.loads(payload)
         financial = {k:v for k,v in row.items() if k not in META}
         schemas.add(frozenset(financial))
+        null_sets.add(frozenset(k for k,v in financial.items() if v is None))
         for k,v in financial.items():
             if v is None:
                 continue
@@ -290,7 +291,9 @@ def classify_payloads(payloads):
         return "metadata_only", []
     if len(schemas) > 1:
         return "schema_or_complementary_difference", []
-    return "null_population_difference", []
+    if len(null_sets) > 1:
+        return "null_population_difference", []
+    return "numeric_representation_difference", []
 
 
 def group_audit(db):
@@ -351,13 +354,14 @@ def build(weekend,old,output,asof):
             counts.append({"api":api,"accepted_rows":total,"distinct_payloads":unique,
                            "exact_duplicate_occurrences":total-unique,"flags":dict(flags)})
         # Calendar matches are row-date evidence only, not proof of version history.
-        date_counts = db.execute("""SELECT v.api, CASE
+        db.execute("""CREATE VIEW statement_date_evidence AS SELECT v.id AS version_id,v.api,v.code,v.period,v.candidate_date, CASE
               WHEN v.candidate_date='' THEN 'no_valid_statement_date'
               WHEN EXISTS(SELECT 1 FROM calendar c WHERE c.code=v.code AND c.period=v.period AND c.actual_date=v.candidate_date) THEN 'calendar_exact_match'
               WHEN EXISTS(SELECT 1 FROM calendar c WHERE c.code=v.code AND c.period=v.period) THEN 'calendar_other_date'
-              ELSE 'statement_date_only' END AS evidence, COUNT(*)
+              ELSE 'statement_date_only' END AS evidence
               FROM versions v WHERE api IN ('balancesheet','income','cashflow') AND report_type='1'
-              GROUP BY v.api,evidence""").fetchall()
+              """)
+        date_counts = db.execute("SELECT api,evidence,COUNT(*) FROM statement_date_evidence GROUP BY api,evidence").fetchall()
         db.commit()
         if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok" or db.execute("PRAGMA foreign_key_check").fetchone():
             raise ValueError("ledger integrity failed")
