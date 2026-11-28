@@ -31,6 +31,19 @@ class QualityTests(unittest.TestCase):
         self.assertEqual(q.share_candidate(g,None,evidence)[1],"no_valid_share_on_market_session")
         self.assertEqual(q.share_candidate(g,1000000,{"status":"market_period_unverified"})[1],"market_period_unverified")
 
+    def test_cross_period_flow_reconciliation(self):
+        self.assertEqual(q.flow_periods("20260331",True),["20250630","20250930","20251231","20260331"])
+        cache={("20260331","1"):{"revenue_quarter":10,"revenue_ttm":100,"revenue_ytd":10},
+               ("20251231","1"):{"revenue_quarter":30},
+               ("20250930","1"):{"revenue_quarter":30},
+               ("20250630","1"):{"revenue_quarter":30}}
+        cache={k:{m:(v,"ok") for m,v in d.items()} for k,d in cache.items()}
+        self.assertEqual(q.flow_check(cache,"20260331","1","revenue",True)[:2],("within_tolerance",0))
+        cache[("20260331","1")]["revenue_ttm"]=(120,"ok")
+        self.assertEqual(q.flow_check(cache,"20260331","1","revenue",True)[:2],("outside_tolerance",20))
+        del cache[("20250630","1")]
+        self.assertEqual(q.flow_check(cache,"20260331","1","revenue",True)[0],"metric_inputs_unavailable")
+
     def test_difference_zero_denominator(self):
         self.assertEqual(q.compare_values(4,2),(2,1,"diagnostic_difference"))
         self.assertEqual(q.compare_values(4,0),(4,None,"diagnostic_difference"))
