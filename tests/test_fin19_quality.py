@@ -73,6 +73,11 @@ class QualityTests(unittest.TestCase):
                 db.execute("INSERT INTO versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(
                     1,"balancesheet","hash","000001.SZ","20251231","1","1","1","20260301",
                     json.dumps(payload),"[]","{}","{}"))
+                # A second report for the same security must not overwrite
+                # the market mapping after computing the first BVPS.
+                db.execute("INSERT INTO versions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(
+                    2,"balancesheet","hash2","000001.SZ","20260331","1","1","1","20260430",
+                    json.dumps(payload),"[]","{}","{}"))
             h=s.digest(path)
             (ledger/"manifest.json").write_text(json.dumps({
                 "format_version":2,"state":"standardized_staging_not_pit_certified",
@@ -98,8 +103,11 @@ class QualityTests(unittest.TestCase):
             out=root/"quality"
             q.build(ledger,metrics,raw,out)
             with sqlite3.connect(out/"quality.sqlite3") as db:
-                self.assertEqual(db.execute("SELECT reported,market_candidate,market_status,shares FROM bvps").fetchone(),
-                    (None,2,"same_calendar_day",1000000))
+                self.assertEqual(db.execute("SELECT period,reported,market_candidate,market_status,shares FROM bvps ORDER BY period").fetchall(),
+                    [("20251231",None,2,"same_calendar_day",1000000),
+                     ("20260331",None,None,"market_period_unverified",None)])
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM accounting_checks").fetchone()[0],30)
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM strategy_quality").fetchone()[0],8)
                 self.assertEqual(db.execute("SELECT status FROM accounting_checks WHERE check_name='balance_identity'").fetchone()[0],
                     "within_tolerance")
             self.assertEqual(s.digest(path),h)
